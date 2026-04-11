@@ -2,8 +2,10 @@ import subprocess
 import sys
 import os
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
-VERSION = "3.1"
+VERSION = "3.2"
 
 # Enable ANSI colors on Windows
 if os.name == 'nt':
@@ -27,6 +29,10 @@ video_extensions = (
     '.wmv', '.m4v', '.mpg', '.mpeg', '.3gp', '.ts',
     '.vob', '.ogv', '.divx', '.rmvb', '.asf', '.m2ts'
 )
+
+# How many ffprobe processes to run at once.
+# 32 is a good default — fast without hammering the drive.
+MAX_WORKERS = 32
 
 # ── HELPERS ───────────────────────────────────────────────────────────
 
@@ -63,23 +69,85 @@ def format_duration(seconds):
         "raw":         seconds
     }
 
-def scan_folder(path, on_file=None):
+def collect_videos(path):
+    """Walk the folder tree and return a flat list of all video Paths."""
     path = Path(path)
-    folder_seconds = 0.0
-    video_count = 0
+    videos = []
+    for item in path.rglob('*'):
+        if item.is_file() and item.suffix.lower() in video_extensions:
+            videos.append(item)
+    return videos
+
+def scan_parallel(root, on_progress=None, stop_event=None):
+    """
+    Two-phase scan:
+      1. Walk the tree to collect all video paths (fast, no ffprobe yet).
+      2. Probe all files in parallel with a thread pool.
+    Returns (total_seconds, total_count, tree) — same shape as before.
+    """
+    root = Path(root)
+
+    # Phase 1: collect
+    all_videos = collect_videos(root)
+    total = len(all_videos)
+
+    if total == 0:
+        return 0.0, 0, _build_tree(root, {})
+
+    # Phase 2: probe in parallel
+    durations = {}   # path -> seconds
+    done = [0]
+    lock = threading.Lock()
+
+    def probe(path):
+        if stop_event and stop_event.is_set():
+            return path, 0.0
+        sec = get_duration(path)
+        with lock:
+            done[0] += 1
+            if on_progress:
+                on_progress(done[0], total)
+        return path, sec
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = {pool.submit(probe, v): v for v in all_videos}
+        try:
+            for future in as_completed(futures):
+                if stop_event and stop_event.is_set():
+                    break
+                path, sec = future.result()
+                durations[path] = sec
+        except KeyboardInterrupt:
+            if stop_event:
+                stop_event.set()
+            raise
+
+    # Phase 3: build tree from results
+    total_sec = sum(durations.values())
+    total_count = len(durations)
+    tree = _build_tree(root, durations)
+
+    return total_sec, total_count, tree
+
+def _build_tree(root, durations):
+    """Recursively build the subfolder tree structure from the durations map."""
+    root = Path(root)
     subfolders = []
-    for item in sorted(path.iterdir()):
+    try:
+        children = sorted(root.iterdir())
+    except PermissionError:
+        return subfolders
+
+    for item in children:
         if item.is_dir():
-            sub_sec, sub_count, sub_info = scan_folder(item, on_file)
-            folder_seconds += sub_sec
-            video_count += sub_count
-            subfolders.append((item.name, sub_sec, sub_count, sub_info))
-        elif item.is_file() and item.suffix.lower() in video_extensions:
-            if on_file:
-                on_file(item)
-            folder_seconds += get_duration(item)
-            video_count += 1
-    return folder_seconds, video_count, subfolders
+            sub_secs = sum(sec for path, sec in durations.items()
+                           if path.is_relative_to(item))
+            sub_count = sum(1 for path in durations
+                            if path.is_relative_to(item))
+            sub_tree = _build_tree(item, durations)
+            subfolders.append((item.name, sub_secs, sub_count, sub_tree))
+
+    return subfolders
 
 depth_colors = [R, G, B, M, C, W]
 
@@ -88,7 +156,6 @@ def print_tree(name, seconds, count, subfolders, depth=0, number=""):
     indent = PAD * depth
     fmt    = format_duration(seconds)
     col    = depth_colors[depth % len(depth_colors)]
-    icons  = ["[]", "--", "  ", "  ", "  ", "  "]
     label  = f"{number}.  {name}" if number else name
 
     if count == 0:
@@ -178,7 +245,7 @@ def main():
             print_banner()
             continue
 
-        # strip surrounding quotes
+        # strip surrounding quotes (Windows drag-and-drop adds these)
         if raw.startswith('"') and raw.endswith('"'):
             raw = raw[1:-1]
 
@@ -193,18 +260,24 @@ def main():
             continue
 
         # scan
-        found = [0]
-        def on_file(item):
-            found[0] += 1
-            print(f"\r  {C}Scanning...{RST}  {Y}{found[0]}{RST} video(s) found", end='', flush=True)
+        stop_event = threading.Event()
+
+        def on_progress(done, total):
+            pct = int((done / total) * 100)
+            bar_len = 24
+            filled = int(bar_len * done / total)
+            bar = "█" * filled + "░" * (bar_len - filled)
+            print(f"\r  {C}Scanning...{RST}  {bar}  {Y}{done}/{total}{RST}  {DIM}({pct}%){RST}",
+                  end='', flush=True)
 
         try:
-            total_sec, total_count, tree = scan_folder(folder, on_file)
+            total_sec, total_count, tree = scan_parallel(folder, on_progress, stop_event)
         except KeyboardInterrupt:
+            stop_event.set()
             print(f"\n\n  {Y}Scan cancelled.{RST}\n")
             continue
 
-        print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} video(s) found.              ")
+        print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} video(s) found.                                    ")
         print_results(folder, total_sec, total_count, tree)
 
         # post-scan menu
@@ -221,7 +294,7 @@ def main():
         elif choice in ('c', 'clear'):
             clear()
             print_banner()
-        # 's' or anything else just loops back to prompt
+        # 's' or anything else loops back to prompt
 
 if __name__ == "__main__":
     main()
