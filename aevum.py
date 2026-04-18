@@ -203,7 +203,14 @@ def print_results(folder, total_sec, total_count, tree):
     print(f"  {W}  Days          {DIM}:{RST}  {Y}{fmt['days_fmt']}{RST}")
     print(f"  {W}  Hours         {DIM}:{RST}  {Y}{fmt['hours_fmt']}{RST}")
     print(f"  {W}  Minutes       {DIM}:{RST}  {Y}{fmt['minutes_fmt']}{RST}")
+    print()
     print(f"  {C}{LINE}{RST}")
+    print(f"  {C}  PLAYBACK SPEED{RST}")
+    print(f"  {C}{LINE}{RST}")
+    for speed in (1.0, 1.25, 1.5, 1.75, 2.0):
+        adjusted = format_duration(total_sec / speed)
+        label = f"{speed:.2f}".rstrip('0').rstrip('.') + "x"
+        print(f"  {W}  {label:<6}        {DIM}:{RST}  {Y}{adjusted['hours_fmt']}{RST}  {DIM}({adjusted['days_fmt']}){RST}")
     print()
 
 def print_post_scan_menu():
