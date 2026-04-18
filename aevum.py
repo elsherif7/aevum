@@ -31,8 +31,8 @@ video_extensions = (
 )
 
 # How many ffprobe processes to run at once.
-# 32 is a good default — fast without hammering the drive.
-MAX_WORKERS = 32
+# Higher = faster on large libraries (ffprobe is I/O bound, not CPU bound).
+MAX_WORKERS = 128
 
 # ── HELPERS ───────────────────────────────────────────────────────────
 
@@ -46,15 +46,147 @@ def check_ffprobe():
     except FileNotFoundError:
         return False
 
-def get_duration(path):
-    result = subprocess.run(
-        ['ffprobe', '-v', 'error', '-show_entries',
-         'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', str(path)],
-        capture_output=True, text=True
-    )
+import struct
+
+def _read_mp4_duration(path):
+    """Seek through MP4 atoms without reading full file into memory."""
     try:
-        return float(result.stdout.strip())
-    except:
+        file_size = os.path.getsize(path)
+        with open(path, 'rb') as f:
+            def read_atom(limit_end):
+                hdr = f.read(8)
+                if len(hdr) < 8:
+                    return None, None, 0
+                size = struct.unpack('>I', hdr[:4])[0]
+                name = hdr[4:8]
+                if size == 1:  # 64-bit size
+                    ext = f.read(8)
+                    if len(ext) < 8:
+                        return None, None, 0
+                    size = struct.unpack('>Q', ext)[0]
+                    header_size = 16
+                else:
+                    header_size = 8
+                if size == 0:
+                    size = limit_end - (f.tell() - header_size)
+                return name, size, header_size
+
+            pos = 0
+            while pos < file_size:
+                f.seek(pos)
+                name, size, hdr_size = read_atom(file_size)
+                if name is None or size < hdr_size:
+                    break
+                if name == b'moov':
+                    # enter moov, search for mvhd
+                    moov_end = pos + size
+                    inner = pos + hdr_size
+                    while inner < moov_end:
+                        f.seek(inner)
+                        iname, isize, ihdr = read_atom(moov_end)
+                        if iname is None or isize < ihdr:
+                            break
+                        if iname == b'mvhd':
+                            box = f.read(min(isize - ihdr, 40))
+                            version = box[0]
+                            if version == 1:
+                                ts = struct.unpack_from('>I', box, 20)[0]
+                                dur = struct.unpack_from('>Q', box, 24)[0]
+                            else:
+                                ts = struct.unpack_from('>I', box, 12)[0]
+                                dur = struct.unpack_from('>I', box, 16)[0]
+                            return dur / ts if ts else 0.0
+                        inner += isize
+                    break
+                pos += size
+    except Exception:
+        pass
+    return None
+
+def _read_mkv_duration(path):
+    """Read duration from MKV/WEBM by scanning EBML for the Segment/Info block."""
+    try:
+        with open(path, 'rb') as f:
+            data = f.read(min(2 * 1024 * 1024, os.path.getsize(path)))
+
+        def read_vint(buf, pos):
+            if pos >= len(buf):
+                return 0, pos + 1
+            b = buf[pos]
+            if b == 0:
+                return 0, pos + 8
+            width = 1
+            mask = 0x80
+            while not (b & mask) and width <= 8:
+                width += 1
+                mask >>= 1
+            val = b & (mask - 1)
+            for k in range(1, width):
+                if pos + k >= len(buf):
+                    break
+                val = (val << 8) | buf[pos + k]
+            return val, pos + width
+
+        def read_id(buf, pos):
+            if pos >= len(buf):
+                return 0, pos + 1
+            b = buf[pos]
+            width = 1
+            mask = 0x80
+            while not (b & mask) and width <= 4:
+                width += 1
+                mask >>= 1
+            val = int.from_bytes(buf[pos:pos+width], 'big')
+            return val, pos + width
+
+        timescale_ns = 1_000_000
+        i = 0
+        while i < len(data) - 4:
+            eid, i = read_id(data, i)
+            esize, i = read_vint(data, i)
+            if eid == 0x1549A966:  # Info
+                end = i + esize
+                j = i
+                duration = None
+                while j < end - 4:
+                    fid, j = read_id(data, j)
+                    fsize, j = read_vint(data, j)
+                    if fid == 0x2AD7B1:
+                        timescale_ns = int.from_bytes(data[j:j+fsize], 'big')
+                    elif fid == 0x4489:
+                        raw = data[j:j+fsize]
+                        duration = struct.unpack('>f', raw)[0] if fsize == 4 else struct.unpack('>d', raw)[0]
+                    j += fsize
+                if duration is not None:
+                    return duration * timescale_ns / 1_000_000_000
+                return None
+            elif 0 < esize < 0x100000:
+                i += esize
+            else:
+                i += 1
+    except Exception:
+        pass
+    return None
+
+def get_duration(path):
+    """Try fast native parse first; fall back to ffprobe if needed."""
+    ext = Path(path).suffix.lower()
+    result = None
+    if ext in ('.mp4', '.mov', '.m4v', '.3gp'):
+        result = _read_mp4_duration(path)
+    elif ext in ('.mkv', '.webm'):
+        result = _read_mkv_duration(path)
+    if result is not None and result > 0:
+        return result
+    # fallback to ffprobe for unsupported/failed formats
+    try:
+        proc = subprocess.run(
+            ['ffprobe', '-v', 'error', '-show_entries',
+             'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', str(path)],
+            capture_output=True, text=True, timeout=15
+        )
+        return float(proc.stdout.strip())
+    except Exception:
         return 0.0
 
 def format_duration(seconds):
@@ -70,33 +202,29 @@ def format_duration(seconds):
     }
 
 def collect_videos(path):
-    """Walk the folder tree and return a flat list of all video Paths."""
-    path = Path(path)
+    """Walk the folder tree using os.scandir (faster than rglob) and return all video paths."""
     videos = []
-    for item in path.rglob('*'):
-        if item.is_file() and item.suffix.lower() in video_extensions:
-            videos.append(item)
+    stack = [str(path)]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as it:
+                for entry in it:
+                    if entry.is_dir(follow_symlinks=False):
+                        stack.append(entry.path)
+                    elif entry.is_file(follow_symlinks=False):
+                        if Path(entry.name).suffix.lower() in video_extensions:
+                            videos.append(Path(entry.path))
+        except PermissionError:
+            pass
     return videos
 
 def scan_parallel(root, on_progress=None, stop_event=None):
-    """
-    Two-phase scan:
-      1. Walk the tree to collect all video paths (fast, no ffprobe yet).
-      2. Probe all files in parallel with a thread pool.
-    Returns (total_seconds, total_count, tree) — same shape as before.
-    """
+    """Pipelined scan: files are submitted to probe pool as they are discovered."""
     root = Path(root)
-
-    # Phase 1: collect
-    all_videos = collect_videos(root)
-    total = len(all_videos)
-
-    if total == 0:
-        return 0.0, 0, _build_tree(root, {})
-
-    # Phase 2: probe in parallel
-    durations = {}   # path -> seconds
+    durations = {}
     done = [0]
+    total = [0]
     lock = threading.Lock()
 
     def probe(path):
@@ -105,12 +233,40 @@ def scan_parallel(root, on_progress=None, stop_event=None):
         sec = get_duration(path)
         with lock:
             done[0] += 1
-            if on_progress:
-                on_progress(done[0], total)
+            if on_progress and total[0] > 0:
+                on_progress(done[0], total[0])
         return path, sec
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        futures = {pool.submit(probe, v): v for v in all_videos}
+        futures = {}
+
+        def collect_and_submit():
+            stack = [str(root)]
+            while stack:
+                if stop_event and stop_event.is_set():
+                    break
+                current = stack.pop()
+                try:
+                    with os.scandir(current) as it:
+                        for entry in it:
+                            if stop_event and stop_event.is_set():
+                                return
+                            if entry.is_dir(follow_symlinks=False):
+                                stack.append(entry.path)
+                            elif entry.is_file(follow_symlinks=False):
+                                if Path(entry.name).suffix.lower() in video_extensions:
+                                    p = Path(entry.path)
+                                    with lock:
+                                        total[0] += 1
+                                    f = pool.submit(probe, p)
+                                    futures[f] = p
+                except PermissionError:
+                    pass
+
+        collector = threading.Thread(target=collect_and_submit, daemon=True)
+        collector.start()
+        collector.join()
+
         try:
             for future in as_completed(futures):
                 if stop_event and stop_event.is_set():
@@ -122,7 +278,9 @@ def scan_parallel(root, on_progress=None, stop_event=None):
                 stop_event.set()
             raise
 
-    # Phase 3: build tree from results
+    if not durations:
+        return 0.0, 0, _build_tree(root, {})
+
     total_sec = sum(durations.values())
     total_count = len(durations)
     tree = _build_tree(root, durations)
@@ -130,24 +288,38 @@ def scan_parallel(root, on_progress=None, stop_event=None):
     return total_sec, total_count, tree
 
 def _build_tree(root, durations):
-    """Recursively build the subfolder tree structure from the durations map."""
+    """
+    O(n) tree builder — aggregate folder stats in a single pass over durations,
+    then recursively assemble the tree structure from the pre-built dict.
+    """
     root = Path(root)
-    subfolders = []
-    try:
-        children = sorted(root.iterdir())
-    except PermissionError:
+
+    # Single pass: bucket every file's duration into its parent folder and all ancestors
+    folder_secs  = {}   # folder path -> total seconds
+    folder_count = {}   # folder path -> video count
+
+    for path, sec in durations.items():
+        parent = path.parent
+        while True:
+            folder_secs[parent]  = folder_secs.get(parent, 0.0) + sec
+            folder_count[parent] = folder_count.get(parent, 0) + 1
+            if parent == root:
+                break
+            parent = parent.parent
+
+    def build(node):
+        subfolders = []
+        try:
+            children = sorted(p for p in node.iterdir() if p.is_dir())
+        except PermissionError:
+            return subfolders
+        for child in children:
+            secs  = folder_secs.get(child, 0.0)
+            count = folder_count.get(child, 0)
+            subfolders.append((child.name, secs, count, build(child)))
         return subfolders
 
-    for item in children:
-        if item.is_dir():
-            sub_secs = sum(sec for path, sec in durations.items()
-                           if path.is_relative_to(item))
-            sub_count = sum(1 for path in durations
-                            if path.is_relative_to(item))
-            sub_tree = _build_tree(item, durations)
-            subfolders.append((item.name, sub_secs, sub_count, sub_tree))
-
-    return subfolders
+    return build(root)
 
 depth_colors = [R, G, B, M, C, W]
 
@@ -262,6 +434,7 @@ def main():
 
         # scan
         stop_event = threading.Event()
+        print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
 
         def on_progress(done, total):
             pct = int((done / total) * 100)
