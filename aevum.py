@@ -182,30 +182,26 @@ def print_banner():
     print(f"  {C}{LINE}{RST}")
     print()
     print(f"  {DIM}Type a folder path and press Enter to scan.{RST}")
-    print(f"  {DIM}Commands:{RST}  "
-          f"{G}clear{RST}  "
-          f"{R}exit{RST}  "
-          f"{Y}Ctrl+C{RST} to quit")
     print()
 
 def print_results(folder, total_sec, total_count, tree):
     fmt = format_duration(total_sec)
     print()
     print(f"  {C}{LINE}{RST}")
-    print(f"  {C}  VIDEO LIBRARY  |  FOLDER SUMMARY{RST}")
+    print(f"  {C}  Video Library  |  Folder Summary{RST}")
     print(f"  {C}{LINE}{RST}")
     print()
     print_tree(Path(folder).name, total_sec, total_count, tree)
     print(f"  {C}{LINE}{RST}")
-    print(f"  {C}  GRAND TOTAL{RST}")
+    print(f"  {C}  Grand Total{RST}")
     print(f"  {C}{LINE}{RST}")
-    print(f"  {W}  Total Videos  {DIM}:{RST}  {Y}{total_count}{RST}")
+    print(f"  {W}  Total videos  {DIM}:{RST}  {Y}{total_count}{RST}")
     print(f"  {W}  Days          {DIM}:{RST}  {Y}{fmt['days_fmt']}{RST}")
     print(f"  {W}  Hours         {DIM}:{RST}  {Y}{fmt['hours_fmt']}{RST}")
     print(f"  {W}  Minutes       {DIM}:{RST}  {Y}{fmt['minutes_fmt']}{RST}")
     print()
     print(f"  {C}{LINE}{RST}")
-    print(f"  {C}  PLAYBACK SPEED{RST}")
+    print(f"  {C}  Playback Speed{RST}")
     print(f"  {C}{LINE}{RST}")
     for speed in (1.0, 1.25, 1.5, 1.75, 2.0):
         adjusted = format_duration(total_sec / speed)
@@ -284,7 +280,7 @@ def main():
             print(f"\n\n  {Y}Scan cancelled.{RST}\n")
             continue
 
-        print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} video(s) found.                                    ")
+        print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.                                    ")
         print_results(folder, total_sec, total_count, tree)
 
         # post-scan menu
