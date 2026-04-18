@@ -211,9 +211,7 @@ def print_results(folder, total_sec, total_count, tree):
 
 def print_post_scan_menu():
     print(f"  {DIM}What do you want to do?{RST}")
-    print(f"  [{G}S{RST}] Scan another path    "
-          f"  [{Y}C{RST}] Clear screen    "
-          f"  [{R}Q{RST}] Quit")
+    print(f"  {G}scan{RST}   {Y}clear{RST}   {R}quit{RST}")
     print()
 
 # ── MAIN ──────────────────────────────────────────────────────────────
@@ -285,19 +283,24 @@ def main():
 
         # post-scan menu
         print_post_scan_menu()
-        try:
-            choice = input(f"  {C}aevum{RST}> ").strip().lower()
-        except (KeyboardInterrupt, EOFError):
-            print(f"\n\n  {G}Goodbye!{RST}\n")
-            sys.exit(0)
+        while True:
+            try:
+                choice = input(f"  {C}aevum{RST}> ").strip().lower()
+            except (KeyboardInterrupt, EOFError):
+                print(f"\n\n  {G}Goodbye!{RST}\n")
+                sys.exit(0)
 
-        if choice in ('q', 'quit', 'exit'):
-            print(f"\n  {G}Goodbye!{RST}\n")
-            sys.exit(0)
-        elif choice in ('c', 'clear'):
-            clear()
-            print_banner()
-        # 's' or anything else loops back to prompt
+            if choice == 'quit':
+                print(f"\n  {G}Goodbye!{RST}\n")
+                sys.exit(0)
+            elif choice == 'clear':
+                clear()
+                print_banner()
+                break
+            elif choice == 'scan':
+                break
+            else:
+                print(f"  {R}Invalid command.{RST} Type {G}scan{RST}, {Y}clear{RST}, or {R}quit{RST}.")
 
 if __name__ == "__main__":
     main()
