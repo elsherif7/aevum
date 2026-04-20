@@ -7,7 +7,7 @@ if errorlevel 1 (
     exit /b
 )
 
-setlocal
+setlocal EnableDelayedExpansion
 
 echo.
 echo  ============================================================

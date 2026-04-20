@@ -403,6 +403,9 @@ def main():
         if not raw:
             continue
 
+        # strip surrounding quotes (Windows drag-and-drop adds these)
+        raw = raw.strip().strip("'\"")
+
         if raw.lower() in ('exit', 'quit', 'q'):
             print(f"\n  {G}Goodbye!{RST}\n")
             sys.exit(0)
@@ -411,9 +414,6 @@ def main():
             clear()
             print_banner()
             continue
-
-        # strip surrounding quotes (Windows drag-and-drop adds these)
-        raw = raw.strip().strip("'\"")
 
         folder = Path(raw)
 
@@ -436,7 +436,7 @@ def main():
             print(f"\n\n  {Y}Scan cancelled.{RST}\n")
             continue
 
-        print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.                                    ")
+        print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.".ljust(60))
         print_results(folder, total_sec, total_count, tree)
 
         # post-scan menu
