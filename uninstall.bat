@@ -44,6 +44,16 @@ if exist "%INSTALL_DIR%" (
         pause
         exit /b 1
     )
+
+    :: Warn if there are extra files that will also be deleted
+    set "EXTRA=0"
+    for /f "delims=" %%F in ('dir /b "%INSTALL_DIR%" 2^>nul ^| findstr /v /i "^aevum\.py$"') do set "EXTRA=1"
+    if "!EXTRA!"=="1" (
+        echo  [WARN] Extra files found in %INSTALL_DIR% - they will also be removed:
+        dir /b "%INSTALL_DIR%" | findstr /v /i "^aevum\.py$"
+        echo.
+    )
+
     echo  Found: %INSTALL_DIR%
     rmdir /S /Q "%INSTALL_DIR%"
     if exist "%INSTALL_DIR%" (

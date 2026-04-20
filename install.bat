@@ -26,7 +26,7 @@ if not exist "%SRC%aevum.py" (
     exit /b 1
 )
 
-:: Check Python
+:: Check Python exists
 python --version >nul 2>&1
 if errorlevel 1 (
     echo  [ERROR] Python not found. Download from https://python.org
@@ -34,11 +34,21 @@ if errorlevel 1 (
     exit /b 1
 )
 
+:: Check Python 3 specifically
+for /f "tokens=2 delims= " %%V in ('python --version 2^>^&1') do set "PYVER=%%V"
+if "!PYVER:~0,1!" NEQ "3" (
+    echo  [ERROR] Python 3 is required. Found: !PYVER!
+    echo  Download Python 3 from https://python.org
+    pause
+    exit /b 1
+)
+echo  [OK] Python !PYVER! found
+
 :: Get Python Scripts path
 for /f "delims=" %%A in ('python -c "import sysconfig; print(sysconfig.get_path(\"scripts\"))"') do set "SCRIPTS=%%A"
 
 :: Make sure we actually got a scripts path
-if "%SCRIPTS%"=="" (
+if "!SCRIPTS!"=="" (
     echo  [ERROR] Could not determine Python Scripts folder. Aborting.
     pause
     exit /b 1
@@ -46,8 +56,13 @@ if "%SCRIPTS%"=="" (
 
 set "INSTALL_DIR=%LOCALAPPDATA%\Aevum"
 
+:: Warn if already installed
+if exist "%INSTALL_DIR%\aevum.py" (
+    echo  [INFO] Existing installation found at %INSTALL_DIR% - updating...
+)
+
 echo  App folder  : %INSTALL_DIR%
-echo  Launcher in : %SCRIPTS%
+echo  Launcher in : !SCRIPTS!
 echo.
 
 :: Create app folder
@@ -63,10 +78,13 @@ if not exist "%INSTALL_DIR%\aevum.py" (
 echo  [OK] Copied aevum.py
 
 :: Write launcher into Python Scripts
+:: Delayed expansion is disabled here so that any ! in INSTALL_DIR is written literally
+setlocal DisableDelayedExpansion
 (
     echo @echo off
     echo python "%INSTALL_DIR%\aevum.py" %%*
 ) > "%SCRIPTS%\aevum.cmd"
+endlocal
 
 :: Verify the launcher was actually created
 if not exist "%SCRIPTS%\aevum.cmd" (

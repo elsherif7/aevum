@@ -10,6 +10,7 @@ Point it at any folder and instantly see the total watch time — broken down by
 - Recursively scans any folder for video files
 - Displays duration per subfolder in a tree view
 - Grand total in days, hours, and minutes
+- Playback speed breakdown (1x → 2x)
 - Supports external drives, USB sticks, network paths — anything Windows can see
 - Drag-and-drop a folder into the terminal window
 - Clean, colored terminal UI
@@ -18,7 +19,7 @@ Point it at any folder and instantly see the total watch time — broken down by
 
 ## Requirements
 
-- **Python** — https://python.org
+- **Python 3** — https://python.org
 - **FFmpeg** (includes `ffprobe`) — https://ffmpeg.org/download.html  
   After downloading, make sure FFmpeg is on your system PATH.
 
@@ -52,11 +53,12 @@ Then enter any folder path at the prompt:
   ================================================================
 
   aevum> D:\Movies
-  Scanning...  312 video(s) found
-  Done!
+  Scanning...  ████████████████░░░░░░░░  288/312  (92%)
+
+  Done!  312 videos found.
 
   ================================================================
-    VIDEO LIBRARY  |  FOLDER SUMMARY
+    Video Library  |  Folder Summary
   ================================================================
 
   Movies
@@ -70,12 +72,18 @@ Then enter any folder path at the prompt:
       ...
 
   ================================================================
-    GRAND TOTAL
+    Grand Total
   ================================================================
-  Total Videos  :  312
+  Total videos  :  312
   Days          :  18d 06h 12m 05s
   Hours         :  438h 12m 05s
   Minutes       :  26292m 05s
+  ================================================================
+    Playback Speed
+  ================================================================
+  1x      :  438h 12m 05s  (18d 06h 12m 05s)
+  1.25x   :  350h 33m 38s  (14d 14h 33m 38s)
+  ...
   ================================================================
 ```
 
@@ -86,11 +94,11 @@ Then enter any folder path at the prompt:
 | Input | Action |
 |---|---|
 | Any folder path | Scan that folder |
-| `clear` | Clear the screen |
-| `exit` / `quit` | Quit |
+| `clear` / `c` | Clear the screen |
+| `exit` / `quit` / `q` | Quit |
 | `Ctrl+C` | Cancel a scan or quit |
 
-After each scan a quick menu also appears with the same options.
+After each scan a quick menu appears with `scan`, `clear`, and `quit`.
 
 ---
 
@@ -103,4 +111,3 @@ After each scan a quick menu also appears with the same options.
 ## Uninstall
 
 Run `uninstall.bat` as administrator. It removes the app folder and launcher — nothing else is touched.
-
