@@ -86,6 +86,8 @@ def _read_mp4_duration(path):
                             break
                         if iname == b'mvhd':
                             box = f.read(min(isize - ihdr, 40))
+                            if not box:
+                                break
                             version = box[0]
                             if version == 1:
                                 ts = struct.unpack_from('>I', box, 20)[0]
@@ -112,7 +114,7 @@ def _read_mkv_duration(path):
                 return 0, pos + 1
             b = buf[pos]
             if b == 0:
-                return 0, pos + 8
+                return 0, len(buf)  # invalid/reserved vint — signal parse failure
             width = 1
             mask = 0x80
             while not (b & mask) and width <= 8:
@@ -203,24 +205,26 @@ def scan_parallel(root, on_progress=None, stop_event=None):
     """Pipelined scan: files are submitted to probe pool as they are discovered."""
     root = Path(root)
     durations = {}
-    done = [0]
-    total = [0]
+    done = 0
+    total = 0
     lock = threading.Lock()
 
     def probe(path):
+        nonlocal done
         if stop_event and stop_event.is_set():
             return path, 0.0
         sec = get_duration(path)
         with lock:
-            done[0] += 1
-            if on_progress and total[0] > 0:
-                on_progress(done[0], total[0])
+            done += 1
+            if on_progress and total > 0:
+                on_progress(done, total)
         return path, sec
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         futures = {}
 
         def collect_and_submit():
+            nonlocal total
             stack = [str(root)]
             while stack:
                 if stop_event and stop_event.is_set():
@@ -237,7 +241,7 @@ def scan_parallel(root, on_progress=None, stop_event=None):
                                 if Path(entry.name).suffix.lower() in video_extensions:
                                     p = Path(entry.path)
                                     with lock:
-                                        total[0] += 1
+                                        total += 1
                                     f = pool.submit(probe, p)
                                     futures[f] = p
                 except PermissionError:
@@ -280,7 +284,7 @@ def _build_tree(root, durations):
 
     for path, sec in durations.items():
         parent = path.parent
-        while True:
+        while parent != parent.parent:  # stops at filesystem root (/ or C:\)
             folder_secs[parent]  = folder_secs.get(parent, 0.0) + sec
             folder_count[parent] = folder_count.get(parent, 0) + 1
             if parent == root:
@@ -303,7 +307,9 @@ def _build_tree(root, durations):
 
 depth_colors = [R, G, B, M, C, W]
 
-def print_tree(name, seconds, count, subfolders, depth=0, number=""):
+def print_tree(name, seconds, count, subfolders, depth=0, number="", max_depth=50):
+    if depth > max_depth:
+        return
     PAD    = "    "
     indent = PAD * depth
     fmt    = format_duration(seconds)
