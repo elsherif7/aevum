@@ -1,12 +1,14 @@
+import argparse
+import csv
+import json
 import struct
 import subprocess
 import sys
 import os
 import threading
+from datetime import datetime
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-VERSION = "3.2"
 
 # Enable ANSI colors on Windows
 if os.name == 'nt':
@@ -263,13 +265,13 @@ def scan_parallel(root, on_progress=None, stop_event=None):
             raise
 
     if not durations:
-        return 0.0, 0, _build_tree(root, {})
+        return 0.0, 0, _build_tree(root, {}), {}
 
     total_sec = sum(durations.values())
     total_count = len(durations)
     tree = _build_tree(root, durations)
 
-    return total_sec, total_count, tree
+    return total_sec, total_count, tree, durations
 
 def _build_tree(root, durations):
     """
@@ -331,6 +333,119 @@ def print_tree(name, seconds, count, subfolders, depth=0, number="", max_depth=5
     if subfolders:
         print()
 
+def print_top_files(durations, n=10):
+    """Print the N longest individual video files."""
+    if not durations:
+        return
+    ranked = sorted(durations.items(), key=lambda x: x[1], reverse=True)[:n]
+    print(f"  {C}{LINE}{RST}")
+    print(f"  {C}  Top {n} Longest Files{RST}")
+    print(f"  {C}{LINE}{RST}")
+    for i, (path, sec) in enumerate(ranked, start=1):
+        fmt = format_duration(sec)
+        name = path.name
+        parent = path.parent.name
+        print(f"  {DIM}{i:>2}.{RST}  {W}{fmt['hours_fmt']}{RST}  {DIM}|{RST}  {Y}{name}{RST}  {DIM}({parent}){RST}")
+    print()
+
+def _tree_to_dict(name, seconds, count, subfolders):
+    """Recursively convert a tree tuple into a JSON-serialisable dict."""
+    return {
+        "name":      name,
+        "seconds":   round(seconds, 2),
+        "count":     count,
+        "hours_fmt": format_duration(seconds)["hours_fmt"],
+        "children":  [_tree_to_dict(n, s, c, sub) for n, s, c, sub in subfolders],
+    }
+
+def export_results(folder, total_sec, total_count, tree, durations, fmt, out_path=None):
+    """
+    Export scan results to a file.
+    fmt: 'txt' | 'csv' | 'json'
+    out_path: explicit Path to write to, or None to auto-generate next to the scan folder.
+    Returns the Path that was written.
+    """
+    folder   = Path(folder)
+    stamp    = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"aevum_{folder.name}_{stamp}.{fmt}"
+    dest     = Path(out_path) if out_path else folder.parent / filename
+
+    if fmt == "json":
+        root_name = folder.name
+        payload = {
+            "scanned":     str(folder),
+            "timestamp":   datetime.now().isoformat(),
+            "total_count": total_count,
+            "total_sec":   round(total_sec, 2),
+            "totals":      format_duration(total_sec),
+            "tree":        _tree_to_dict(root_name, total_sec, total_count, tree),
+            "files":       {str(p): round(s, 2) for p, s in
+                            sorted(durations.items(), key=lambda x: x[1], reverse=True)},
+        }
+        dest.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    elif fmt == "csv":
+        ranked = sorted(durations.items(), key=lambda x: x[1], reverse=True)
+        with dest.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["path", "filename", "folder", "seconds", "duration"])
+            for path, sec in ranked:
+                writer.writerow([
+                    str(path),
+                    path.name,
+                    path.parent.name,
+                    round(sec, 2),
+                    format_duration(sec)["hours_fmt"],
+                ])
+
+    elif fmt == "txt":
+        import io
+        buf = io.StringIO()
+        # Strip ANSI by temporarily redirecting — we rebuild the text cleanly
+        fd = format_duration(total_sec)
+        buf.write(f"AEVUM  |  Video Library Duration Scanner\n")
+        buf.write(f"Scanned : {folder}\n")
+        buf.write(f"Date    : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        buf.write("=" * 64 + "\n\n")
+
+        def write_tree(name, seconds, count, subfolders, depth=0, number=""):
+            indent = "    " * depth
+            label  = f"{number}.  {name}" if number else name
+            fd_    = format_duration(seconds)
+            if count == 0:
+                buf.write(f"{indent}{label}\n")
+                buf.write(f"{indent}    +--  (empty)\n")
+            else:
+                buf.write(f"{indent}{label}\n")
+                buf.write(f"{indent}    +--  {fd_['hours_fmt']}  |  {count} videos\n")
+            if subfolders:
+                buf.write("\n")
+            for i, (sn, ss, sc, ssub) in enumerate(subfolders, start=1):
+                sub_number = f"{number}.{i}" if number else str(i)
+                write_tree(sn, ss, sc, ssub, depth + 1, sub_number)
+            if subfolders:
+                buf.write("\n")
+
+        write_tree(folder.name, total_sec, total_count, tree)
+        buf.write("=" * 64 + "\n")
+        buf.write("GRAND TOTAL\n")
+        buf.write("=" * 64 + "\n")
+        buf.write(f"Total videos  :  {total_count}\n")
+        buf.write(f"Days          :  {fd['days_fmt']}\n")
+        buf.write(f"Hours         :  {fd['hours_fmt']}\n")
+        buf.write(f"Minutes       :  {fd['minutes_fmt']}\n")
+        buf.write("=" * 64 + "\n\n")
+
+        buf.write("TOP 10 LONGEST FILES\n")
+        buf.write("=" * 64 + "\n")
+        ranked = sorted(durations.items(), key=lambda x: x[1], reverse=True)[:10]
+        for i, (path, sec) in enumerate(ranked, start=1):
+            buf.write(f"  {i:>2}.  {format_duration(sec)['hours_fmt']}  |  {path.name}  ({path.parent.name})\n")
+
+        dest.write_text(buf.getvalue(), encoding="utf-8")
+
+    return dest
+
 LINE = "=" * 64
 
 def print_banner():
@@ -342,7 +457,7 @@ def print_banner():
     print(f"  {DIM}Type a folder path and press Enter to scan.{RST}")
     print()
 
-def print_results(folder, total_sec, total_count, tree):
+def print_results(folder, total_sec, total_count, tree, durations=None, top_n=10):
     fmt = format_duration(total_sec)
     print()
     print(f"  {C}{LINE}{RST}")
@@ -366,15 +481,118 @@ def print_results(folder, total_sec, total_count, tree):
         label = f"{speed:.2f}".rstrip('0').rstrip('.') + "x"
         print(f"  {W}  {label:<6}        {DIM}:{RST}  {Y}{adjusted['hours_fmt']}{RST}  {DIM}({adjusted['days_fmt']}){RST}")
     print()
+    if durations and top_n > 0:
+        print_top_files(durations, top_n)
 
 def print_post_scan_menu():
     print(f"  {DIM}What do you want to do?{RST}")
-    print(f"  {G}scan{RST}   {Y}clear{RST}   {R}quit{RST}")
+    print(f"  {G}scan{RST}   {Y}clear{RST}   {M}export{RST}   {R}quit{RST}")
     print()
 
 # ── MAIN ──────────────────────────────────────────────────────────────
 
+def _parse_args():
+    p = argparse.ArgumentParser(
+        prog="aevum",
+        description="Video library duration scanner.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  aevum                          interactive mode\n"
+            "  aevum D:\\Movies                scan and print, then exit\n"
+            "  aevum D:\\Movies --export csv   scan and save a CSV next to the folder\n"
+            "  aevum D:\\Movies --export json --out report.json\n"
+            "  aevum D:\\Movies --top 20       show 20 longest files\n"
+            "  aevum D:\\Movies --top 0        hide top-files section\n"
+            "  aevum D:\\Movies --no-color     plain text output (good for piping)\n"
+        ),
+    )
+    p.add_argument("folder",         nargs="?",  default=None,
+                   help="folder to scan (omit to enter interactive mode)")
+    p.add_argument("--export", "-e", choices=["txt", "csv", "json"], default=None,
+                   metavar="FORMAT",
+                   help="export results to a file: txt | csv | json")
+    p.add_argument("--out",    "-o", default=None,
+                   help="explicit output file path for --export (default: auto-named next to scanned folder)")
+    p.add_argument("--top",    "-t", type=int, default=10,
+                   metavar="N",
+                   help="show top N longest files (default: 10, set 0 to hide)")
+    p.add_argument("--no-color",     action="store_true",
+                   help="strip ANSI colours from terminal output")
+    p.add_argument("--version", "-v", action="version", version="aevum")
+    return p.parse_args()
+
+
+def _disable_color():
+    """Replace all colour constants with empty strings for plain output."""
+    global R, G, Y, B, M, C, W, DIM, RST
+    R = G = Y = B = M = C = W = DIM = RST = ""
+
+
+def _run_scan(folder, on_progress, top_n):
+    """Run scan_parallel and unpack the 4-tuple. Returns (total_sec, total_count, tree, durations)."""
+    stop_event = threading.Event()
+    try:
+        result = scan_parallel(folder, on_progress, stop_event)
+    except KeyboardInterrupt:
+        stop_event.set()
+        raise
+    return result  # (total_sec, total_count, tree, durations)
+
+
 def main():
+    args = _parse_args()
+
+    if args.no_color:
+        _disable_color()
+
+    # ── HEADLESS MODE ────────────────────────────────────────────────
+    if args.folder is not None:
+        folder = Path(args.folder.strip().strip("'\""))
+
+        if not check_ffprobe():
+            print(f"Error: ffprobe not found on PATH. Download FFmpeg from https://ffmpeg.org/download.html",
+                  file=sys.stderr)
+            sys.exit(1)
+
+        if not folder.exists():
+            print(f"Error: path not found: {folder}", file=sys.stderr)
+            sys.exit(1)
+
+        if not folder.is_dir():
+            print(f"Error: not a directory: {folder}", file=sys.stderr)
+            sys.exit(1)
+
+        def on_progress(done, total):
+            pct = int((done / total) * 100)
+            bar_len = 24
+            filled  = int(bar_len * done / total)
+            bar     = "█" * filled + "░" * (bar_len - filled)
+            print(f"\r  {C}Scanning...{RST}  {bar}  {Y}{done}/{total}{RST}  {DIM}({pct}%){RST}",
+                  end='', flush=True)
+
+        print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
+        try:
+            total_sec, total_count, tree, durations = _run_scan(folder, on_progress, args.top)
+        except KeyboardInterrupt:
+            print(f"\n\n  {Y}Scan cancelled.{RST}\n")
+            sys.exit(0)
+
+        print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.".ljust(60))
+        print_results(folder, total_sec, total_count, tree, durations, args.top)
+
+        if args.export:
+            try:
+                dest = export_results(folder, total_sec, total_count, tree,
+                                      durations, args.export, args.out)
+                print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
+            except Exception as e:
+                print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr)
+                sys.exit(1)
+
+        sys.exit(0)
+
+    # ── INTERACTIVE MODE ─────────────────────────────────────────────
     clear()
     print_banner()
 
@@ -386,12 +604,15 @@ def main():
         sys.exit(1)
 
     def on_progress(done, total):
-        pct = int((done / total) * 100)
+        pct    = int((done / total) * 100)
         bar_len = 24
-        filled = int(bar_len * done / total)
-        bar = "█" * filled + "░" * (bar_len - filled)
+        filled  = int(bar_len * done / total)
+        bar     = "█" * filled + "░" * (bar_len - filled)
         print(f"\r  {C}Scanning...{RST}  {bar}  {Y}{done}/{total}{RST}  {DIM}({pct}%){RST}",
               end='', flush=True)
+
+    # Remember last scan for export in post-scan menu
+    last_scan = {}
 
     while True:
         try:
@@ -426,18 +647,24 @@ def main():
             continue
 
         # scan
-        stop_event = threading.Event()
         print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
-
         try:
-            total_sec, total_count, tree = scan_parallel(folder, on_progress, stop_event)
+            total_sec, total_count, tree, durations = _run_scan(folder, on_progress, args.top)
         except KeyboardInterrupt:
-            stop_event.set()
             print(f"\n\n  {Y}Scan cancelled.{RST}\n")
             continue
 
         print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.".ljust(60))
-        print_results(folder, total_sec, total_count, tree)
+        print_results(folder, total_sec, total_count, tree, durations, args.top)
+
+        # stash for potential export
+        last_scan = {
+            "folder":      folder,
+            "total_sec":   total_sec,
+            "total_count": total_count,
+            "tree":        tree,
+            "durations":   durations,
+        }
 
         # post-scan menu
         print_post_scan_menu()
@@ -451,14 +678,44 @@ def main():
             if choice in ('quit', 'exit', 'q'):
                 print(f"\n  {G}Goodbye!{RST}\n")
                 sys.exit(0)
+
             elif choice == 'clear':
                 clear()
                 print_banner()
                 break
+
             elif choice == 'scan':
                 break
+
+            elif choice in ('export', 'export txt', 'export csv', 'export json'):
+                parts = choice.split()
+                fmt   = parts[1] if len(parts) == 2 else None
+
+                if fmt is None:
+                    print(f"  {DIM}Format?{RST}  {W}txt{RST}   {W}csv{RST}   {W}json{RST}")
+                    try:
+                        fmt = input(f"  {C}aevum{RST}> ").strip().lower()
+                    except (KeyboardInterrupt, EOFError):
+                        print()
+                        continue
+
+                if fmt not in ('txt', 'csv', 'json'):
+                    print(f"  {R}Unknown format.{RST} Choose {W}txt{RST}, {W}csv{RST}, or {W}json{RST}.")
+                    continue
+
+                try:
+                    dest = export_results(
+                        last_scan["folder"], last_scan["total_sec"],
+                        last_scan["total_count"], last_scan["tree"],
+                        last_scan["durations"], fmt,
+                    )
+                    print(f"\n  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
+                except Exception as e:
+                    print(f"\n  {R}Export failed:{RST} {e}\n")
+
             else:
-                print(f"  {R}Invalid command.{RST} Type {G}scan{RST}, {Y}clear{RST}, or {R}quit{RST}.")
+                print(f"  {R}Invalid command.{RST} Type {G}scan{RST}, {Y}clear{RST}, {M}export{RST}, or {R}quit{RST}.")
+
 
 if __name__ == "__main__":
     main()
