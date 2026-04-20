@@ -1,15 +1,15 @@
+import struct
 import subprocess
 import sys
 import os
+import threading
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
 
 VERSION = "3.2"
 
 # Enable ANSI colors on Windows
 if os.name == 'nt':
-    os.system('color')
     import ctypes
     kernel32 = ctypes.windll.kernel32
     kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
@@ -31,8 +31,8 @@ video_extensions = (
 )
 
 # How many ffprobe processes to run at once.
-# Higher = faster on large libraries (ffprobe is I/O bound, not CPU bound).
-MAX_WORKERS = 128
+# Capped at 32 — beyond that, disk I/O becomes the bottleneck on HDDs/network shares.
+MAX_WORKERS = min(32, (os.cpu_count() or 4) * 4)
 
 # ── HELPERS ───────────────────────────────────────────────────────────
 
@@ -45,8 +45,6 @@ def check_ffprobe():
         return True
     except FileNotFoundError:
         return False
-
-import struct
 
 def _read_mp4_duration(path):
     """Seek through MP4 atoms without reading full file into memory."""
@@ -185,7 +183,8 @@ def get_duration(path):
              'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', str(path)],
             capture_output=True, text=True, timeout=15
         )
-        return float(proc.stdout.strip())
+        val = proc.stdout.strip()
+        return float(val) if val and val != 'N/A' else 0.0
     except Exception:
         return 0.0
 
@@ -198,26 +197,7 @@ def format_duration(seconds):
         "days_fmt":    f"{days}d {hours:02}h {minutes:02}m {secs:02}s",
         "hours_fmt":   f"{int(seconds // 3600):02}h {minutes:02}m {secs:02}s",
         "minutes_fmt": f"{int(seconds // 60)}m {secs:02}s",
-        "raw":         seconds
     }
-
-def collect_videos(path):
-    """Walk the folder tree using os.scandir (faster than rglob) and return all video paths."""
-    videos = []
-    stack = [str(path)]
-    while stack:
-        current = stack.pop()
-        try:
-            with os.scandir(current) as it:
-                for entry in it:
-                    if entry.is_dir(follow_symlinks=False):
-                        stack.append(entry.path)
-                    elif entry.is_file(follow_symlinks=False):
-                        if Path(entry.name).suffix.lower() in video_extensions:
-                            videos.append(Path(entry.path))
-        except PermissionError:
-            pass
-    return videos
 
 def scan_parallel(root, on_progress=None, stop_event=None):
     """Pipelined scan: files are submitted to probe pool as they are discovered."""
@@ -399,6 +379,14 @@ def main():
         input("  Press Enter to exit...")
         sys.exit(1)
 
+    def on_progress(done, total):
+        pct = int((done / total) * 100)
+        bar_len = 24
+        filled = int(bar_len * done / total)
+        bar = "█" * filled + "░" * (bar_len - filled)
+        print(f"\r  {C}Scanning...{RST}  {bar}  {Y}{done}/{total}{RST}  {DIM}({pct}%){RST}",
+              end='', flush=True)
+
     while True:
         try:
             raw = input(f"  {C}aevum{RST}> ").strip()
@@ -419,8 +407,7 @@ def main():
             continue
 
         # strip surrounding quotes (Windows drag-and-drop adds these)
-        if raw.startswith('"') and raw.endswith('"'):
-            raw = raw[1:-1]
+        raw = raw.strip().strip("'\"")
 
         folder = Path(raw)
 
@@ -435,14 +422,6 @@ def main():
         # scan
         stop_event = threading.Event()
         print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
-
-        def on_progress(done, total):
-            pct = int((done / total) * 100)
-            bar_len = 24
-            filled = int(bar_len * done / total)
-            bar = "█" * filled + "░" * (bar_len - filled)
-            print(f"\r  {C}Scanning...{RST}  {bar}  {Y}{done}/{total}{RST}  {DIM}({pct}%){RST}",
-                  end='', flush=True)
 
         try:
             total_sec, total_count, tree = scan_parallel(folder, on_progress, stop_event)
@@ -463,7 +442,7 @@ def main():
                 print(f"\n\n  {G}Goodbye!{RST}\n")
                 sys.exit(0)
 
-            if choice == 'quit':
+            if choice in ('quit', 'exit', 'q'):
                 print(f"\n  {G}Goodbye!{RST}\n")
                 sys.exit(0)
             elif choice == 'clear':
