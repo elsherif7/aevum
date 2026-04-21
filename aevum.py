@@ -1,5 +1,6 @@
 import argparse
 import csv
+import hashlib
 import json
 import struct
 import subprocess
@@ -35,6 +36,54 @@ video_extensions = (
 # How many ffprobe processes to run at once.
 # Capped at 32 — beyond that, disk I/O becomes the bottleneck on HDDs/network shares.
 MAX_WORKERS = min(32, (os.cpu_count() or 4) * 4)
+
+CACHE_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Aevum" / "cache"
+
+# ── CACHE ─────────────────────────────────────────────────────────────
+
+def _cache_key(root):
+    """Stable filename for the cache of a given root folder."""
+    h = hashlib.sha1(str(Path(root).resolve()).encode("utf-8")).hexdigest()[:16]
+    return CACHE_DIR / f"{h}.json"
+
+def load_cache(root):
+    """
+    Load the cache for this root folder.
+    Returns a dict mapping absolute path string -> {mtime, size, duration}.
+    Returns {} if no cache exists or it is unreadable.
+    """
+    path = _cache_key(root)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {entry["path"]: entry for entry in data}
+    except Exception:
+        return {}
+
+def save_cache(root, durations):
+    """
+    Persist durations to the cache file for this root folder.
+    durations: dict mapping Path -> seconds (float)
+    """
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        entries = []
+        for p, sec in durations.items():
+            try:
+                st = p.stat()
+                entries.append({
+                    "path":     str(p.resolve()),
+                    "mtime":    st.st_mtime,
+                    "size":     st.st_size,
+                    "duration": sec,
+                })
+            except OSError:
+                pass
+        _cache_key(root).write_text(
+            json.dumps(entries, indent=None, separators=(',', ':')),
+            encoding="utf-8"
+        )
+    except Exception:
+        pass  # cache write failure is never fatal
 
 # ── HELPERS ───────────────────────────────────────────────────────────
 
@@ -203,18 +252,37 @@ def format_duration(seconds):
         "minutes_fmt": f"{int(seconds // 60)}m {secs:02}s",
     }
 
-def scan_parallel(root, on_progress=None, stop_event=None):
+def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache=None):
     """Pipelined scan: files are submitted to probe pool as they are discovered."""
-    root = Path(root)
+    root      = Path(root)
     durations = {}
-    done = 0
-    total = 0
-    lock = threading.Lock()
+    done      = 0
+    total     = 0
+    hits      = 0   # files served from cache
+    lock      = threading.Lock()
+    cache     = cache or {}
 
     def probe(path):
-        nonlocal done
+        nonlocal done, hits
         if stop_event and stop_event.is_set():
             return path, 0.0
+
+        # Check cache: match on both mtime and size to detect re-encoded files
+        key = str(path.resolve())
+        if key in cache:
+            try:
+                st = path.stat()
+                entry = cache[key]
+                if st.st_mtime == entry["mtime"] and st.st_size == entry["size"]:
+                    with lock:
+                        done += 1
+                        hits += 1
+                        if on_progress and total > 0:
+                            on_progress(done, total)
+                    return path, entry["duration"]
+            except OSError:
+                pass
+
         sec = get_duration(path)
         with lock:
             done += 1
@@ -265,18 +333,19 @@ def scan_parallel(root, on_progress=None, stop_event=None):
             raise
 
     if not durations:
-        return 0.0, 0, _build_tree(root, {}), {}
+        return 0.0, 0, _build_tree(root, {}, sort_by), {}, 0
 
-    total_sec = sum(durations.values())
+    total_sec   = sum(durations.values())
     total_count = len(durations)
-    tree = _build_tree(root, durations)
+    tree        = _build_tree(root, durations, sort_by)
 
-    return total_sec, total_count, tree, durations
+    return total_sec, total_count, tree, durations, hits
 
-def _build_tree(root, durations):
+def _build_tree(root, durations, sort_by="name"):
     """
     O(n) tree builder — aggregate folder stats in a single pass over durations,
     then recursively assemble the tree structure from the pre-built dict.
+    sort_by: 'name' | 'duration' | 'count'
     """
     root = Path(root)
 
@@ -296,9 +365,17 @@ def _build_tree(root, durations):
     def build(node):
         subfolders = []
         try:
-            children = sorted(p for p in node.iterdir() if p.is_dir())
+            children = list(p for p in node.iterdir() if p.is_dir())
         except PermissionError:
             return subfolders
+
+        if sort_by == "duration":
+            children.sort(key=lambda p: folder_secs.get(p, 0.0), reverse=True)
+        elif sort_by == "count":
+            children.sort(key=lambda p: folder_count.get(p, 0), reverse=True)
+        else:  # name (default)
+            children.sort()
+
         for child in children:
             secs  = folder_secs.get(child, 0.0)
             count = folder_count.get(child, 0)
@@ -484,9 +561,10 @@ def print_results(folder, total_sec, total_count, tree, durations=None, top_n=10
     if durations and top_n > 0:
         print_top_files(durations, top_n)
 
-def print_post_scan_menu():
-    print(f"  {DIM}What do you want to do?{RST}")
-    print(f"  {G}scan{RST}   {Y}clear{RST}   {M}export{RST}   {R}quit{RST}")
+def print_post_scan_menu(current_sort="name"):
+    sort_label = f"{DIM}(sorted by {current_sort}){RST}"
+    print(f"  {DIM}What do you want to do?{RST}  {sort_label}")
+    print(f"  {G}scan{RST}   {Y}clear{RST}   {M}export{RST}   {B}sort{RST}   {R}quit{RST}")
     print()
 
 # ── MAIN ──────────────────────────────────────────────────────────────
@@ -504,6 +582,8 @@ def _parse_args():
             "  aevum D:\\Movies --export json --out report.json\n"
             "  aevum D:\\Movies --top 20       show 20 longest files\n"
             "  aevum D:\\Movies --top 0        hide top-files section\n"
+            "  aevum D:\\Movies --sort duration  sort folders by total duration\n"
+            "  aevum D:\\Movies --sort count     sort folders by video count\n"
             "  aevum D:\\Movies --no-color     plain text output (good for piping)\n"
         ),
     )
@@ -517,6 +597,10 @@ def _parse_args():
     p.add_argument("--top",    "-t", type=int, default=10,
                    metavar="N",
                    help="show top N longest files (default: 10, set 0 to hide)")
+    p.add_argument("--sort",   "-s", choices=["name", "duration", "count"], default="name",
+                   help="sort folders by: name (default) | duration | count")
+    p.add_argument("--no-cache",     action="store_true",
+                   help="bypass the duration cache and re-probe every file")
     p.add_argument("--no-color",     action="store_true",
                    help="strip ANSI colours from terminal output")
     p.add_argument("--version", "-v", action="version", version="aevum")
@@ -529,15 +613,23 @@ def _disable_color():
     R = G = Y = B = M = C = W = DIM = RST = ""
 
 
-def _run_scan(folder, on_progress, top_n):
-    """Run scan_parallel and unpack the 4-tuple. Returns (total_sec, total_count, tree, durations)."""
+def _run_scan(folder, on_progress, sort_by="name", use_cache=True):
+    """
+    Run scan_parallel with optional cache.
+    Returns (total_sec, total_count, tree, durations, hits).
+    """
+    folder     = Path(folder)
+    cache      = load_cache(folder) if use_cache else {}
     stop_event = threading.Event()
     try:
-        result = scan_parallel(folder, on_progress, stop_event)
+        result = scan_parallel(folder, on_progress, stop_event, sort_by, cache)
     except KeyboardInterrupt:
         stop_event.set()
         raise
-    return result  # (total_sec, total_count, tree, durations)
+    total_sec, total_count, tree, durations, hits = result
+    if use_cache and durations:
+        save_cache(folder, durations)
+    return total_sec, total_count, tree, durations, hits
 
 
 def main():
@@ -573,12 +665,15 @@ def main():
 
         print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
         try:
-            total_sec, total_count, tree, durations = _run_scan(folder, on_progress, args.top)
+            total_sec, total_count, tree, durations, hits = _run_scan(
+                folder, on_progress, args.sort, not args.no_cache)
         except KeyboardInterrupt:
             print(f"\n\n  {Y}Scan cancelled.{RST}\n")
             sys.exit(0)
 
-        print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.".ljust(60))
+        probed     = total_count - hits
+        cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
+        print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.{cache_info}".ljust(60))
         print_results(folder, total_sec, total_count, tree, durations, args.top)
 
         if args.export:
@@ -612,7 +707,8 @@ def main():
               end='', flush=True)
 
     # Remember last scan for export in post-scan menu
-    last_scan = {}
+    last_scan   = {}
+    current_sort = args.sort  # inherits --sort flag if given, otherwise 'name'
 
     while True:
         try:
@@ -649,12 +745,15 @@ def main():
         # scan
         print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
         try:
-            total_sec, total_count, tree, durations = _run_scan(folder, on_progress, args.top)
+            total_sec, total_count, tree, durations, hits = _run_scan(
+                folder, on_progress, current_sort, not args.no_cache)
         except KeyboardInterrupt:
             print(f"\n\n  {Y}Scan cancelled.{RST}\n")
             continue
 
-        print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.".ljust(60))
+        probed     = total_count - hits
+        cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
+        print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.{cache_info}".ljust(60))
         print_results(folder, total_sec, total_count, tree, durations, args.top)
 
         # stash for potential export
@@ -667,7 +766,7 @@ def main():
         }
 
         # post-scan menu
-        print_post_scan_menu()
+        print_post_scan_menu(current_sort)
         while True:
             try:
                 choice = input(f"  {C}aevum{RST}> ").strip().lower()
@@ -686,6 +785,26 @@ def main():
 
             elif choice == 'scan':
                 break
+
+            elif choice in ('sort', 'sort name', 'sort duration', 'sort count'):
+                parts = choice.split()
+                mode  = parts[1] if len(parts) == 2 else None
+
+                if mode is None:
+                    print(f"  {DIM}Sort by?{RST}  {W}name{RST}   {W}duration{RST}   {W}count{RST}")
+                    try:
+                        mode = input(f"  {C}aevum{RST}> ").strip().lower()
+                    except (KeyboardInterrupt, EOFError):
+                        print()
+                        continue
+
+                if mode not in ('name', 'duration', 'count'):
+                    print(f"  {R}Unknown sort.{RST} Choose {W}name{RST}, {W}duration{RST}, or {W}count{RST}.")
+                    continue
+
+                current_sort = mode
+                print(f"\n  {G}Sort set to:{RST} {W}{current_sort}{RST}  {DIM}(applies on next scan){RST}\n")
+                print_post_scan_menu(current_sort)
 
             elif choice in ('export', 'export txt', 'export csv', 'export json'):
                 parts = choice.split()
@@ -714,7 +833,7 @@ def main():
                     print(f"\n  {R}Export failed:{RST} {e}\n")
 
             else:
-                print(f"  {R}Invalid command.{RST} Type {G}scan{RST}, {Y}clear{RST}, {M}export{RST}, or {R}quit{RST}.")
+                print(f"  {R}Invalid command.{RST} Type {G}scan{RST}, {Y}clear{RST}, {M}export{RST}, {B}sort{RST}, or {R}quit{RST}.")
 
 
 if __name__ == "__main__":
