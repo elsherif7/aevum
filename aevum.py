@@ -396,7 +396,7 @@ def _build_tree(root, durations, sort_by="name"):
 
 depth_colors = [R, G, B, M, C, W]
 
-def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number="", max_depth=50):
+def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number="", max_depth=50, show_files=False):
     if depth > max_depth:
         return
     PAD    = "    "
@@ -413,7 +413,7 @@ def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number=""
         print(f"{indent}    {DIM}+--{RST}  {W}{fmt['hours_fmt']}{RST}  {DIM}|{RST}  {Y}{count} videos{RST}")
 
     # show loose files sitting directly in this folder
-    if direct:
+    if show_files and direct:
         for path, sec in direct:
             fd = format_duration(sec)
             print(f"{indent}    {DIM}|  {fd['hours_fmt']}  {path.name}{RST}")
@@ -423,7 +423,7 @@ def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number=""
         print()
     for i, (sub_name, sub_sec, sub_count, sub_sub, sub_direct) in enumerate(subfolders, start=1):
         sub_number = f"{number}.{i}" if number else str(i)
-        print_tree(sub_name, sub_sec, sub_count, sub_sub, sub_direct, depth + 1, sub_number)
+        print_tree(sub_name, sub_sec, sub_count, sub_sub, sub_direct, depth + 1, sub_number, show_files=show_files)
     if subfolders:
         print()
 
@@ -714,7 +714,7 @@ def print_banner():
     print(f"  {DIM}Type a folder path and press Enter to scan.{RST}")
     print()
 
-def print_results(folder, total_sec, total_count, tree, durations=None, top_n=10):
+def print_results(folder, total_sec, total_count, tree, durations=None, top_n=10, show_files=False):
     fmt = format_duration(total_sec)
     subfolders, direct = tree
     print()
@@ -722,7 +722,7 @@ def print_results(folder, total_sec, total_count, tree, durations=None, top_n=10
     print(f"  {C}  Video Library  |  Folder Summary{RST}")
     print(f"  {C}{LINE}{RST}")
     print()
-    print_tree(Path(folder).name, total_sec, total_count, subfolders, direct)
+    print_tree(Path(folder).name, total_sec, total_count, subfolders, direct, show_files=show_files)
     print(f"  {C}{LINE}{RST}")
     print(f"  {C}  Grand Total{RST}")
     print(f"  {C}{LINE}{RST}")
@@ -799,6 +799,8 @@ def _parse_args():
                        help="show top N longest files (default: 10, set 0 to hide)")
         p.add_argument("--sort",   "-s", choices=["name", "duration", "count"], default="name",
                        help="sort folders by: name (default) | duration | count")
+        p.add_argument("--files",  "-f", action="store_true",
+                       help="show individual files under each folder in the tree")
         p.add_argument("--no-cache",     action="store_true",
                        help="bypass the duration cache and re-probe every file")
         p.add_argument("--no-color",     action="store_true",
@@ -923,7 +925,7 @@ def main():
         probed     = total_count - hits
         cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
         print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.{cache_info}".ljust(60))
-        print_results(folder, total_sec, total_count, tree, durations, args.top)
+        print_results(folder, total_sec, total_count, tree, durations, args.top, show_files=args.files)
 
         # dupe warning
         groups = find_duplicates(durations)
@@ -1004,7 +1006,7 @@ def main():
         probed     = total_count - hits
         cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
         print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.{cache_info}".ljust(60))
-        print_results(folder, total_sec, total_count, tree, durations, args.top)
+        print_results(folder, total_sec, total_count, tree, durations, args.top, show_files=getattr(args, "files", False))
 
         # dupe warning
         groups = find_duplicates(durations)
