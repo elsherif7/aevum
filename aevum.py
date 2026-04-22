@@ -500,7 +500,7 @@ def _tree_to_dict(name, seconds, count, subfolders, direct=None):
         "count":     count,
         "hours_fmt": format_duration(seconds)["hours_fmt"],
         "direct":    [{"file": p.name, "seconds": round(s, 2)} for p, s in (direct or [])],
-        "children":  [_tree_to_dict(n, s, c, sub, d) for n, s, c, sub, d in subfolders],
+        "children":  [_tree_to_dict(n, s, c, sub, d) for n, s, c, _fb, _dc, sub, d in subfolders],
     }
 
 def export_results(folder, total_sec, total_count, tree, durations, fmt, out_path=None):
@@ -517,7 +517,7 @@ def export_results(folder, total_sec, total_count, tree, durations, fmt, out_pat
 
     if fmt == "json":
         root_name = folder.name
-        subfolders, direct = tree
+        subfolders, direct, _root_bytes = tree
         payload = {
             "scanned":     str(folder),
             "timestamp":   datetime.now().isoformat(),
@@ -568,13 +568,13 @@ def export_results(folder, total_sec, total_count, tree, durations, fmt, out_pat
                 buf.write(f"{indent}    |  {format_duration(sec)['hours_fmt']}  {path.name}\n")
             if subfolders:
                 buf.write("\n")
-            for i, (sn, ss, sc, ssub, sd) in enumerate(subfolders, start=1):
+            for i, (sn, ss, sc, _fb, _dc, ssub, sd) in enumerate(subfolders, start=1):
                 sub_number = f"{number}.{i}" if number else str(i)
                 write_tree(sn, ss, sc, ssub, sd, depth + 1, sub_number)
             if subfolders:
                 buf.write("\n")
 
-        subfolders, direct = tree
+        subfolders, direct, _root_bytes = tree
         write_tree(folder.name, total_sec, total_count, subfolders, direct)
         buf.write("=" * 64 + "\n")
         buf.write("GRAND TOTAL\n")
