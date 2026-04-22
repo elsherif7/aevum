@@ -280,7 +280,7 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
     def probe(path):
         nonlocal done, hits
         if stop_event and stop_event.is_set():
-            return path, 0.0
+            return path, 0.0, 0
 
         # Check cache: match on both mtime and size to detect re-encoded files
         key = str(path.resolve())
@@ -294,17 +294,21 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
                         hits += 1
                         if on_progress and total > 0:
                             on_progress(done, total)
-                    sizes[path] = entry.get("size", 0)
-                    return path, entry["duration"]
+                    # return cached size — avoids a second stat() in as_completed
+                    return path, entry["duration"], int(entry.get("size", 0))
             except OSError:
                 pass
 
         sec = get_duration(path)
+        try:
+            file_size = path.stat().st_size
+        except OSError:
+            file_size = 0
         with lock:
             done += 1
             if on_progress and total > 0:
                 on_progress(done, total)
-        return path, sec
+        return path, sec, file_size
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         futures = {}
@@ -341,12 +345,9 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
             for future in as_completed(futures):
                 if stop_event and stop_event.is_set():
                     break
-                path, sec = future.result()
+                path, sec, file_size = future.result()
                 durations[path] = sec
-                try:
-                    sizes[path] = path.stat().st_size
-                except OSError:
-                    sizes[path] = 0
+                sizes[path] = file_size
         except KeyboardInterrupt:
             if stop_event:
                 stop_event.set()
