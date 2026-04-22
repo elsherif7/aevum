@@ -142,6 +142,11 @@ def _read_mp4_duration(path):
                             if not box:
                                 break
                             version = box[0]
+                            # version 1: timescale at offset 20 (4 bytes), duration at 24 (8 bytes) — need 32
+                            # version 0: timescale at offset 12 (4 bytes), duration at 16 (4 bytes) — need 20
+                            min_size = 32 if version == 1 else 20
+                            if len(box) < min_size:
+                                break
                             if version == 1:
                                 ts = struct.unpack_from('>I', box, 20)[0]
                                 dur = struct.unpack_from('>Q', box, 24)[0]
@@ -390,14 +395,21 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None):
         parent = path.parent
         folder_direct.setdefault(parent, []).append((path, sec))
 
-        # bubble totals up to all ancestors including root
-        while parent != parent.parent:
-            folder_secs[parent]  = folder_secs.get(parent, 0.0) + sec
-            folder_bytes[parent] = folder_bytes.get(parent, 0) + file_bytes
-            folder_count[parent] = folder_count.get(parent, 0) + 1
-            if parent == root:
+        # bubble totals up to all ancestors including root.
+        # Loop is path-based, not identity-based, so it correctly handles
+        # drive roots (e.g. D:\) where parent.parent == parent on Windows.
+        ancestor = path.parent
+        while True:
+            folder_secs[ancestor]  = folder_secs.get(ancestor, 0.0) + sec
+            folder_bytes[ancestor] = folder_bytes.get(ancestor, 0) + file_bytes
+            folder_count[ancestor] = folder_count.get(ancestor, 0) + 1
+            if ancestor == root:
                 break
-            parent = parent.parent
+            next_ancestor = ancestor.parent
+            if next_ancestor == ancestor:
+                # reached filesystem root without hitting scan root — stop
+                break
+            ancestor = next_ancestor
 
     def build(node):
         subfolders = []
