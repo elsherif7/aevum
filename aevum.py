@@ -241,6 +241,16 @@ def get_duration(path):
     except Exception:
         return 0.0
 
+def format_size(b):
+    """Return human-readable file size."""
+    if b >= 1_073_741_824:
+        return f"{b / 1_073_741_824:.2f} GB"
+    if b >= 1_048_576:
+        return f"{b / 1_048_576:.1f} MB"
+    if b >= 1024:
+        return f"{b / 1024:.1f} KB"
+    return f"{b} B"
+
 def format_duration(seconds):
     days    = int(seconds // 86400)
     hours   = int((seconds % 86400) // 3600)
@@ -256,6 +266,7 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
     """Pipelined scan: files are submitted to probe pool as they are discovered."""
     root      = Path(root)
     durations = {}
+    sizes     = {}
     done      = 0
     total     = 0
     hits      = 0   # files served from cache
@@ -279,6 +290,7 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
                         hits += 1
                         if on_progress and total > 0:
                             on_progress(done, total)
+                    sizes[path] = entry.get("size", 0)
                     return path, entry["duration"]
             except OSError:
                 pass
@@ -327,22 +339,26 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
                     break
                 path, sec = future.result()
                 durations[path] = sec
+                try:
+                    sizes[path] = path.stat().st_size
+                except OSError:
+                    sizes[path] = 0
         except KeyboardInterrupt:
             if stop_event:
                 stop_event.set()
             raise
 
     if not durations:
-        subfolders, direct = _build_tree(root, {}, sort_by)
-        return 0.0, 0, (subfolders, direct), {}, 0
+        subfolders, direct, root_bytes = _build_tree(root, {}, sort_by)
+        return 0.0, 0, (subfolders, direct, root_bytes), {}, {}, 0
 
     total_sec   = sum(durations.values())
     total_count = len(durations)
-    subfolders, direct = _build_tree(root, durations, sort_by)
+    subfolders, direct, root_bytes = _build_tree(root, durations, sort_by, sizes)
 
-    return total_sec, total_count, (subfolders, direct), durations, hits
+    return total_sec, total_count, (subfolders, direct, root_bytes), durations, sizes, hits
 
-def _build_tree(root, durations, sort_by="name:asc"):
+def _build_tree(root, durations, sort_by="name:asc", sizes=None):
     """
     O(n) tree builder — aggregate folder stats in a single pass over durations,
     then recursively assemble the tree structure from the pre-built dict.
@@ -357,11 +373,14 @@ def _build_tree(root, durations, sort_by="name:asc"):
     sort_rev = (sort_dir == 'desc')
     root = Path(root)
 
+    sizes         = sizes or {}
     folder_secs   = {}  # folder path -> total seconds (recursive)
+    folder_bytes  = {}  # folder path -> total bytes (recursive)
     folder_count  = {}  # folder path -> total video count (recursive)
     folder_direct = {}  # folder path -> list of (Path, sec) sitting directly inside
 
     for path, sec in durations.items():
+        file_bytes = sizes.get(path, 0)
         # record this file as a direct child of its parent
         parent = path.parent
         folder_direct.setdefault(parent, []).append((path, sec))
@@ -369,6 +388,7 @@ def _build_tree(root, durations, sort_by="name:asc"):
         # bubble totals up to all ancestors including root
         while parent != parent.parent:
             folder_secs[parent]  = folder_secs.get(parent, 0.0) + sec
+            folder_bytes[parent] = folder_bytes.get(parent, 0) + file_bytes
             folder_count[parent] = folder_count.get(parent, 0) + 1
             if parent == root:
                 break
@@ -391,21 +411,23 @@ def _build_tree(root, durations, sort_by="name:asc"):
         for child in children:
             secs         = folder_secs.get(child, 0.0)
             count        = folder_count.get(child, 0)
+            fbytes       = folder_bytes.get(child, 0)
             direct_files = folder_direct.get(child, [])
             direct_count = len(direct_files)
             child_subs, child_direct = build(child)
-            subfolders.append((child.name, secs, count, direct_count, child_subs, child_direct))
+            subfolders.append((child.name, secs, count, fbytes, direct_count, child_subs, child_direct))
 
         # direct files sitting immediately inside this node
         direct = sorted(folder_direct.get(node, []), key=lambda x: x[1], reverse=True)
         return subfolders, direct
 
     subfolders, direct = build(root)
-    return subfolders, direct
+    root_bytes = folder_bytes.get(root, 0)
+    return subfolders, direct, root_bytes
 
 depth_colors = [R, G, B, M, C, W]
 
-def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number="", max_depth=50, show_files=False, direct_count=None):
+def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number="", max_depth=50, show_files=False, direct_count=None, fbytes=0):
     if depth > max_depth:
         return
     PAD    = "    "
@@ -419,7 +441,8 @@ def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number=""
         print(f"{indent}    {DIM}+--  (empty){RST}")
     else:
         print(f"{indent}{col}{label}{RST}")
-        print(f"{indent}    {DIM}+--{RST}  {W}{fmt['hours_fmt']}{RST}  {DIM}|{RST}  {Y}{count} {'video' if count == 1 else 'videos'}{RST}")
+        size_label = f"  {DIM}|{RST}  {Y}{format_size(fbytes)}{RST}" if fbytes else ""
+        print(f"{indent}    {DIM}+--{RST}  {W}{fmt['hours_fmt']}{RST}  {DIM}|{RST}  {Y}{count} {'video' if count == 1 else 'videos'}{RST}{size_label}")
 
     print()
     # Show (no folder) virtual entry ONLY when there are also real subfolders
@@ -430,7 +453,12 @@ def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number=""
         child_col    = depth_colors[(depth + 1) % len(depth_colors)]
         virt_num     = f"{number}.0" if number else "0"
         print(f"{indent}    {child_col}{virt_num}.  (no folder){RST}")
-        print(f"{indent}        {DIM}+--{RST}  {W}{dir_fmt['hours_fmt']}{RST}  {DIM}|{RST}  {Y}{direct_count} {'video' if direct_count == 1 else 'videos'}{RST}")
+        dir_bytes = 0
+        for p, _ in direct:
+            try: dir_bytes += p.stat().st_size
+            except OSError: pass
+        dir_size_label = f"  {DIM}|{RST}  {Y}{format_size(dir_bytes)}{RST}" if dir_bytes else ""
+        print(f"{indent}        {DIM}+--{RST}  {W}{dir_fmt['hours_fmt']}{RST}  {DIM}|{RST}  {Y}{direct_count} {'video' if direct_count == 1 else 'videos'}{RST}{dir_size_label}")
         if show_files:
             print()
             for path, sec in direct:
@@ -438,10 +466,10 @@ def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number=""
                 print(f"{indent}        {DIM}|  {fd['hours_fmt']}  {path.name}{RST}")
         print()
 
-    for i, (sub_name, sub_sec, sub_count, sub_direct_count, sub_sub, sub_direct) in enumerate(subfolders, start=1):
+    for i, (sub_name, sub_sec, sub_count, sub_fbytes, sub_direct_count, sub_sub, sub_direct) in enumerate(subfolders, start=1):
         sub_number = f"{number}.{i}" if number else str(i)
         print_tree(sub_name, sub_sec, sub_count, sub_sub, sub_direct, depth + 1, sub_number,
-                   show_files=show_files, direct_count=sub_direct_count)
+                   show_files=show_files, direct_count=sub_direct_count, fbytes=sub_fbytes)
     if subfolders:
         print()
 
@@ -657,11 +685,11 @@ def print_dupe_warning(groups):
 def run_compare(folder_a, folder_b, on_progress, sort_by, use_cache):
     """Scan both folders and return comparison data."""
     print(f"  {DIM}Scanning {Path(folder_a).name}...{RST}", end='', flush=True)
-    sec_a, count_a, tree_a, dur_a, _ = _run_scan(folder_a, on_progress, sort_by, use_cache)
+    sec_a, count_a, tree_a, dur_a, _, _ = _run_scan(folder_a, on_progress, sort_by, use_cache)
     print(f"\r  {G}Done{RST}  {DIM}→{RST}  {W}{Path(folder_a).name}{RST}  {DIM}|{RST}  {Y}{count_a} videos  {format_duration(sec_a)['hours_fmt']}{RST}".ljust(70))
 
     print(f"  {DIM}Scanning {Path(folder_b).name}...{RST}", end='', flush=True)
-    sec_b, count_b, tree_b, dur_b, _ = _run_scan(folder_b, on_progress, sort_by, use_cache)
+    sec_b, count_b, tree_b, dur_b, _, _ = _run_scan(folder_b, on_progress, sort_by, use_cache)
     print(f"\r  {G}Done{RST}  {DIM}→{RST}  {W}{Path(folder_b).name}{RST}  {DIM}|{RST}  {Y}{count_b} videos  {format_duration(sec_b)['hours_fmt']}{RST}".ljust(70))
 
     return (sec_a, count_a, dur_a), (sec_b, count_b, dur_b)
@@ -732,19 +760,22 @@ def print_banner():
     print(f"  {DIM}Type a folder path and press Enter to scan.{RST}")
     print()
 
-def print_results(folder, total_sec, total_count, tree, durations=None, top_n=10, show_files=False):
+def print_results(folder, total_sec, total_count, tree, durations=None, sizes=None, top_n=10, show_files=False):
     fmt = format_duration(total_sec)
-    subfolders, direct = tree
+    sizes = sizes or {}
+    subfolders, direct, root_bytes = tree
     print()
     print(f"  {C}{LINE}{RST}")
     print(f"  {C}  Video Library  |  Folder Summary{RST}")
     print(f"  {C}{LINE}{RST}")
     print()
-    print_tree(Path(folder).name, total_sec, total_count, subfolders, direct, show_files=show_files)
+    print_tree(Path(folder).name, total_sec, total_count, subfolders, direct, show_files=show_files, fbytes=root_bytes)
     print(f"  {C}{LINE}{RST}")
     print(f"  {C}  Grand Total{RST}")
     print(f"  {C}{LINE}{RST}")
+    total_bytes = sum(sizes.values())
     print(f"  {W}  Total videos  {DIM}:{RST}  {Y}{total_count}{RST}")
+    print(f"  {W}  Total size    {DIM}:{RST}  {Y}{format_size(total_bytes)}{RST}")
     print(f"  {W}  Days          {DIM}:{RST}  {Y}{fmt['days_fmt']}{RST}")
     print(f"  {W}  Hours         {DIM}:{RST}  {Y}{fmt['hours_fmt']}{RST}")
     print(f"  {W}  Minutes       {DIM}:{RST}  {Y}{fmt['minutes_fmt']}{RST}")
@@ -867,7 +898,7 @@ def _disable_color():
 def _run_scan(folder, on_progress, sort_by="name", use_cache=True):
     """
     Run scan_parallel with optional cache.
-    Returns (total_sec, total_count, tree, durations, hits).
+    Returns (total_sec, total_count, tree, durations, sizes, hits).
     """
     folder     = Path(folder)
     cache      = load_cache(folder) if use_cache else {}
@@ -877,10 +908,10 @@ def _run_scan(folder, on_progress, sort_by="name", use_cache=True):
     except KeyboardInterrupt:
         stop_event.set()
         raise
-    total_sec, total_count, tree, durations, hits = result
+    total_sec, total_count, tree, durations, sizes, hits = result
     if use_cache and durations:
         save_cache(folder, durations)
-    return total_sec, total_count, tree, durations, hits
+    return total_sec, total_count, tree, durations, sizes, hits
 
 
 def main():
@@ -926,7 +957,7 @@ def main():
             print(f"\r  {C}Scanning...{RST}  {bar}  {Y}{done}/{total}{RST}  {DIM}({pct}%){RST}",
                   end='', flush=True)
         print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
-        _, _, _, durations, hits = _run_scan(folder, on_prog, "name", not args.no_cache)
+        _, _, _, durations, _, hits = _run_scan(folder, on_prog, "name", not args.no_cache)
         probed = len(durations) - hits
         cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
         print(f"\r  {G}Done!{RST}  {Y}{len(durations)}{RST} videos found.{cache_info}".ljust(60))
@@ -962,7 +993,7 @@ def main():
 
         print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
         try:
-            total_sec, total_count, tree, durations, hits = _run_scan(
+            total_sec, total_count, tree, durations, sizes, hits = _run_scan(
                 folder, on_progress, args.sort, not args.no_cache)
         except KeyboardInterrupt:
             print(f"\n\n  {Y}Scan cancelled.{RST}\n")
@@ -971,7 +1002,7 @@ def main():
         probed     = total_count - hits
         cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
         print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.{cache_info}".ljust(60))
-        print_results(folder, total_sec, total_count, tree, durations, args.top, show_files=args.files)
+        print_results(folder, total_sec, total_count, tree, durations, sizes, args.top, show_files=args.files)
 
         # dupe warning
         groups = find_duplicates(durations)
@@ -1043,7 +1074,7 @@ def main():
 
         print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
         try:
-            total_sec, total_count, tree, durations, hits = _run_scan(
+            total_sec, total_count, tree, durations, sizes, hits = _run_scan(
                 folder, on_progress, current_sort, not args.no_cache)
         except KeyboardInterrupt:
             print(f"\n\n  {Y}Scan cancelled.{RST}\n")
@@ -1052,7 +1083,7 @@ def main():
         probed     = total_count - hits
         cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
         print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.{cache_info}".ljust(60))
-        print_results(folder, total_sec, total_count, tree, durations, args.top, show_files=getattr(args, "files", False))
+        print_results(folder, total_sec, total_count, tree, durations, sizes, args.top, show_files=getattr(args, "files", False))
 
         # dupe warning
         groups = find_duplicates(durations)
@@ -1064,6 +1095,7 @@ def main():
             "total_count": total_count,
             "tree":        tree,
             "durations":   durations,
+            "sizes":       sizes,
         }
 
         print_post_scan_menu(current_sort)
@@ -1161,14 +1193,15 @@ def main():
                     continue
 
                 current_sort = f"{field}:{direc}"
-                _, _, new_tree, new_durations, _ = _run_scan(
+                _, _, new_tree, new_durations, new_sizes, _ = _run_scan(
                     last_scan["folder"], None, current_sort, True)
                 last_scan["tree"]      = new_tree
                 last_scan["durations"] = new_durations
+                last_scan["sizes"]     = new_sizes
                 show_f = getattr(args, "files", False)
                 print_results(last_scan["folder"], last_scan["total_sec"],
                               last_scan["total_count"], new_tree,
-                              new_durations, args.top, show_files=show_f)
+                              new_durations, last_scan["sizes"], args.top, show_files=show_f)
                 print_post_scan_menu(current_sort)
 
             elif choice.split()[0] == 'export' or choice == 'export':
