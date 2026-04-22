@@ -11,11 +11,15 @@ from datetime import datetime
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+__version__ = "1.0.0"
+
 # Enable ANSI colors on Windows
 if os.name == 'nt':
     import ctypes
     kernel32 = ctypes.windll.kernel32
-    kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+    _handle = kernel32.GetStdHandle(-11)
+    if _handle and _handle != -1:
+        kernel32.SetConsoleMode(_handle, 7)
 
 R   = "\033[91m"
 G   = "\033[92m"
@@ -90,7 +94,7 @@ def save_cache(root, durations):
 # ── HELPERS ───────────────────────────────────────────────────────────
 
 def clear():
-    os.system('cls' if os.name == 'nt' else 'clear')
+    print('\033[2J\033[H', end='', flush=True)
 
 def check_ffprobe():
     try:
@@ -908,7 +912,7 @@ def _parse_args():
                        help="bypass the duration cache and re-probe every file")
         p.add_argument("--no-color",     action="store_true",
                        help="strip ANSI colours from terminal output")
-        p.add_argument("--version", "-v", action="version", version="aevum")
+        p.add_argument("--version", "-v", action="version", version=f"aevum {__version__}")
 
     args = p.parse_args(argv)
     args.command = command
