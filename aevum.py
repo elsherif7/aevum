@@ -348,7 +348,12 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
 
         collector = threading.Thread(target=collect_and_submit, daemon=True)
         collector.start()
-        collector.join()
+        # Join with periodic timeout so a hung network scandir doesn't block forever.
+        # stop_event lets an external Ctrl+C propagate cleanly.
+        while collector.is_alive():
+            collector.join(timeout=1.0)
+            if stop_event and stop_event.is_set():
+                break
 
         try:
             for future in as_completed(futures):
@@ -1115,7 +1120,7 @@ def main():
         print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.{cache_info}".ljust(60))
         print_results(folder, total_sec, total_count, tree, durations, sizes, args.top, show_files=getattr(args, "files", False))
 
-        # dupe warning
+        # dupe warning — result cached in last_scan so menu option 6 doesn't re-run it
         groups = find_duplicates(durations)
         print_dupe_warning(groups)
 
@@ -1126,6 +1131,7 @@ def main():
             "tree":        tree,
             "durations":   durations,
             "sizes":       sizes,
+            "dupe_groups": groups,
         }
 
         print_post_scan_menu(current_sort)
@@ -1276,12 +1282,12 @@ def main():
                     print(f"  {R}No scan yet.{RST} Run a scan first.\n")
                     print_post_scan_menu(current_sort)
                     continue
-                groups = find_duplicates(last_scan["durations"])
-                print_duplicates(groups, last_scan["durations"])
+                # reuse groups computed at scan time — no need to re-run find_duplicates
+                print_duplicates(last_scan["dupe_groups"], last_scan["durations"])
                 print_post_scan_menu(current_sort)
 
             else:
-                sug = _fuzzy_suggest(first_word, _all_cmds)
+                sug = _fuzzy_suggest(first_word, _all_cmds) if first_word else None
                 if sug:
                     print(f"  {R}Unknown command.{RST}  {DIM}Did you mean{RST}  {W}{sug}{RST}{DIM}?{RST}")
                 else:
