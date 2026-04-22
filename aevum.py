@@ -276,7 +276,11 @@ def format_duration(seconds):
     }
 
 def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache=None):
-    """Pipelined scan: files are submitted to probe pool as they are discovered."""
+    """
+    Parallel scan: collector thread discovers files and submits them to the thread
+    pool. Results are drained after collection completes (not true streaming), so
+    memory usage is O(n_files) in futures. Sufficient for libraries up to ~100k files.
+    """
     root      = Path(root)
     durations = {}
     sizes     = {}
@@ -539,7 +543,21 @@ def export_results(folder, total_sec, total_count, tree, durations, fmt, out_pat
     folder   = Path(folder)
     stamp    = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"aevum_{folder.name}_{stamp}.{fmt}"
-    dest     = Path(out_path) if out_path else folder.parent / filename
+    if out_path:
+        dest = Path(out_path)
+    else:
+        # Prefer writing next to the scanned folder; fall back to Desktop
+        # if the parent directory is read-only (e.g. external drive, network share).
+        preferred = folder.parent / filename
+        try:
+            preferred.parent.stat()  # quick existence check
+            preferred.touch()        # will raise if not writable
+            preferred.unlink()
+            dest = preferred
+        except OSError:
+            desktop = Path.home() / "Desktop"
+            desktop.mkdir(parents=True, exist_ok=True)
+            dest = desktop / filename
 
     if fmt == "json":
         root_name = folder.name
@@ -623,16 +641,16 @@ def export_results(folder, total_sec, total_count, tree, durations, fmt, out_pat
 
 # ── DUPLICATE DETECTION ───────────────────────────────────────────────
 
-def _file_fingerprint(path, chunk=65536):
+def _file_fingerprint(path, size, chunk=65536):
     """
     Fast partial hash: read first + last 64KB of the file.
+    size is passed in from the caller (already known) to avoid a second stat().
     Files with different sizes are never equal, so we only hash
     candidates that share a size — making this very rarely called
     on unique files.
     """
     h = hashlib.sha1()
     try:
-        size = path.stat().st_size
         with open(path, 'rb') as f:
             h.update(f.read(chunk))
             if size > chunk * 2:
@@ -642,19 +660,25 @@ def _file_fingerprint(path, chunk=65536):
         return None
     return h.hexdigest()
 
-def find_duplicates(durations):
+def find_duplicates(durations, sizes=None):
     """
     Find duplicate video files by size + partial hash.
+    sizes: optional dict mapping Path -> bytes (from scan); avoids extra stat() calls.
     Returns a list of groups, where each group is a list of Paths
     that are identical. Only groups with 2+ files are returned.
     """
-    # Step 1: group by size
+    sizes = sizes or {}
+
+    # Step 1: group by size — use known sizes dict, fall back to stat() only if missing
     by_size = {}
     for path in durations:
-        try:
-            sz = path.stat().st_size
-        except OSError:
-            continue
+        if path in sizes:
+            sz = sizes[path]
+        else:
+            try:
+                sz = path.stat().st_size
+            except OSError:
+                continue
         by_size.setdefault(sz, []).append(path)
 
     # Step 2: for size groups with 2+ files, hash and group
@@ -664,7 +688,7 @@ def find_duplicates(durations):
             continue
         by_hash = {}
         for path in paths:
-            fp = _file_fingerprint(path)
+            fp = _file_fingerprint(path, sz)  # pass known size — no extra stat()
             if fp:
                 by_hash.setdefault(fp, []).append(path)
         for fp, members in by_hash.items():
@@ -861,6 +885,17 @@ def _fuzzy_suggest(word, candidates):
 
 # ── MAIN ──────────────────────────────────────────────────────────────
 
+def _make_progress_bar():
+    """Return a progress callback that renders a progress bar to stdout."""
+    def on_progress(done, total):
+        pct    = int((done / total) * 100)
+        filled = int(24 * done / total)
+        bar    = "█" * filled + "░" * (24 - filled)
+        print(f"\r  {C}Scanning...{RST}  {bar}  {Y}{done}/{total}{RST}  {DIM}({pct}%){RST}",
+              end='', flush=True)
+    return on_progress
+
+
 def _parse_args():
     # Detect compare / dupes subcommands manually before argparse
     # so the main 'folder' positional doesn't conflict with subcommand names.
@@ -966,12 +1001,7 @@ def main():
         if not check_ffprobe():
             print("Error: ffprobe not found on PATH.", file=sys.stderr)
             sys.exit(1)
-        def on_prog(done, total):
-            pct = int((done / total) * 100)
-            filled = int(24 * done / total)
-            bar = "█" * filled + "░" * (24 - filled)
-            print(f"\r  {C}Scanning...{RST}  {bar}  {Y}{done}/{total}{RST}  {DIM}({pct}%){RST}",
-                  end='', flush=True)
+        on_prog = _make_progress_bar()
         data_a, data_b = run_compare(folder_a, folder_b, on_prog, args.sort, not args.no_cache)
         print_comparison(folder_a, folder_b, data_a, data_b)
         sys.exit(0)
@@ -985,12 +1015,7 @@ def main():
         if not check_ffprobe():
             print("Error: ffprobe not found on PATH.", file=sys.stderr)
             sys.exit(1)
-        def on_prog(done, total):
-            pct = int((done / total) * 100)
-            filled = int(24 * done / total)
-            bar = "█" * filled + "░" * (24 - filled)
-            print(f"\r  {C}Scanning...{RST}  {bar}  {Y}{done}/{total}{RST}  {DIM}({pct}%){RST}",
-                  end='', flush=True)
+        on_prog = _make_progress_bar()
         print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
         _, _, _, durations, _, hits = _run_scan(folder, on_prog, "name", not args.no_cache)
         probed = len(durations) - hits
@@ -1018,14 +1043,7 @@ def main():
             print(f"Error: not a directory: {folder}", file=sys.stderr)
             sys.exit(1)
 
-        def on_progress(done, total):
-            pct = int((done / total) * 100)
-            bar_len = 24
-            filled  = int(bar_len * done / total)
-            bar     = "█" * filled + "░" * (bar_len - filled)
-            print(f"\r  {C}Scanning...{RST}  {bar}  {Y}{done}/{total}{RST}  {DIM}({pct}%){RST}",
-                  end='', flush=True)
-
+        on_progress = _make_progress_bar()
         print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
         try:
             total_sec, total_count, tree, durations, sizes, hits = _run_scan(
@@ -1040,7 +1058,7 @@ def main():
         print_results(folder, total_sec, total_count, tree, durations, sizes, args.top, show_files=args.files)
 
         # dupe warning
-        groups = find_duplicates(durations)
+        groups = find_duplicates(durations, sizes)
         print_dupe_warning(groups)
 
         if args.export:
@@ -1065,13 +1083,7 @@ def main():
         input("  Press Enter to exit...")
         sys.exit(1)
 
-    def on_progress(done, total):
-        pct    = int((done / total) * 100)
-        bar_len = 24
-        filled  = int(bar_len * done / total)
-        bar     = "█" * filled + "░" * (bar_len - filled)
-        print(f"\r  {C}Scanning...{RST}  {bar}  {Y}{done}/{total}{RST}  {DIM}({pct}%){RST}",
-              end='', flush=True)
+    on_progress = _make_progress_bar()
 
     last_scan    = {}
     current_sort = args.sort
@@ -1087,6 +1099,9 @@ def main():
             continue
 
         raw = raw.strip().strip("'\"")
+
+        if not raw:
+            continue
 
         if raw.lower() in ('exit', 'quit', 'q'):
             print(f"\n  {G}Goodbye!{RST}\n")
@@ -1121,7 +1136,7 @@ def main():
         print_results(folder, total_sec, total_count, tree, durations, sizes, args.top, show_files=getattr(args, "files", False))
 
         # dupe warning — result cached in last_scan so menu option 6 doesn't re-run it
-        groups = find_duplicates(durations)
+        groups = find_duplicates(durations, sizes)
         print_dupe_warning(groups)
 
         last_scan = {
