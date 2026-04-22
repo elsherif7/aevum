@@ -730,6 +730,13 @@ def print_results(folder, total_sec, total_count, tree, durations=None, top_n=10
     print(f"  {C}{LINE}{RST}")
     print()
     print_tree(Path(folder).name, total_sec, total_count, subfolders, direct, show_files=show_files)
+    # Always show loose files sitting directly in the root (not inside any subfolder)
+    if direct:
+        print(f"  {DIM}Loose files in root:{RST}")
+        for path, sec in direct:
+            fd = format_duration(sec)
+            print(f"      {DIM}|{RST}  {W}{fd['hours_fmt']}{RST}  {DIM}{path.name}{RST}")
+        print()
     print(f"  {C}{LINE}{RST}")
     print(f"  {C}  Grand Total{RST}")
     print(f"  {C}{LINE}{RST}")
@@ -749,11 +756,38 @@ def print_results(folder, total_sec, total_count, tree, durations=None, top_n=10
     if durations and top_n > 0:
         print_top_files(durations, top_n)
 
+def _sort_label(current_sort):
+    """Convert 'name:asc' -> 'name ascending' etc."""
+    _dir_words = {'asc': 'ascending', 'desc': 'descending'}
+    if ':' in current_sort:
+        field, d = current_sort.split(':', 1)
+        return f"{field} {_dir_words.get(d, d)}"
+    return current_sort
+
 def print_post_scan_menu(current_sort="name:asc"):
-    sort_label = f"{DIM}(sorted by {current_sort}){RST}"
+    sort_label = f"{DIM}(sorted by {_sort_label(current_sort)}){RST}"
     print(f"  {DIM}What do you want to do?{RST}  {sort_label}")
-    print(f"  {G}scan{RST}   {Y}clear{RST}   {M}export{RST}   {B}sort{RST}   {R}quit{RST}")
+    print(f"  {G}1. scan{RST}   {B}2. sort{RST}   {M}3. export{RST}   {Y}4. clear{RST}   {R}5. quit{RST}")
     print()
+
+
+def _fuzzy_suggest(word, candidates):
+    """Return the closest candidate if edit distance <= 2, else None."""
+    def _dist(a, b):
+        if a == b: return 0
+        la, lb = len(a), len(b)
+        if abs(la - lb) > 3: return 99
+        prev = list(range(lb + 1))
+        for i, ca in enumerate(a):
+            curr = [i + 1]
+            for j, cb in enumerate(b):
+                curr.append(min(prev[j] + (0 if ca == cb else 1),
+                                curr[j] + 1, prev[j + 1] + 1))
+            prev = curr
+        return prev[lb]
+    scored = [(c, _dist(word, c)) for c in candidates]
+    best_c, best_d = min(scored, key=lambda x: x[1])
+    return best_c if best_d <= 2 else None
 
 # ── MAIN ──────────────────────────────────────────────────────────────
 
@@ -1036,6 +1070,14 @@ def main():
                 print(f"\n\n  {G}Goodbye!{RST}\n")
                 sys.exit(0)
 
+            # number aliases
+            _menu_map = {'1': 'scan', '2': 'sort', '3': 'export', '4': 'clear', '5': 'quit'}
+            if choice in _menu_map:
+                choice = _menu_map[choice]
+
+            _all_cmds = ['scan', 'clear', 'export', 'sort', 'quit', 'exit', 'q']
+            first_word = choice.split()[0] if choice else ''
+
             if choice in ('quit', 'exit', 'q'):
                 print(f"\n  {G}Goodbye!{RST}\n")
                 sys.exit(0)
@@ -1052,44 +1094,69 @@ def main():
                 parts = choice.split()
                 field = parts[1] if len(parts) >= 2 else None
                 direc = parts[2] if len(parts) >= 3 else None
+                _field_opts = ('name', 'duration', 'count')
+                _field_map  = {'1': 'name', '2': 'duration', '3': 'count'}
 
-                # Step 1: pick field
-                if field is None:
-                    print(f"  {DIM}Sort by?{RST}  {W}name{RST}   {W}duration{RST}   {W}count{RST}")
+                # Step 1: pick field — loop until valid or back
+                while field not in _field_opts:
+                    sug  = _fuzzy_suggest(field, list(_field_opts) + list(_field_map.keys())) if field else None
+                    hint = f"  {DIM}Did you mean {W}{_field_map.get(sug, sug)}{RST}{DIM}?{RST}" if sug else ""
+                    if field is not None:
+                        print(f"  {R}Unknown.{RST}{hint}")
+                    print(f"  {DIM}Sort by?{RST}  {G}1. name{RST}   {B}2. duration{RST}   {M}3. count{RST}   {DIM}0. back{RST}")
                     try:
                         field = input(f"  {C}aevum{RST}> ").strip().lower()
                     except (KeyboardInterrupt, EOFError):
                         print()
-                        continue
-                if field not in ('name', 'duration', 'count'):
-                    print(f"  {R}Unknown field.{RST} Choose {W}name{RST}, {W}duration{RST}, or {W}count{RST}.")
+                        field = 'back'
+                    if field in _field_map:
+                        field = _field_map[field]
+                    if field in ('back', '0', ''):
+                        print_post_scan_menu(current_sort)
+                        field = None
+                        break
+                if field is None:
                     continue
 
-                # Step 2: pick direction
+                # Step 2: pick direction — loop until valid or back
+                _dir_aliases = {
+                    'asc': 'asc', 'ascending': 'asc', 'a': 'asc', '1': 'asc',
+                    'desc': 'desc', 'descending': 'desc', 'd': 'desc', '2': 'desc',
+                }
                 if field == 'name':
-                    dir_opts = ('asc', 'desc')
-                    dir_hint = f"{W}asc{RST} (a→z)   {W}desc{RST} (z→a)"
-                    dir_def  = 'asc'
+                    dir_hint_str = f"{G}1. ascending{RST} (a→z)   {B}2. descending{RST} (z→a)"
+                    dir_def = 'asc'
                 else:
-                    dir_opts = ('asc', 'desc')
-                    dir_hint = f"{W}desc{RST} (high→low)   {W}asc{RST} (low→high)"
-                    dir_def  = 'desc'
+                    dir_hint_str = f"{G}1. descending{RST} (high→low)   {B}2. ascending{RST} (low→high)"
+                    dir_def = 'desc'
 
-                if direc is None:
-                    print(f"  {DIM}Direction?{RST}  {dir_hint}  {DIM}[default: {dir_def}]{RST}")
-                    try:
-                        direc = input(f"  {C}aevum{RST}> ").strip().lower()
-                    except (KeyboardInterrupt, EOFError):
-                        print()
-                        continue
+                while True:
+                    if direc is None:
+                        print(f"  {DIM}Direction?{RST}  {dir_hint_str}   {DIM}0. back{RST}  {DIM}[Enter = default]{RST}")
+                        try:
+                            direc = input(f"  {C}aevum{RST}> ").strip().lower()
+                        except (KeyboardInterrupt, EOFError):
+                            print()
+                            direc = 'back'
+                    if direc in ('back', '0'):
+                        print_post_scan_menu(current_sort)
+                        direc = None
+                        break
                     if direc == '':
                         direc = dir_def
-                if direc not in dir_opts:
-                    print(f"  {R}Unknown direction.{RST} Choose {W}asc{RST} or {W}desc{RST}.")
+                    resolved = _dir_aliases.get(direc)
+                    if resolved:
+                        direc = resolved
+                        break
+                    sug  = _fuzzy_suggest(direc, list(_dir_aliases.keys()))
+                    hint = f"  {DIM}Did you mean {W}{sug}{RST}{DIM}?{RST}" if sug else ""
+                    print(f"  {R}Unknown direction.{RST}{hint}")
+                    direc = None  # re-prompt
+
+                if direc is None:
                     continue
 
                 current_sort = f"{field}:{direc}"
-                # Re-build tree and re-print immediately
                 _, _, new_tree, new_durations, _ = _run_scan(
                     last_scan["folder"], None, current_sort, True)
                 last_scan["tree"]      = new_tree
@@ -1100,18 +1167,32 @@ def main():
                               new_durations, args.top, show_files=show_f)
                 print_post_scan_menu(current_sort)
 
-            elif choice in ('export', 'export txt', 'export csv', 'export json'):
-                parts = choice.split()
-                fmt   = parts[1] if len(parts) == 2 else None
-                if fmt is None:
-                    print(f"  {DIM}Format?{RST}  {W}txt{RST}   {W}csv{RST}   {W}json{RST}")
+            elif choice.split()[0] == 'export' or choice == 'export':
+                parts   = choice.split()
+                fmt     = parts[1] if len(parts) >= 2 else None
+                _fmt_opts = ('txt', 'csv', 'json')
+                _fmt_map  = {'1': 'txt', '2': 'csv', '3': 'json'}
+
+                # Loop until valid format or back
+                while fmt not in _fmt_opts:
+                    sug  = _fuzzy_suggest(fmt, list(_fmt_opts) + list(_fmt_map.keys())) if fmt else None
+                    hint = f"  {DIM}Did you mean {W}{_fmt_map.get(sug, sug)}{RST}{DIM}?{RST}" if sug else ""
+                    if fmt is not None:
+                        print(f"  {R}Unknown format.{RST}{hint}")
+                    print(f"  {DIM}Export as?{RST}  {G}1. txt{RST}   {B}2. csv{RST}   {M}3. json{RST}   {DIM}0. back{RST}")
                     try:
                         fmt = input(f"  {C}aevum{RST}> ").strip().lower()
                     except (KeyboardInterrupt, EOFError):
                         print()
-                        continue
-                if fmt not in ('txt', 'csv', 'json'):
-                    print(f"  {R}Unknown format.{RST} Choose {W}txt{RST}, {W}csv{RST}, or {W}json{RST}.")
+                        fmt = 'back'
+                    if fmt in _fmt_map:
+                        fmt = _fmt_map[fmt]
+                    if fmt in ('back', '0', ''):
+                        print_post_scan_menu(current_sort)
+                        fmt = None
+                        break
+
+                if fmt is None:
                     continue
                 try:
                     dest = export_results(
@@ -1124,7 +1205,12 @@ def main():
                     print(f"\n  {R}Export failed:{RST} {e}\n")
 
             else:
-                print(f"  {R}Invalid command.{RST} Type {G}scan{RST}, {Y}clear{RST}, {M}export{RST}, {B}sort{RST}, or {R}quit{RST}.")
+                sug = _fuzzy_suggest(first_word, _all_cmds)
+                if sug:
+                    print(f"  {R}Unknown command.{RST}  {DIM}Did you mean{RST}  {W}{sug}{RST}{DIM}?{RST}")
+                else:
+                    print(f"  {R}Invalid command.{RST} Type  {G}1. scan{RST}   {B}2. sort{RST}   {M}3. export{RST}   {Y}4. clear{RST}   {R}5. quit{RST}")
+                print_post_scan_menu(current_sort)
 
 
 if __name__ == "__main__":
