@@ -414,6 +414,10 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None):
             fbytes       = folder_bytes.get(child, 0)
             direct_files = folder_direct.get(child, [])
             direct_count = len(direct_files)
+            if count == 0:
+                # show the folder but do not recurse — no children displayed
+                subfolders.append((child.name, 0.0, 0, 0, 0, [], []))
+                continue
             child_subs, child_direct = build(child)
             subfolders.append((child.name, secs, count, fbytes, direct_count, child_subs, child_direct))
 
@@ -677,7 +681,9 @@ def print_dupe_warning(groups):
     if not groups:
         return
     total = sum(len(g) - 1 for g in groups)
-    print(f"  {Y}⚠  {len(groups)} duplicate group(s) found ({total} redundant file(s)){RST}  "
+    grp_word  = "group" if len(groups) == 1 else "groups"
+    file_word = "file"  if total == 1       else "files"
+    print(f"  {Y}⚠  {len(groups)} duplicate {grp_word} found ({total} redundant {file_word}){RST}  "
           f"{DIM}— run 'aevum dupes <folder>' for details{RST}\n")
 
 # ── FOLDER COMPARISON ─────────────────────────────────────────────────
@@ -802,7 +808,7 @@ def _sort_label(current_sort):
 def print_post_scan_menu(current_sort="name:asc"):
     sort_label = f"{DIM}(sorted by {_sort_label(current_sort)}){RST}"
     print(f"  {DIM}What do you want to do?{RST}  {sort_label}")
-    print(f"  {G}1. scan{RST}   {B}2. sort{RST}   {M}3. export{RST}   {Y}4. clear{RST}   {R}5. quit{RST}")
+    print(f"  {G}1. scan{RST}   {B}2. sort{RST}   {M}3. export{RST}   {Y}4. clear{RST}   {R}5. quit{RST}   {C}6. duplicates{RST}")
     print()
 
 
@@ -1107,11 +1113,11 @@ def main():
                 sys.exit(0)
 
             # number aliases
-            _menu_map = {'1': 'scan', '2': 'sort', '3': 'export', '4': 'clear', '5': 'quit'}
+            _menu_map = {'1': 'scan', '2': 'sort', '3': 'export', '4': 'clear', '5': 'quit', '6': 'duplicates'}
             if choice in _menu_map:
                 choice = _menu_map[choice]
 
-            _all_cmds = ['scan', 'clear', 'export', 'sort', 'quit', 'exit', 'q']
+            _all_cmds = ['scan', 'clear', 'export', 'sort', 'quit', 'exit', 'q', 'duplicates', 'dupes']
             first_word = choice.split()[0] if choice else ''
 
             if choice in ('quit', 'exit', 'q'):
@@ -1241,12 +1247,21 @@ def main():
                 except Exception as e:
                     print(f"\n  {R}Export failed:{RST} {e}\n")
 
+            elif choice in ('duplicates', 'dupes'):
+                if not last_scan:
+                    print(f"  {R}No scan yet.{RST} Run a scan first.\n")
+                    print_post_scan_menu(current_sort)
+                    continue
+                groups = find_duplicates(last_scan["durations"])
+                print_duplicates(groups, last_scan["durations"])
+                print_post_scan_menu(current_sort)
+
             else:
                 sug = _fuzzy_suggest(first_word, _all_cmds)
                 if sug:
                     print(f"  {R}Unknown command.{RST}  {DIM}Did you mean{RST}  {W}{sug}{RST}{DIM}?{RST}")
                 else:
-                    print(f"  {R}Invalid command.{RST} Type  {G}1. scan{RST}   {B}2. sort{RST}   {M}3. export{RST}   {Y}4. clear{RST}   {R}5. quit{RST}")
+                    print(f"  {R}Invalid command.{RST} Type  {G}1. scan{RST}   {B}2. sort{RST}   {M}3. export{RST}   {Y}4. clear{RST}   {R}5. quit{RST}   {C}6. duplicates{RST}")
                 print_post_scan_menu(current_sort)
 
 
