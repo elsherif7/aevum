@@ -342,12 +342,19 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
 
     return total_sec, total_count, (subfolders, direct), durations, hits
 
-def _build_tree(root, durations, sort_by="name"):
+def _build_tree(root, durations, sort_by="name:asc"):
     """
     O(n) tree builder — aggregate folder stats in a single pass over durations,
     then recursively assemble the tree structure from the pre-built dict.
-    sort_by: 'name' | 'duration' | 'count'
+    sort_by: 'name:asc' | 'name:desc' | 'duration:asc' | 'duration:desc' | 'count:asc' | 'count:desc'
+    Also accepts bare 'name'|'duration'|'count' (defaults to asc for name, desc for others).
     """
+    # Normalise sort_by to "field:dir"
+    if ':' not in sort_by:
+        defaults = {'name': 'asc', 'duration': 'desc', 'count': 'desc'}
+        sort_by = sort_by + ':' + defaults.get(sort_by, 'asc')
+    sort_field, sort_dir = sort_by.split(':', 1)
+    sort_rev = (sort_dir == 'desc')
     root = Path(root)
 
     folder_secs   = {}  # folder path -> total seconds (recursive)
@@ -374,12 +381,12 @@ def _build_tree(root, durations, sort_by="name"):
         except PermissionError:
             return subfolders, []
 
-        if sort_by == "duration":
-            children.sort(key=lambda p: folder_secs.get(p, 0.0), reverse=True)
-        elif sort_by == "count":
-            children.sort(key=lambda p: folder_count.get(p, 0), reverse=True)
+        if sort_field == "duration":
+            children.sort(key=lambda p: folder_secs.get(p, 0.0), reverse=sort_rev)
+        elif sort_field == "count":
+            children.sort(key=lambda p: folder_count.get(p, 0), reverse=sort_rev)
         else:
-            children.sort()
+            children.sort(reverse=sort_rev)
 
         for child in children:
             secs  = folder_secs.get(child, 0.0)
@@ -742,7 +749,7 @@ def print_results(folder, total_sec, total_count, tree, durations=None, top_n=10
     if durations and top_n > 0:
         print_top_files(durations, top_n)
 
-def print_post_scan_menu(current_sort="name"):
+def print_post_scan_menu(current_sort="name:asc"):
     sort_label = f"{DIM}(sorted by {current_sort}){RST}"
     print(f"  {DIM}What do you want to do?{RST}  {sort_label}")
     print(f"  {G}scan{RST}   {Y}clear{RST}   {M}export{RST}   {B}sort{RST}   {R}quit{RST}")
@@ -797,8 +804,9 @@ def _parse_args():
         p.add_argument("--top",    "-t", type=int, default=10,
                        metavar="N",
                        help="show top N longest files (default: 10, set 0 to hide)")
-        p.add_argument("--sort",   "-s", choices=["name", "duration", "count"], default="name",
-                       help="sort folders by: name (default) | duration | count")
+        p.add_argument("--sort",   "-s", default="name:asc",
+                       metavar="FIELD[:DIR]",
+                       help="sort: name[:asc|desc]  duration[:asc|desc]  count[:asc|desc]  (default: name:asc)")
         p.add_argument("--files",  "-f", action="store_true",
                        help="show individual files under each folder in the tree")
         p.add_argument("--no-cache",     action="store_true",
@@ -1040,21 +1048,56 @@ def main():
             elif choice == 'scan':
                 break
 
-            elif choice in ('sort', 'sort name', 'sort duration', 'sort count'):
+            elif choice.split()[0] == 'sort' or choice == 'sort':
                 parts = choice.split()
-                mode  = parts[1] if len(parts) == 2 else None
-                if mode is None:
+                field = parts[1] if len(parts) >= 2 else None
+                direc = parts[2] if len(parts) >= 3 else None
+
+                # Step 1: pick field
+                if field is None:
                     print(f"  {DIM}Sort by?{RST}  {W}name{RST}   {W}duration{RST}   {W}count{RST}")
                     try:
-                        mode = input(f"  {C}aevum{RST}> ").strip().lower()
+                        field = input(f"  {C}aevum{RST}> ").strip().lower()
                     except (KeyboardInterrupt, EOFError):
                         print()
                         continue
-                if mode not in ('name', 'duration', 'count'):
-                    print(f"  {R}Unknown sort.{RST} Choose {W}name{RST}, {W}duration{RST}, or {W}count{RST}.")
+                if field not in ('name', 'duration', 'count'):
+                    print(f"  {R}Unknown field.{RST} Choose {W}name{RST}, {W}duration{RST}, or {W}count{RST}.")
                     continue
-                current_sort = mode
-                print(f"\n  {G}Sort set to:{RST} {W}{current_sort}{RST}  {DIM}(applies on next scan){RST}\n")
+
+                # Step 2: pick direction
+                if field == 'name':
+                    dir_opts = ('asc', 'desc')
+                    dir_hint = f"{W}asc{RST} (a→z)   {W}desc{RST} (z→a)"
+                    dir_def  = 'asc'
+                else:
+                    dir_opts = ('asc', 'desc')
+                    dir_hint = f"{W}desc{RST} (high→low)   {W}asc{RST} (low→high)"
+                    dir_def  = 'desc'
+
+                if direc is None:
+                    print(f"  {DIM}Direction?{RST}  {dir_hint}  {DIM}[default: {dir_def}]{RST}")
+                    try:
+                        direc = input(f"  {C}aevum{RST}> ").strip().lower()
+                    except (KeyboardInterrupt, EOFError):
+                        print()
+                        continue
+                    if direc == '':
+                        direc = dir_def
+                if direc not in dir_opts:
+                    print(f"  {R}Unknown direction.{RST} Choose {W}asc{RST} or {W}desc{RST}.")
+                    continue
+
+                current_sort = f"{field}:{direc}"
+                # Re-build tree and re-print immediately
+                _, _, new_tree, new_durations, _ = _run_scan(
+                    last_scan["folder"], None, current_sort, True)
+                last_scan["tree"]      = new_tree
+                last_scan["durations"] = new_durations
+                show_f = getattr(args, "files", False)
+                print_results(last_scan["folder"], last_scan["total_sec"],
+                              last_scan["total_count"], new_tree,
+                              new_durations, args.top, show_files=show_f)
                 print_post_scan_menu(current_sort)
 
             elif choice in ('export', 'export txt', 'export csv', 'export json'):
