@@ -389,10 +389,12 @@ def _build_tree(root, durations, sort_by="name:asc"):
             children.sort(reverse=sort_rev)
 
         for child in children:
-            secs  = folder_secs.get(child, 0.0)
-            count = folder_count.get(child, 0)
+            secs         = folder_secs.get(child, 0.0)
+            count        = folder_count.get(child, 0)
+            direct_files = folder_direct.get(child, [])
+            direct_count = len(direct_files)
             child_subs, child_direct = build(child)
-            subfolders.append((child.name, secs, count, child_subs, child_direct))
+            subfolders.append((child.name, secs, count, direct_count, child_subs, child_direct))
 
         # direct files sitting immediately inside this node
         direct = sorted(folder_direct.get(node, []), key=lambda x: x[1], reverse=True)
@@ -403,7 +405,7 @@ def _build_tree(root, durations, sort_by="name:asc"):
 
 depth_colors = [R, G, B, M, C, W]
 
-def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number="", max_depth=50, show_files=False):
+def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number="", max_depth=50, show_files=False, direct_count=None):
     if depth > max_depth:
         return
     PAD    = "    "
@@ -417,20 +419,29 @@ def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number=""
         print(f"{indent}    {DIM}+--  (empty){RST}")
     else:
         print(f"{indent}{col}{label}{RST}")
-        print(f"{indent}    {DIM}+--{RST}  {W}{fmt['hours_fmt']}{RST}  {DIM}|{RST}  {Y}{count} videos{RST}")
+        print(f"{indent}    {DIM}+--{RST}  {W}{fmt['hours_fmt']}{RST}  {DIM}|{RST}  {Y}{count} {'video' if count == 1 else 'videos'}{RST}")
 
-    # show loose files sitting directly in this folder
-    if show_files and direct:
-        for path, sec in direct:
-            fd = format_duration(sec)
-            print(f"{indent}    {DIM}|  {fd['hours_fmt']}  {path.name}{RST}")
+    print()
+    # Show (no folder) virtual entry ONLY when there are also real subfolders
+    if direct and subfolders:
+        direct_sec   = sum(sec for _, sec in direct)
+        direct_count = len(direct)
+        dir_fmt      = format_duration(direct_sec)
+        child_col    = depth_colors[(depth + 1) % len(depth_colors)]
+        virt_num     = f"{number}.0" if number else "0"
+        print(f"{indent}    {child_col}{virt_num}.  (no folder){RST}")
+        print(f"{indent}        {DIM}+--{RST}  {W}{dir_fmt['hours_fmt']}{RST}  {DIM}|{RST}  {Y}{direct_count} {'video' if direct_count == 1 else 'videos'}{RST}")
+        if show_files:
+            print()
+            for path, sec in direct:
+                fd = format_duration(sec)
+                print(f"{indent}        {DIM}|  {fd['hours_fmt']}  {path.name}{RST}")
         print()
 
-    if subfolders:
-        print()
-    for i, (sub_name, sub_sec, sub_count, sub_sub, sub_direct) in enumerate(subfolders, start=1):
+    for i, (sub_name, sub_sec, sub_count, sub_direct_count, sub_sub, sub_direct) in enumerate(subfolders, start=1):
         sub_number = f"{number}.{i}" if number else str(i)
-        print_tree(sub_name, sub_sec, sub_count, sub_sub, sub_direct, depth + 1, sub_number, show_files=show_files)
+        print_tree(sub_name, sub_sec, sub_count, sub_sub, sub_direct, depth + 1, sub_number,
+                   show_files=show_files, direct_count=sub_direct_count)
     if subfolders:
         print()
 
@@ -730,13 +741,6 @@ def print_results(folder, total_sec, total_count, tree, durations=None, top_n=10
     print(f"  {C}{LINE}{RST}")
     print()
     print_tree(Path(folder).name, total_sec, total_count, subfolders, direct, show_files=show_files)
-    # Always show loose files sitting directly in the root (not inside any subfolder)
-    if direct:
-        print(f"  {DIM}Loose files in root:{RST}")
-        for path, sec in direct:
-            fd = format_duration(sec)
-            print(f"      {DIM}|{RST}  {W}{fd['hours_fmt']}{RST}  {DIM}{path.name}{RST}")
-        print()
     print(f"  {C}{LINE}{RST}")
     print(f"  {C}  Grand Total{RST}")
     print(f"  {C}{LINE}{RST}")
