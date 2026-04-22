@@ -757,7 +757,7 @@ def print_comparison(folder_a, folder_b, data_a, data_b):
 
 LINE = "=" * 64
 
-def print_banner():
+def print_banner(post_scan=False, current_sort="name:asc"):
     print()
     print(f"  {C}{LINE}{RST}")
     print(f"  {C}  A E V U M{RST}  {DIM}|{RST}  Video Library Duration Scanner")
@@ -765,6 +765,11 @@ def print_banner():
     print()
     print(f"  {DIM}Type a folder path and press Enter to scan.{RST}")
     print()
+    if post_scan:
+        print_post_scan_menu(current_sort)
+    else:
+        print(f"  {G}1. scan{RST}   {M}2. clear{RST}   {R}3. quit{RST}")
+        print()
 
 def print_results(folder, total_sec, total_count, tree, durations=None, sizes=None, top_n=10, show_files=False):
     fmt = format_duration(total_sec)
