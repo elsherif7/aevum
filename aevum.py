@@ -27,6 +27,8 @@ W   = "\033[97m"
 DIM = "\033[2m"
 RST = "\033[0m"
 
+LINE = "=" * 64
+
 video_extensions = (
     '.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv',
     '.wmv', '.m4v', '.mpg', '.mpeg', '.3gp', '.ts',
@@ -207,6 +209,8 @@ def _read_mkv_duration(path):
                     elif fid == 0x4489:
                         raw = data[j:j+fsize]
                         duration = struct.unpack('>f', raw)[0] if fsize == 4 else struct.unpack('>d', raw)[0]
+                    if fsize == 0:
+                        break
                     j += fsize
                 if duration is not None:
                     return duration * timescale_ns / 1_000_000_000
@@ -754,8 +758,6 @@ def print_comparison(folder_a, folder_b, data_a, data_b):
         for s in in_both:
             print(f"    {DIM}→{RST}  {s}")
         print()
-
-LINE = "=" * 64
 
 def print_banner(post_scan=False, current_sort="name:asc"):
     print()
