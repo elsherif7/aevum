@@ -34,9 +34,32 @@ RST = "\033[0m"
 LINE = "=" * 64
 
 video_extensions = (
+    # Common video
     '.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv',
     '.wmv', '.m4v', '.mpg', '.mpeg', '.3gp', '.ts',
-    '.vob', '.ogv', '.divx', '.rmvb', '.asf', '.m2ts'
+    '.vob', '.ogv', '.divx', '.rmvb', '.asf', '.m2ts',
+    # Less common video
+    '.mts', '.m2v', '.f4v', '.f4p', '.nsv', '.roq',
+    '.yuv', '.mxf', '.drc', '.gifv', '.mng', '.qt',
+    '.rm', '.amv', '.svi', '.3g2', '.mpe', '.mpv',
+    '.m1v', '.m2p', '.m4p', '.mp2', '.mpeg1', '.mpeg2',
+    '.mpeg4', '.h264', '.h265', '.hevc', '.avchd',
+    '.ogm', '.ogx', '.dv', '.dvr', '.dvr-ms', '.rec',
+    '.wtv', '.bdmv', '.iso', '.evo', '.ifo', '.mod',
+    '.tod', '.trp', '.tp', '.pva', '.nuv', '.fli',
+    '.flc', '.flic', '.smk', '.bik', '.bik2', '.webp',
+    # Audio
+    '.mp3', '.aac', '.flac', '.wav', '.ogg', '.wma',
+    '.m4a', '.opus', '.aiff', '.aif', '.aifc', '.ape',
+    '.wv', '.tta', '.mka', '.mpa', '.mp2', '.ac3',
+    '.eac3', '.dts', '.dtshd', '.truehd', '.thd',
+    '.pcm', '.caf', '.ra', '.ram', '.oga', '.spx',
+    '.amr', '.awb', '.gsm', '.au', '.snd', '.vox',
+    '.8svx', '.iff', '.svx', '.f32', '.f64', '.s8',
+    '.s16', '.s24', '.s32', '.u8', '.u16', '.u24',
+    '.u32', '.w64', '.rf64', '.bwf', '.mid', '.midi',
+    '.kar', '.xmf', '.mxmf', '.rtttl', '.rtx', '.ota',
+    '.imy', '.mp1', '.m3u', '.pls', '.xspf',
 )
 
 # How many ffprobe processes to run at once.
@@ -236,9 +259,9 @@ def get_duration(path):
     """Try fast native parse first; fall back to ffprobe if needed."""
     ext = Path(path).suffix.lower()
     result = None
-    if ext in ('.mp4', '.mov', '.m4v', '.3gp'):
+    if ext in ('.mp4', '.mov', '.m4v', '.3gp', '.3g2', '.m4a', '.m4p', '.m4b', '.mp4v', '.f4v', '.f4a'):
         result = _read_mp4_duration(path)
-    elif ext in ('.mkv', '.webm'):
+    elif ext in ('.mkv', '.webm', '.mka', '.mk3d'):
         result = _read_mkv_duration(path)
     if result is not None and result > 0:
         return result
