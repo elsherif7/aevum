@@ -1103,6 +1103,11 @@ def main():
         if not raw:
             continue
 
+        # number aliases for the initial menu (1. scan  2. clear  3. quit)
+        _init_map = {'1': 'scan', '2': 'clear', '3': 'quit'}
+        if raw in _init_map:
+            raw = _init_map[raw]
+
         if raw.lower() in ('exit', 'quit', 'q'):
             print(f"\n  {G}Goodbye!{RST}\n")
             sys.exit(0)
@@ -1110,6 +1115,10 @@ def main():
         if raw.lower() in ('clear', 'c'):
             clear()
             print_banner()
+            continue
+
+        if raw.lower() == 'scan':
+            print(f"\n  {DIM}Enter a folder path to scan.{RST}\n")
             continue
 
         folder = Path(raw)
