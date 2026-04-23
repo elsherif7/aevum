@@ -126,6 +126,268 @@ def check_ffprobe():
     except FileNotFoundError:
         return False
 
+# ── YOUTUBE API SUPPORT ───────────────────────────────────────────────
+
+YT_API_KEY_FILE = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Aevum" / "yt_api_key.txt"
+YT_API_BASE     = "https://www.googleapis.com/youtube/v3"
+
+def _is_url(s):
+    return s.startswith(('http://', 'https://')) or s.startswith('www.')
+
+def _parse_iso8601_duration(d):
+    """Parse ISO 8601 duration string like PT1H2M3S → seconds (float)."""
+    import re
+    m = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?', d or '')
+    if not m:
+        return 0.0
+    h, mi, s = m.groups()
+    return float(h or 0) * 3600 + float(mi or 0) * 60 + float(s or 0)
+
+def _yt_api_request(endpoint, params, api_key):
+    """Make a single YouTube Data API v3 GET request. Returns parsed JSON or raises."""
+    import urllib.request, urllib.parse
+    params['key'] = api_key
+    url = f"{YT_API_BASE}/{endpoint}?{urllib.parse.urlencode(params)}"
+    with urllib.request.urlopen(url, timeout=15) as r:
+        return json.loads(r.read().decode('utf-8'))
+
+def load_api_key():
+    """Load the saved API key, or return None."""
+    try:
+        key = YT_API_KEY_FILE.read_text(encoding='utf-8').strip()
+        return key if key else None
+    except Exception:
+        return None
+
+def save_api_key(key):
+    try:
+        YT_API_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        YT_API_KEY_FILE.write_text(key.strip(), encoding='utf-8')
+    except Exception:
+        pass
+
+def prompt_api_key():
+    """Interactively ask the user for their YouTube API key and save it."""
+    print()
+    print(f"  {Y}YouTube API key required.{RST}")
+    print(f"  {DIM}Get a free key in ~2 minutes:{RST}")
+    print(f"  {C}1.{RST} Go to {W}https://console.cloud.google.com/{RST}")
+    print(f"  {C}2.{RST} Create a project → Enable {W}YouTube Data API v3{RST}")
+    print(f"  {C}3.{RST} Credentials → Create API Key → copy it here")
+    print()
+    try:
+        key = input(f"  {C}Paste API key{RST}> ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        return None
+    if not key:
+        return None
+    save_api_key(key)
+    print(f"  {G}Key saved to {YT_API_KEY_FILE}{RST}")
+    print()
+    return key
+
+def _parse_yt_url(url):
+    """
+    Parse a YouTube URL and return (kind, id) where kind is:
+    'video', 'playlist', 'channel_id', 'channel_handle'
+    """
+    from urllib.parse import urlparse, parse_qs
+    p  = urlparse(url)
+    qs = parse_qs(p.query)
+    path_parts = [x for x in p.path.split('/') if x]
+    netloc = p.netloc.replace('www.', '')
+
+    if netloc not in ('youtube.com', 'youtu.be', 'm.youtube.com'):
+        return None, None
+
+    # Playlist (takes priority over video if both present)
+    if 'list' in qs:
+        return 'playlist', qs['list'][0]
+
+    # youtu.be/<id>
+    if netloc == 'youtu.be' and path_parts:
+        return 'video', path_parts[0]
+
+    # watch?v=
+    if 'v' in qs:
+        return 'video', qs['v'][0]
+
+    # /shorts/<id>
+    if len(path_parts) == 2 and path_parts[0] == 'shorts':
+        return 'video', path_parts[1]
+
+    # /@handle  /c/name  /user/name  /channel/<id>
+    if path_parts:
+        if path_parts[0].startswith('@'):
+            return 'channel_handle', path_parts[0]
+        if path_parts[0] in ('c', 'user') and len(path_parts) >= 2:
+            return 'channel_handle', path_parts[1]
+        if path_parts[0] == 'channel' and len(path_parts) >= 2:
+            return 'channel_id', path_parts[1]
+
+    return None, None
+
+def _yt_get_channel_uploads_playlist(channel_id_or_handle, api_key):
+    """Resolve a channel handle/id to its uploads playlist id."""
+    # Try by handle (forHandle param) first, then by id
+    for param_key, param_val in [('forHandle', channel_id_or_handle), ('id', channel_id_or_handle)]:
+        try:
+            data = _yt_api_request('channels', {
+                'part': 'contentDetails,snippet',
+                param_key: param_val,
+            }, api_key)
+            items = data.get('items', [])
+            if items:
+                uploads = items[0]['contentDetails']['relatedPlaylists']['uploads']
+                title   = items[0]['snippet']['title']
+                return uploads, title
+        except Exception:
+            continue
+    return None, None
+
+def _yt_fetch_playlist_video_ids(playlist_id, api_key, on_progress=None):
+    """Page through a playlist and collect all video IDs. Returns list of ids."""
+    ids = []
+    page_token = None
+    while True:
+        params = {
+            'part':       'contentDetails',
+            'playlistId': playlist_id,
+            'maxResults': 50,
+        }
+        if page_token:
+            params['pageToken'] = page_token
+        try:
+            data = _yt_api_request('playlistItems', params, api_key)
+        except Exception as e:
+            raise RuntimeError(f"playlistItems API error: {e}")
+        for item in data.get('items', []):
+            vid = item.get('contentDetails', {}).get('videoId')
+            if vid:
+                ids.append(vid)
+        if on_progress:
+            on_progress(len(ids), 0)
+        page_token = data.get('nextPageToken')
+        if not page_token:
+            break
+    return ids
+
+def _yt_fetch_video_details(video_ids, api_key):
+    """
+    Batch-fetch title + duration for a list of video IDs.
+    Processes up to 50 per API call. Returns list of dicts.
+    """
+    entries = []
+    for i in range(0, len(video_ids), 50):
+        batch = video_ids[i:i+50]
+        try:
+            data = _yt_api_request('videos', {
+                'part': 'snippet,contentDetails',
+                'id':   ','.join(batch),
+            }, api_key)
+        except Exception as e:
+            raise RuntimeError(f"videos API error: {e}")
+        for item in data.get('items', []):
+            title    = item['snippet']['title']
+            channel  = item['snippet'].get('channelTitle', '')
+            duration = _parse_iso8601_duration(item['contentDetails']['duration'])
+            vid_url  = f"https://youtu.be/{item['id']}"
+            entries.append({'title': title, 'duration': duration, 'url': vid_url, 'channel': channel})
+    return entries
+
+def scan_url(url, on_progress=None):
+    """
+    Fetch video durations for a YouTube URL via the Data API v3.
+    Returns (total_sec, total_count, entries, label).
+    Prompts for API key on first use (saved to disk for reuse).
+    """
+    api_key = load_api_key()
+    if not api_key:
+        api_key = prompt_api_key()
+        if not api_key:
+            return 0, 0, [], 'cancelled'
+
+    kind, vid_id = _parse_yt_url(url)
+    if kind is None:
+        raise ValueError(f"Could not parse YouTube URL: {url}")
+
+    label   = url
+    entries = []
+
+    if kind == 'video':
+        entries = _yt_fetch_video_details([vid_id], api_key)
+        label   = entries[0]['title'] if entries else vid_id
+
+    elif kind == 'playlist':
+        # Get playlist title
+        try:
+            pl_data = _yt_api_request('playlists', {'part': 'snippet', 'id': vid_id}, api_key)
+            pl_items = pl_data.get('items', [])
+            label = pl_items[0]['snippet']['title'] if pl_items else vid_id
+        except Exception:
+            label = vid_id
+        ids = _yt_fetch_playlist_video_ids(vid_id, api_key, on_progress)
+        if on_progress:
+            print(f"\r  {C}Fetching video details...{RST}  {Y}{len(ids)} videos{RST}  {DIM}(this may take a moment){RST}".ljust(70), flush=True)
+        entries = _yt_fetch_video_details(ids, api_key)
+
+    elif kind in ('channel_id', 'channel_handle'):
+        uploads_pl, channel_title = _yt_get_channel_uploads_playlist(vid_id, api_key)
+        if not uploads_pl:
+            raise ValueError(f"Could not find channel: {vid_id}")
+        label = channel_title or vid_id
+        ids = _yt_fetch_playlist_video_ids(uploads_pl, api_key, on_progress)
+        if on_progress:
+            print(f"\r  {C}Fetching video details...{RST}  {Y}{len(ids)} videos{RST}  {DIM}(this may take a moment){RST}".ljust(70), flush=True)
+        entries = _yt_fetch_video_details(ids, api_key)
+
+    total_sec   = sum(e['duration'] for e in entries)
+    total_count = len(entries)
+    return total_sec, total_count, entries, label
+
+
+def print_url_results(url, label, total_sec, total_count, entries, top_n=10):
+    fmt = format_duration(total_sec)
+    print()
+    print(f"  {C}{LINE}{RST}")
+    print(f"  {W}  {label}{RST}")
+    print(f"  {DIM}  {url[:70]}{RST}")
+    print(f"  {C}{LINE}{RST}")
+    print()
+    print(f"  {W}  Total videos  {DIM}:{RST}  {W}{total_count}{RST}")
+    print(f"  {W}  Days          {DIM}:{RST}  {W}{fmt['days_fmt']}{RST}")
+    print(f"  {W}  Hours         {DIM}:{RST}  {W}{fmt['hours_fmt']}{RST}")
+    print(f"  {W}  Minutes       {DIM}:{RST}  {W}{fmt['minutes_fmt']}{RST}")
+    print()
+    print(f"  {C}{LINE}{RST}")
+    print(f"  {W}  Playback Speed{RST}")
+    print(f"  {C}{LINE}{RST}")
+    for speed in (1.0, 1.25, 1.5, 1.75, 2.0):
+        adjusted = format_duration(total_sec / speed)
+        slabel = f"{speed:.2f}".rstrip('0').rstrip('.') + "x"
+        print(f"  {W}  {slabel:<6}        {DIM}:{RST}  {W}{adjusted['hours_fmt']}{RST}  {DIM}({adjusted['days_fmt']}){RST}")
+    print()
+    if entries and top_n > 0:
+        ranked = sorted(entries, key=lambda e: e['duration'], reverse=True)[:top_n]
+        print(f"  {C}{LINE}{RST}")
+        print(f"  {W}  Top {top_n} Longest Videos{RST}")
+        print(f"  {C}{LINE}{RST}")
+        for i, e in enumerate(ranked, start=1):
+            dur_fmt = format_duration(e['duration'])
+            print(f"  {DIM}{i:>2}.{RST}  {W}{dur_fmt['hours_fmt']}{RST}  {DIM}|{RST}  {W}{e['title'][:60]}{RST}")
+        print()
+
+
+def _make_url_progress():
+    """Progress callback for playlist ID collection."""
+    def on_progress(done, _total):
+        print(f"\r  {C}Collecting video IDs...{RST}  {Y}{done} found{RST}",
+              end='', flush=True)
+    return on_progress
+
+# ── END YOUTUBE API SUPPORT ───────────────────────────────────────────
+
 def _read_mp4_duration(path):
     """Seek through MP4 atoms without reading full file into memory."""
     try:
@@ -835,7 +1097,7 @@ def print_banner(post_scan=False, current_sort="name:asc"):
     print(f"  {C}  A E V U M{RST}  {DIM}|{RST}  {W}Video Library Duration Scanner{RST}")
     print(f"  {C}{LINE}{RST}")
     print()
-    print(f"  {W}Type a folder path and press Enter to scan.{RST}")
+    print(f"  {W}Type a folder path or YouTube URL (video/playlist/channel) and press Enter.{RST}")
     print()
     if post_scan:
         print_post_scan_menu(current_sort)
@@ -1051,7 +1313,22 @@ def main():
 
     # ── HEADLESS MODE ────────────────────────────────────────────────
     if args.folder is not None:
-        folder = Path(args.folder.strip().strip("'\""))
+        raw_arg = args.folder.strip().strip("'\"")
+
+        # ── URL headless ─────────────────────────────────────────────
+        if _is_url(raw_arg):
+            url_prog = _make_url_progress()
+            try:
+                total_sec, total_count, entries, label = scan_url(raw_arg, url_prog)
+            except KeyboardInterrupt:
+                print(f"\n\n  {Y}Fetch cancelled.{RST}\n")
+                sys.exit(0)
+            print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.".ljust(60))
+            print_url_results(raw_arg, label, total_sec, total_count, entries, top_n=args.top)
+            sys.exit(0)
+
+        # ── Local folder headless ─────────────────────────────────────
+        folder = Path(raw_arg)
 
         if not check_ffprobe():
             print(f"Error: ffprobe not found on PATH. Download FFmpeg from https://ffmpeg.org/download.html",
@@ -1100,11 +1377,10 @@ def main():
     print_banner()
 
     if not check_ffprobe():
-        print(f"  {R}ffprobe not found on PATH!{RST}")
+        print(f"  {Y}ffprobe not found on PATH.{RST}  {DIM}Local folder scanning won't work.{RST}")
         print(f"  Download FFmpeg from {C}https://ffmpeg.org/download.html{RST}")
+        print(f"  {DIM}(You can still scan YouTube/playlist URLs if yt-dlp is installed.){RST}")
         print()
-        input("  Press Enter to exit...")
-        sys.exit(1)
 
     on_progress = _make_progress_bar()
 
@@ -1140,10 +1416,42 @@ def main():
             print_banner()
             continue
 
+        if raw.lower() in ('reset-key', 'apikey', 'api-key'):
+            prompt_api_key()
+            continue
+
         if raw.lower() == 'scan':
             print(f"\n  {DIM}Enter a folder path to scan.{RST}\n")
             continue
 
+        # ── URL mode ─────────────────────────────────────────────────
+        if _is_url(raw):
+            url_prog = _make_url_progress()
+            try:
+                total_sec, total_count, entries, label = scan_url(raw, url_prog)
+            except KeyboardInterrupt:
+                print(f"\n\n  {Y}Fetch cancelled.{RST}\n")
+                continue
+
+            print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.".ljust(60))
+            print_url_results(raw, label, total_sec, total_count, entries, top_n=args.top)
+
+            last_scan = {
+                "folder":      raw,
+                "total_sec":   total_sec,
+                "total_count": total_count,
+                "tree":        None,   # no tree for URL scans
+                "durations":   {e['title']: e['duration'] for e in entries},
+                "sizes":       {},
+                "dupe_groups": [],
+                "is_url":      True,
+                "entries":     entries,
+                "label":       label,
+            }
+            print_post_scan_menu(current_sort)
+            continue
+
+        # ── Local folder mode ────────────────────────────────────────
         folder = Path(raw)
 
         if not folder.exists():
@@ -1152,6 +1460,10 @@ def main():
 
         if not folder.is_dir():
             print(f"\n  {R}That is a file, not a folder.{RST}\n")
+            continue
+
+        if not check_ffprobe():
+            print(f"\n  {R}ffprobe not found on PATH.{RST} Download FFmpeg from https://ffmpeg.org/download.html\n")
             continue
 
         print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
@@ -1179,6 +1491,7 @@ def main():
             "durations":   durations,
             "sizes":       sizes,
             "dupe_groups": groups,
+            "is_url":      False,
         }
 
         print_post_scan_menu(current_sort)
@@ -1210,6 +1523,10 @@ def main():
                 break
 
             elif choice.split()[0] == 'sort' or choice == 'sort':
+                if last_scan.get("is_url"):
+                    print(f"  {Y}Sort is not available for URL scans.{RST}\n")
+                    print_post_scan_menu(current_sort)
+                    continue
                 parts = choice.split()
                 field = parts[1] if len(parts) >= 2 else None
                 direc = parts[2] if len(parts) >= 3 else None
@@ -1288,6 +1605,10 @@ def main():
                 print_post_scan_menu(current_sort)
 
             elif choice.split()[0] == 'export' or choice == 'export':
+                if last_scan.get("is_url"):
+                    print(f"  {Y}Export is not available for URL scans yet.{RST}\n")
+                    print_post_scan_menu(current_sort)
+                    continue
                 parts   = choice.split()
                 fmt     = parts[1] if len(parts) >= 2 else None
                 _fmt_opts = ('txt', 'csv', 'json')
@@ -1325,6 +1646,10 @@ def main():
                     print(f"\n  {R}Export failed:{RST} {e}\n")
 
             elif choice in ('duplicates', 'dupes'):
+                if last_scan.get("is_url"):
+                    print(f"  {Y}Duplicate detection is not available for URL scans.{RST}\n")
+                    print_post_scan_menu(current_sort)
+                    continue
                 if not last_scan:
                     print(f"  {R}No scan yet.{RST} Run a scan first.\n")
                     print_post_scan_menu(current_sort)
