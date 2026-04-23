@@ -459,7 +459,7 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None):
     root_bytes = folder_bytes.get(root, 0)
     return subfolders, direct, root_bytes
 
-depth_colors = [R, G, B, M, C, W]
+depth_colors = [R, G, B, M, C]
 
 def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number="", max_depth=50, show_files=False, direct_count=None, fbytes=0):
     if depth > max_depth:
@@ -475,8 +475,8 @@ def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number=""
         print(f"{indent}    {DIM}+--  (empty){RST}")
     else:
         print(f"{indent}{col}{label}{RST}")
-        size_label = f"  {DIM}|{RST}  {Y}{format_size(fbytes)}{RST}" if fbytes else ""
-        print(f"{indent}    {DIM}+--{RST}  {W}{fmt['hours_fmt']}{RST}  {DIM}|{RST}  {Y}{count} {'video' if count == 1 else 'videos'}{RST}{size_label}")
+        size_label = f"  {DIM}|{RST}  {W}{format_size(fbytes)}{RST}" if fbytes else ""
+        print(f"{indent}    {DIM}+--{RST}  {W}{fmt['hours_fmt']}{RST}  {DIM}|{RST}  {W}{count} {'video' if count == 1 else 'videos'}{RST}{size_label}")
 
     print()
     # Show (no folder) virtual entry ONLY when there are also real subfolders
@@ -491,8 +491,8 @@ def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number=""
         for p, _ in direct:
             try: dir_bytes += p.stat().st_size
             except OSError: pass
-        dir_size_label = f"  {DIM}|{RST}  {Y}{format_size(dir_bytes)}{RST}" if dir_bytes else ""
-        print(f"{indent}        {DIM}+--{RST}  {W}{dir_fmt['hours_fmt']}{RST}  {DIM}|{RST}  {Y}{direct_count} {'video' if direct_count == 1 else 'videos'}{RST}{dir_size_label}")
+        dir_size_label = f"  {DIM}|{RST}  {W}{format_size(dir_bytes)}{RST}" if dir_bytes else ""
+        print(f"{indent}        {DIM}+--{RST}  {W}{dir_fmt['hours_fmt']}{RST}  {DIM}|{RST}  {W}{direct_count} {'video' if direct_count == 1 else 'videos'}{RST}{dir_size_label}")
         if show_files:
             print()
             for path, sec in direct:
@@ -513,13 +513,13 @@ def print_top_files(durations, n=10):
         return
     ranked = sorted(durations.items(), key=lambda x: x[1], reverse=True)[:n]
     print(f"  {C}{LINE}{RST}")
-    print(f"  {C}  Top {n} Longest Files{RST}")
+    print(f"  {W}  Top {n} Longest Files{RST}")
     print(f"  {C}{LINE}{RST}")
     for i, (path, sec) in enumerate(ranked, start=1):
         fmt = format_duration(sec)
         name = path.name
         parent = path.parent.name
-        print(f"  {DIM}{i:>2}.{RST}  {W}{fmt['hours_fmt']}{RST}  {DIM}|{RST}  {Y}{name}{RST}  {DIM}({parent}){RST}")
+        print(f"  {DIM}{i:>2}.{RST}  {W}{fmt['hours_fmt']}{RST}  {DIM}|{RST}  {W}{name}{RST}  {DIM}({parent}){RST}")
     print()
 
 def _tree_to_dict(name, seconds, count, subfolders, direct=None):
@@ -717,7 +717,8 @@ def print_duplicates(groups, durations):
         fmt = format_duration(sec)
         print(f"  {Y}Group {i}{RST}  {DIM}|{RST}  {W}{fmt['hours_fmt']}{RST}  {DIM}|{RST}  {R}{len(group)} copies{RST}  {DIM}(wasted: {format_duration(wasted)['hours_fmt']}){RST}")
         for path in group:
-            print(f"      {DIM}→{RST}  {path}")
+            print(f"      {DIM}→{RST}  {Y}{path.name}{RST}")
+            print(f"         {DIM}{path}{RST}")
         print()
 
     wasted_fmt = format_duration(total_wasted_sec)
@@ -734,7 +735,7 @@ def print_dupe_warning(groups):
     grp_word  = "group" if len(groups) == 1 else "groups"
     file_word = "file"  if total == 1       else "files"
     print(f"  {Y}⚠  {len(groups)} duplicate {grp_word} found ({total} redundant {file_word}){RST}  "
-          f"{DIM}— run 'aevum dupes <folder>' for details{RST}\n")
+          f"{DIM}— press 6 or type 'duplicates' for details{RST}\n")
 
 # ── FOLDER COMPARISON ─────────────────────────────────────────────────
 
@@ -808,10 +809,10 @@ def print_comparison(folder_a, folder_b, data_a, data_b):
 def print_banner(post_scan=False, current_sort="name:asc"):
     print()
     print(f"  {C}{LINE}{RST}")
-    print(f"  {C}  A E V U M{RST}  {DIM}|{RST}  Video Library Duration Scanner")
+    print(f"  {C}  A E V U M{RST}  {DIM}|{RST}  {W}Video Library Duration Scanner{RST}")
     print(f"  {C}{LINE}{RST}")
     print()
-    print(f"  {DIM}Type a folder path and press Enter to scan.{RST}")
+    print(f"  {W}Type a folder path and press Enter to scan.{RST}")
     print()
     if post_scan:
         print_post_scan_menu(current_sort)
@@ -825,27 +826,27 @@ def print_results(folder, total_sec, total_count, tree, durations=None, sizes=No
     subfolders, direct, root_bytes = tree
     print()
     print(f"  {C}{LINE}{RST}")
-    print(f"  {C}  Video Library  |  Folder Summary{RST}")
+    print(f"  {W}  Video Library  |  Folder Summary{RST}")
     print(f"  {C}{LINE}{RST}")
     print()
     print_tree(Path(folder).name, total_sec, total_count, subfolders, direct, show_files=show_files, fbytes=root_bytes)
     print(f"  {C}{LINE}{RST}")
-    print(f"  {C}  Grand Total{RST}")
+    print(f"  {W}  Grand Total{RST}")
     print(f"  {C}{LINE}{RST}")
     total_bytes = sum(sizes.values())
-    print(f"  {W}  Total videos  {DIM}:{RST}  {Y}{total_count}{RST}")
-    print(f"  {W}  Total size    {DIM}:{RST}  {Y}{format_size(total_bytes)}{RST}")
-    print(f"  {W}  Days          {DIM}:{RST}  {Y}{fmt['days_fmt']}{RST}")
-    print(f"  {W}  Hours         {DIM}:{RST}  {Y}{fmt['hours_fmt']}{RST}")
-    print(f"  {W}  Minutes       {DIM}:{RST}  {Y}{fmt['minutes_fmt']}{RST}")
+    print(f"  {W}  Total videos  {DIM}:{RST}  {W}{total_count}{RST}")
+    print(f"  {W}  Total size    {DIM}:{RST}  {W}{format_size(total_bytes)}{RST}")
+    print(f"  {W}  Days          {DIM}:{RST}  {W}{fmt['days_fmt']}{RST}")
+    print(f"  {W}  Hours         {DIM}:{RST}  {W}{fmt['hours_fmt']}{RST}")
+    print(f"  {W}  Minutes       {DIM}:{RST}  {W}{fmt['minutes_fmt']}{RST}")
     print()
     print(f"  {C}{LINE}{RST}")
-    print(f"  {C}  Playback Speed{RST}")
+    print(f"  {W}  Playback Speed{RST}")
     print(f"  {C}{LINE}{RST}")
     for speed in (1.0, 1.25, 1.5, 1.75, 2.0):
         adjusted = format_duration(total_sec / speed)
         label = f"{speed:.2f}".rstrip('0').rstrip('.') + "x"
-        print(f"  {W}  {label:<6}        {DIM}:{RST}  {Y}{adjusted['hours_fmt']}{RST}  {DIM}({adjusted['days_fmt']}){RST}")
+        print(f"  {W}  {label:<6}        {DIM}:{RST}  {W}{adjusted['hours_fmt']}{RST}  {DIM}({adjusted['days_fmt']}){RST}")
     print()
     if durations and top_n > 0:
         print_top_files(durations, top_n)
@@ -859,8 +860,7 @@ def _sort_label(current_sort):
     return current_sort
 
 def print_post_scan_menu(current_sort="name:asc"):
-    sort_label = f"{DIM}(sorted by {_sort_label(current_sort)}){RST}"
-    print(f"  {DIM}What do you want to do?{RST}  {sort_label}")
+    print(f"  {W}What do you want to do?{RST}")
     print(f"  {G}1. scan{RST}   {B}2. sort{RST}   {M}3. export{RST}   {Y}4. clear{RST}   {R}5. quit{RST}   {C}6. duplicates{RST}")
     print()
 
@@ -1020,7 +1020,7 @@ def main():
         _, _, _, durations, _, hits = _run_scan(folder, on_prog, "name", not args.no_cache)
         probed = len(durations) - hits
         cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
-        print(f"\r  {G}Done!{RST}  {Y}{len(durations)}{RST} videos found.{cache_info}".ljust(60))
+        print(f"\r  {G}Done!{RST}  {W}{len(durations)}{RST} videos found.{cache_info}".ljust(60))
         print(f"  {DIM}Checking for duplicates...{RST}", flush=True)
         groups = find_duplicates(durations)
         print_duplicates(groups, durations)
@@ -1054,7 +1054,7 @@ def main():
 
         probed     = total_count - hits
         cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
-        print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.{cache_info}".ljust(60))
+        print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.{cache_info}".ljust(60))
         print_results(folder, total_sec, total_count, tree, durations, sizes, args.top, show_files=args.files)
 
         # dupe warning
@@ -1141,7 +1141,7 @@ def main():
 
         probed     = total_count - hits
         cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
-        print(f"\r  {G}Done!{RST}  {Y}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.{cache_info}".ljust(60))
+        print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.{cache_info}".ljust(60))
         print_results(folder, total_sec, total_count, tree, durations, sizes, args.top, show_files=getattr(args, "files", False))
 
         # dupe warning — result cached in last_scan so menu option 6 doesn't re-run it
