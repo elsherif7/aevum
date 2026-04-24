@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aevum"
+version = "1.0.0"
+description = "Media Library Scanner"
+requires-python = ">=3.8"
+
+[project.scripts]
+aevum = "aevum:main"
+
+[tool.setuptools]
+py-modules = ["aevum"]
