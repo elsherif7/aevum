@@ -1168,6 +1168,36 @@ def _fuzzy_suggest(word, candidates):
     best_c, best_d = min(scored, key=lambda x: x[1])
     return best_c if best_d <= 2 else None
 
+# ── CONFIG ────────────────────────────────────────────────────────────
+
+CONFIG_FILE = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Aevum" / "config.json"
+
+CONFIG_DEFAULTS = {
+    "sort":         "name:asc",
+    "top":          10,
+    "no_color":     False,
+    "cache_enabled": True,
+    "export_dir":   "",
+}
+
+def load_config():
+    """Load config from disk, merging with defaults for missing keys."""
+    try:
+        data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        return {**CONFIG_DEFAULTS, **data}
+    except Exception:
+        return dict(CONFIG_DEFAULTS)
+
+def save_config(cfg):
+    try:
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"  {R}Config write failed:{RST} {e}", file=sys.stderr)
+
+def _config_key_valid(key):
+    return key in CONFIG_DEFAULTS
+
 # ── MAIN ──────────────────────────────────────────────────────────────
 
 def _make_progress_bar():
@@ -1182,66 +1212,272 @@ def _make_progress_bar():
 
 
 def _parse_args():
-    # Detect compare / dupes subcommands manually before argparse
-    # so the main 'folder' positional doesn't conflict with subcommand names.
     argv = sys.argv[1:]
-    command = None
-    if argv and argv[0] in ('compare', 'dupes'):
-        command = argv[0]
-        argv = argv[1:]
 
-    p = argparse.ArgumentParser(
-        prog="aevum",
-        description="Video library duration scanner.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "Examples:\n"
-            "  aevum                             interactive mode\n"
-            "  aevum D:\\Movies                   scan and print, then exit\n"
-            "  aevum D:\\Movies --export csv      save results as CSV\n"
-            "  aevum D:\\Movies --sort duration   sort folders by duration\n"
-            "  aevum D:\\Movies --top 20          show 20 longest files\n"
-            "  aevum D:\\Movies --no-color        plain text output\n"
-            "  aevum compare D:\\Movies E:\\Backup compare two folders\n"
-            "  aevum dupes D:\\Movies             find duplicate videos\n"
-        ),
-    )
+    # ── top-level --version / --help before subcommand dispatch ──────
+    # argparse subparsers don't propagate -V cleanly, so handle it here.
+    if not argv or argv[0] in ('-h', '--help'):
+        _print_global_help()
+        sys.exit(0)
 
-    if command == "compare":
+    if argv[0] in ('-V', '--version'):
+        print(f"aevum {__version__}")
+        sys.exit(0)
+
+    # ── subcommand dispatch ───────────────────────────────────────────
+    subcommand = argv[0]
+
+    SUBCOMMANDS = ('scan', 'compare', 'dupes', 'export', 'cache', 'config', 'doctor', 'version', 'shell')
+
+    # Bare path / URL shorthand → treat as implicit 'scan'
+    if subcommand not in SUBCOMMANDS:
+        argv = ['scan'] + argv
+        subcommand = 'scan'
+
+    return _dispatch_subcommand(subcommand, argv[1:])
+
+
+def _dispatch_subcommand(sub, argv):
+    """Parse argv for the given subcommand. Returns a Namespace with .command set."""
+    import types
+
+    def _make(ns_dict):
+        ns = types.SimpleNamespace(**ns_dict, command=sub)
+        return ns
+
+    # ── scan ─────────────────────────────────────────────────────────
+    if sub == 'scan':
+        p = argparse.ArgumentParser(
+            prog="aevum scan",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            description="Scan a local folder or YouTube URL and report total duration.",
+            epilog=(
+                "Examples:\n"
+                "  aevum scan D:\\Movies\n"
+                "  aevum scan D:\\Movies --sort duration --top 20\n"
+                "  aevum scan D:\\Movies --files --out report.csv\n"
+                "  aevum scan https://youtube.com/@mkbhd\n"
+                "  aevum scan https://youtube.com/playlist?list=PLxxx --top 5\n"
+            ),
+            add_help=True,
+        )
+        p.add_argument("target", nargs="?", default=None,
+                       metavar="PATH|URL",
+                       help="local folder path or YouTube URL (video/playlist/channel)")
+        p.add_argument("-s", "--sort", default=None,
+                       metavar="FIELD[:DIR]",
+                       help="sort tree: name|duration|count  with optional :asc|:desc  (default: name:asc)")
+        p.add_argument("-t", "--top", type=int, default=None,
+                       metavar="N",
+                       help="show top N longest files (default: 10, 0 = hide)")
+        p.add_argument("-f", "--files", action="store_true",
+                       help="show individual filenames under each folder in the tree")
+        p.add_argument("-o", "--out", default=None,
+                       metavar="FILE",
+                       help="write results to FILE (format inferred from extension: .txt .csv .json)")
+        p.add_argument("--format", dest="fmt", choices=["txt", "csv", "json"], default=None,
+                       help="explicit export format when --out is used")
+        p.add_argument("--depth", type=int, default=None,
+                       metavar="N",
+                       help="limit tree display to N levels deep")
+        p.add_argument("--no-cache", action="store_true",
+                       help="bypass cache; re-probe every file")
+        p.add_argument("--no-color", action="store_true",
+                       help="disable ANSI color output")
+        args = p.parse_args(argv)
+        args.command = sub
+        return args
+
+    # ── compare ──────────────────────────────────────────────────────
+    if sub == 'compare':
+        p = argparse.ArgumentParser(
+            prog="aevum compare",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            description="Compare the duration totals of two local video libraries.",
+            epilog=(
+                "Examples:\n"
+                "  aevum compare D:\\Movies E:\\Movies-Backup\n"
+                "  aevum compare D:\\Movies E:\\Backup --sort duration\n"
+            ),
+        )
         p.add_argument("folder_a", help="first folder")
         p.add_argument("folder_b", help="second folder")
-        p.add_argument("--sort",     "-s", choices=["name", "duration", "count"], default="name")
-        p.add_argument("--no-cache", action="store_true")
-        p.add_argument("--no-color", action="store_true")
-    elif command == "dupes":
-        p.add_argument("folder", help="folder to scan for duplicates")
-        p.add_argument("--no-cache", action="store_true")
-        p.add_argument("--no-color", action="store_true")
-    else:
-        p.add_argument("folder",         nargs="?",  default=None,
-                       help="folder to scan (omit to enter interactive mode)")
-        p.add_argument("--export", "-e", choices=["txt", "csv", "json"], default=None,
-                       metavar="FORMAT",
-                       help="export results to a file: txt | csv | json")
-        p.add_argument("--out",    "-o", default=None,
-                       help="output path for --export (default: auto-named next to folder)")
-        p.add_argument("--top",    "-t", type=int, default=10,
-                       metavar="N",
-                       help="show top N longest files (default: 10, set 0 to hide)")
-        p.add_argument("--sort",   "-s", default="name:asc",
+        p.add_argument("-s", "--sort", default=None,
                        metavar="FIELD[:DIR]",
-                       help="sort: name[:asc|desc]  duration[:asc|desc]  count[:asc|desc]  (default: name:asc)")
-        p.add_argument("--files",  "-f", action="store_true",
-                       help="show individual files under each folder in the tree")
-        p.add_argument("--no-cache",     action="store_true",
-                       help="bypass the duration cache and re-probe every file")
-        p.add_argument("--no-color",     action="store_true",
-                       help="strip ANSI colours from terminal output")
-        p.add_argument("--version", "-v", action="version", version=f"aevum {__version__}")
+                       help="sort: name|duration|count  (default: name:asc)")
+        p.add_argument("--no-cache", action="store_true")
+        p.add_argument("--no-color", action="store_true")
+        args = p.parse_args(argv)
+        args.command = sub
+        return args
 
-    args = p.parse_args(argv)
-    args.command = command
-    return args
+    # ── dupes ─────────────────────────────────────────────────────────
+    if sub == 'dupes':
+        p = argparse.ArgumentParser(
+            prog="aevum dupes",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            description="Find duplicate video files (by size + partial hash) in a folder.",
+            epilog=(
+                "Examples:\n"
+                "  aevum dupes D:\\Movies\n"
+                "  aevum dupes D:\\Movies -o dupes.txt\n"
+            ),
+        )
+        p.add_argument("folder", help="folder to scan for duplicates")
+        p.add_argument("-o", "--out", default=None,
+                       metavar="FILE",
+                       help="write duplicate report to FILE")
+        p.add_argument("--no-cache", action="store_true")
+        p.add_argument("--no-color", action="store_true")
+        args = p.parse_args(argv)
+        args.command = sub
+        return args
+
+    # ── export ────────────────────────────────────────────────────────
+    if sub == 'export':
+        p = argparse.ArgumentParser(
+            prog="aevum export",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            description="Scan a folder or URL and write results directly to a file.",
+            epilog=(
+                "Examples:\n"
+                "  aevum export D:\\Movies csv\n"
+                "  aevum export D:\\Movies json -o D:\\Reports\\library.json\n"
+                "  aevum export https://youtube.com/@mkbhd txt\n"
+            ),
+        )
+        p.add_argument("target", metavar="PATH|URL",
+                       help="local folder path or YouTube URL")
+        p.add_argument("format", choices=["txt", "csv", "json"],
+                       help="output format: txt | csv | json")
+        p.add_argument("-o", "--out", default=None,
+                       metavar="FILE",
+                       help="output path (default: auto-named next to the folder)")
+        p.add_argument("-s", "--sort", default=None,
+                       metavar="FIELD[:DIR]",
+                       help="sort: name|duration|count  (default: name:asc)")
+        p.add_argument("--no-cache", action="store_true")
+        p.add_argument("--no-color", action="store_true")
+        args = p.parse_args(argv)
+        args.command = sub
+        return args
+
+    # ── cache ─────────────────────────────────────────────────────────
+    if sub == 'cache':
+        p = argparse.ArgumentParser(
+            prog="aevum cache",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            description="Manage the duration cache.",
+            epilog=(
+                "Subcommands:\n"
+                "  list               List all cache files\n"
+                "  clear              Delete all cache files\n"
+                "  clear <path>       Delete cache for a specific folder\n"
+                "  path               Print the cache directory path\n"
+            ),
+        )
+        p.add_argument("action", nargs="?", default="list",
+                       choices=["list", "clear", "path"],
+                       help="action to perform (default: list)")
+        p.add_argument("folder", nargs="?", default=None,
+                       help="folder path (used with 'clear' to target a specific folder)")
+        p.add_argument("--no-color", action="store_true")
+        args = p.parse_args(argv)
+        args.command = sub
+        return args
+
+    # ── config ────────────────────────────────────────────────────────
+    if sub == 'config':
+        p = argparse.ArgumentParser(
+            prog="aevum config",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            description="Read and write persistent configuration.",
+            epilog=(
+                "Keys:  sort  top  no_color  cache_enabled  export_dir  yt_api_key\n\n"
+                "Examples:\n"
+                "  aevum config list\n"
+                "  aevum config get sort\n"
+                "  aevum config set sort duration:desc\n"
+                "  aevum config set top 20\n"
+                "  aevum config set yt_api_key AIzaSy...\n"
+                "  aevum config reset\n"
+            ),
+        )
+        p.add_argument("action", choices=["get", "set", "list", "reset"],
+                       help="action to perform")
+        p.add_argument("key",   nargs="?", default=None,
+                       help="config key (required for get/set)")
+        p.add_argument("value", nargs="?", default=None,
+                       help="new value (required for set)")
+        p.add_argument("--no-color", action="store_true")
+        args = p.parse_args(argv)
+        args.command = sub
+        return args
+
+    # ── doctor ────────────────────────────────────────────────────────
+    if sub == 'doctor':
+        p = argparse.ArgumentParser(
+            prog="aevum doctor",
+            description="Check environment: ffprobe, API key, cache, Python version.",
+        )
+        p.add_argument("--no-color", action="store_true")
+        args = p.parse_args(argv)
+        args.command = sub
+        return args
+
+    # ── version ───────────────────────────────────────────────────────
+    if sub == 'version':
+        print(f"aevum {__version__}")
+        sys.exit(0)
+
+    # ── shell (explicit REPL entry) ───────────────────────────────────
+    if sub == 'shell':
+        ns = types.SimpleNamespace(command='shell', no_color=False, sort=None, top=None)
+        for a in argv:
+            if a == '--no-color':
+                ns.no_color = True
+        return ns
+
+    _print_global_help()
+    sys.exit(1)
+
+
+def _print_global_help():
+    print(f"""
+  {C}aevum {__version__}{RST}  {DIM}—{RST}  {W}Video library duration scanner{RST}
+
+  {W}USAGE{RST}
+    aevum [command] [options]
+    aevum                           Open interactive shell
+    aevum <path|url>                Quick scan (shorthand for 'aevum scan')
+
+  {W}COMMANDS{RST}
+    {G}scan{RST}      <path|url>            Scan a folder or YouTube URL
+    {G}compare{RST}   <path> <path>         Compare two libraries side-by-side
+    {G}dupes{RST}     <path>                Find duplicate-duration files
+    {G}export{RST}    <path|url> <format>   Scan and write results to a file
+    {G}cache{RST}                           Manage the duration cache
+    {G}config{RST}                          Read/write configuration
+    {G}doctor{RST}                          Check environment (ffprobe, API key, cache)
+    {G}version{RST}                         Print version and exit
+
+  {W}GLOBAL OPTIONS{RST}
+    --no-color                      Disable ANSI color output
+    -h, --help                      Show this help
+    -V, --version                   Show version
+
+  {W}EXAMPLES{RST}
+    aevum scan D:\\Movies
+    aevum scan D:\\Movies --sort duration --top 20
+    aevum scan https://youtube.com/@mkbhd
+    aevum export D:\\Movies json -o library.json
+    aevum dupes D:\\Movies
+    aevum compare D:\\Movies E:\\Backup
+    aevum config set sort duration:desc
+    aevum doctor
+
+  {DIM}Run 'aevum <command> --help' for command-specific options.{RST}
+""")
 
 
 def _disable_color():
@@ -1269,85 +1505,228 @@ def _run_scan(folder, on_progress, sort_by="name", use_cache=True):
     return total_sec, total_count, tree, durations, sizes, hits
 
 
+def _require_ffprobe(context=""):
+    """Print a clear error and exit 2 if ffprobe is missing."""
+    if not check_ffprobe():
+        ctx = f" ({context})" if context else ""
+        print(f"\n  {R}[ERROR]{RST} ffprobe not found on PATH{ctx}.")
+        print(f"  {DIM}ffprobe is required for local folder scanning.{RST}")
+        print(f"  Install FFmpeg: {C}https://ffmpeg.org/download.html{RST}")
+        print(f"  Then re-run:    {W}aevum doctor{RST}\n")
+        sys.exit(2)
+
+
+def _resolve_sort(args, cfg):
+    """Return the effective sort string, preferring CLI flag > config > default."""
+    raw = getattr(args, 'sort', None) or cfg.get('sort') or 'name:asc'
+    if ':' not in raw:
+        defaults = {'name': 'asc', 'duration': 'desc', 'count': 'desc'}
+        raw = raw + ':' + defaults.get(raw, 'asc')
+    return raw
+
+
+def _resolve_top(args, cfg):
+    v = getattr(args, 'top', None)
+    if v is not None:
+        return v
+    return cfg.get('top', 10)
+
+
+def _resolve_out_format(out_path, explicit_fmt):
+    """Infer format from file extension if not explicitly given."""
+    if explicit_fmt:
+        return explicit_fmt
+    if out_path:
+        ext = Path(out_path).suffix.lower().lstrip('.')
+        if ext in ('txt', 'csv', 'json'):
+            return ext
+    return None
+
+
 def main():
     args = _parse_args()
+    cfg  = load_config()
 
-    if getattr(args, 'no_color', False):
+    # Apply no_color from CLI flag or config
+    if getattr(args, 'no_color', False) or cfg.get('no_color'):
         _disable_color()
 
-    # ── COMPARE SUBCOMMAND ───────────────────────────────────────────
-    if args.command == "compare":
+    cmd = args.command
+
+    # ── VERSION ──────────────────────────────────────────────────────
+    if cmd == 'version':
+        print(f"aevum {__version__}")
+        sys.exit(0)
+
+    # ── DOCTOR ───────────────────────────────────────────────────────
+    if cmd == 'doctor':
+        _cmd_doctor(cfg)
+        sys.exit(0)
+
+    # ── CONFIG ───────────────────────────────────────────────────────
+    if cmd == 'config':
+        _cmd_config(args, cfg)
+        sys.exit(0)
+
+    # ── CACHE ────────────────────────────────────────────────────────
+    if cmd == 'cache':
+        _cmd_cache(args)
+        sys.exit(0)
+
+    # ── COMPARE ──────────────────────────────────────────────────────
+    if cmd == 'compare':
         folder_a = Path(args.folder_a.strip().strip("'\""))
         folder_b = Path(args.folder_b.strip().strip("'\""))
         for f in (folder_a, folder_b):
             if not f.exists() or not f.is_dir():
-                print(f"Error: not a valid folder: {f}", file=sys.stderr)
+                print(f"\n  {R}[ERROR]{RST} Not a valid folder: {f}\n", file=sys.stderr)
                 sys.exit(1)
-        if not check_ffprobe():
-            print("Error: ffprobe not found on PATH.", file=sys.stderr)
-            sys.exit(1)
+        _require_ffprobe("compare")
+        sort = _resolve_sort(args, cfg)
         on_prog = _make_progress_bar()
-        data_a, data_b = run_compare(folder_a, folder_b, on_prog, args.sort, not args.no_cache)
+        data_a, data_b = run_compare(folder_a, folder_b, on_prog, sort, not args.no_cache)
         print_comparison(folder_a, folder_b, data_a, data_b)
         sys.exit(0)
 
-    # ── DUPES SUBCOMMAND ─────────────────────────────────────────────
-    if args.command == "dupes":
+    # ── DUPES ─────────────────────────────────────────────────────────
+    if cmd == 'dupes':
         folder = Path(args.folder.strip().strip("'\""))
         if not folder.exists() or not folder.is_dir():
-            print(f"Error: not a valid folder: {folder}", file=sys.stderr)
+            print(f"\n  {R}[ERROR]{RST} Not a valid folder: {folder}\n", file=sys.stderr)
             sys.exit(1)
-        if not check_ffprobe():
-            print("Error: ffprobe not found on PATH.", file=sys.stderr)
-            sys.exit(1)
+        _require_ffprobe("dupes")
         on_prog = _make_progress_bar()
         print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
-        _, _, _, durations, _, hits = _run_scan(folder, on_prog, "name", not args.no_cache)
+        use_cache = not args.no_cache and cfg.get('cache_enabled', True)
+        _, _, _, durations, sizes, hits = _run_scan(folder, on_prog, "name", use_cache)
         probed = len(durations) - hits
         cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
         print(f"\r  {G}Done!{RST}  {W}{len(durations)}{RST} videos found.{cache_info}".ljust(60))
         print(f"  {DIM}Checking for duplicates...{RST}", flush=True)
-        groups = find_duplicates(durations)
+        groups = find_duplicates(durations, sizes)
         print_duplicates(groups, durations)
+        if args.out:
+            # Export the dupe report as plain text
+            try:
+                import io
+                buf = io.StringIO()
+                if not groups:
+                    buf.write("No duplicates found.\n")
+                else:
+                    for i, group in enumerate(groups, 1):
+                        sec = durations.get(group[0], 0.0)
+                        buf.write(f"Group {i}  |  {format_duration(sec)['hours_fmt']}  |  {len(group)} copies\n")
+                        for p in group:
+                            buf.write(f"  -> {p}\n")
+                        buf.write("\n")
+                Path(args.out).write_text(buf.getvalue(), encoding="utf-8")
+                print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{args.out}{RST}\n")
+            except Exception as e:
+                print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr)
+                sys.exit(4)
         sys.exit(0)
 
-    # ── HEADLESS MODE ────────────────────────────────────────────────
-    if args.folder is not None:
-        raw_arg = args.folder.strip().strip("'\"")
+    # ── EXPORT (dedicated command) ────────────────────────────────────
+    if cmd == 'export':
+        raw = args.target.strip().strip("'\"")
+        sort = _resolve_sort(args, cfg)
+        use_cache = not args.no_cache and cfg.get('cache_enabled', True)
+        out_path = args.out or None
+        fmt = args.format
 
-        # ── URL headless ─────────────────────────────────────────────
-        if _is_url(raw_arg):
+        if _is_url(raw):
             url_prog = _make_url_progress()
             try:
-                total_sec, total_count, entries, label = scan_url(raw_arg, url_prog)
+                total_sec, total_count, entries, label = scan_url(raw, url_prog)
+            except KeyboardInterrupt:
+                print(f"\n\n  {Y}Fetch cancelled.{RST}\n")
+                sys.exit(0)
+            print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} videos found.".ljust(60))
+            if not fmt:
+                print(f"  {R}[ERROR]{RST} --format required for URL export (txt|csv|json).", file=sys.stderr)
+                sys.exit(1)
+            # For URLs we build a synthetic folder-less export
+            durations_titled = {type('P', (), {'name': e['title'], 'parent': type('Q', (), {'name': label})()})(): e['duration'] for e in entries}
+            # Simple txt fallback for URL
+            try:
+                import io
+                buf = io.StringIO()
+                buf.write(f"AEVUM  |  {label}\n{'=' * 64}\n")
+                buf.write(f"Total videos : {total_count}\n")
+                buf.write(f"Duration     : {format_duration(total_sec)['hours_fmt']}\n\n")
+                for e in sorted(entries, key=lambda x: x['duration'], reverse=True):
+                    buf.write(f"  {format_duration(e['duration'])['hours_fmt']}  |  {e['title']}\n")
+                dest = Path(out_path) if out_path else Path(f"aevum_url_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{fmt}")
+                dest.write_text(buf.getvalue(), encoding="utf-8")
+                print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
+            except Exception as e:
+                print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr)
+                sys.exit(4)
+            sys.exit(0)
+
+        folder = Path(raw)
+        if not folder.exists() or not folder.is_dir():
+            print(f"\n  {R}[ERROR]{RST} Not a valid folder: {folder}\n", file=sys.stderr)
+            sys.exit(1)
+        _require_ffprobe("export")
+        if not fmt:
+            fmt = _resolve_out_format(out_path, None)
+        if not fmt:
+            print(f"  {R}[ERROR]{RST} Specify a format: aevum export <path> txt|csv|json\n", file=sys.stderr)
+            sys.exit(1)
+        on_prog = _make_progress_bar()
+        print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
+        try:
+            total_sec, total_count, tree, durations, sizes, hits = _run_scan(folder, on_prog, sort, use_cache)
+        except KeyboardInterrupt:
+            print(f"\n\n  {Y}Scan cancelled.{RST}\n")
+            sys.exit(0)
+        print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} videos found.".ljust(60))
+        try:
+            dest = export_results(folder, total_sec, total_count, tree, durations, fmt, out_path)
+            print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
+        except Exception as e:
+            print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr)
+            sys.exit(4)
+        sys.exit(0)
+
+    # ── SCAN (headless) ───────────────────────────────────────────────
+    if cmd == 'scan' and getattr(args, 'target', None) is not None:
+        raw = args.target.strip().strip("'\"")
+        sort = _resolve_sort(args, cfg)
+        top  = _resolve_top(args, cfg)
+        use_cache = not args.no_cache and cfg.get('cache_enabled', True)
+        out_path = getattr(args, 'out', None)
+        fmt = _resolve_out_format(out_path, getattr(args, 'fmt', None))
+
+        if _is_url(raw):
+            url_prog = _make_url_progress()
+            try:
+                total_sec, total_count, entries, label = scan_url(raw, url_prog)
             except KeyboardInterrupt:
                 print(f"\n\n  {Y}Fetch cancelled.{RST}\n")
                 sys.exit(0)
             print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.".ljust(60))
-            print_url_results(raw_arg, label, total_sec, total_count, entries, top_n=args.top)
+            print_url_results(raw, label, total_sec, total_count, entries, top_n=top)
             sys.exit(0)
 
-        # ── Local folder headless ─────────────────────────────────────
-        folder = Path(raw_arg)
-
-        if not check_ffprobe():
-            print(f"Error: ffprobe not found on PATH. Download FFmpeg from https://ffmpeg.org/download.html",
-                  file=sys.stderr)
-            sys.exit(1)
-
+        folder = Path(raw)
         if not folder.exists():
-            print(f"Error: path not found: {folder}", file=sys.stderr)
+            print(f"\n  {R}[ERROR]{RST} Path not found: {folder}", file=sys.stderr)
+            sug = _fuzzy_suggest(folder.name, [p.name for p in folder.parent.iterdir() if p.is_dir()] if folder.parent.exists() else [])
+            if sug:
+                print(f"  {DIM}Did you mean:{RST}  {W}{folder.parent / sug}{RST}", file=sys.stderr)
+            print()
             sys.exit(1)
-
         if not folder.is_dir():
-            print(f"Error: not a directory: {folder}", file=sys.stderr)
+            print(f"\n  {R}[ERROR]{RST} That is a file, not a folder: {folder}\n", file=sys.stderr)
             sys.exit(1)
+        _require_ffprobe("scan")
 
         on_progress = _make_progress_bar()
         print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
         try:
-            total_sec, total_count, tree, durations, sizes, hits = _run_scan(
-                folder, on_progress, args.sort, not args.no_cache)
+            total_sec, total_count, tree, durations, sizes, hits = _run_scan(folder, on_progress, sort, use_cache)
         except KeyboardInterrupt:
             print(f"\n\n  {Y}Scan cancelled.{RST}\n")
             sys.exit(0)
@@ -1355,37 +1734,36 @@ def main():
         probed     = total_count - hits
         cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
         print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.{cache_info}".ljust(60))
-        print_results(folder, total_sec, total_count, tree, durations, sizes, args.top, show_files=args.files)
+        print_results(folder, total_sec, total_count, tree, durations, sizes, top,
+                      show_files=getattr(args, 'files', False))
 
-        # dupe warning
         groups = find_duplicates(durations, sizes)
         print_dupe_warning(groups)
 
-        if args.export:
+        if fmt and out_path:
             try:
-                dest = export_results(folder, total_sec, total_count, tree,
-                                      durations, args.export, args.out)
+                dest = export_results(folder, total_sec, total_count, tree, durations, fmt, out_path)
                 print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
             except Exception as e:
                 print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr)
-                sys.exit(1)
+                sys.exit(4)
 
         sys.exit(0)
 
-    # ── INTERACTIVE MODE ─────────────────────────────────────────────
+    # ── INTERACTIVE / SHELL MODE ──────────────────────────────────────
     clear()
     print_banner()
 
     if not check_ffprobe():
         print(f"  {Y}ffprobe not found on PATH.{RST}  {DIM}Local folder scanning won't work.{RST}")
         print(f"  Download FFmpeg from {C}https://ffmpeg.org/download.html{RST}")
-        print(f"  {DIM}(You can still scan YouTube/playlist URLs if yt-dlp is installed.){RST}")
         print()
 
-    on_progress = _make_progress_bar()
-
+    on_progress  = _make_progress_bar()
     last_scan    = {}
-    current_sort = args.sort
+    current_sort = cfg.get('sort', 'name:asc')
+    default_top  = cfg.get('top', 10)
+    use_cache    = cfg.get('cache_enabled', True)
 
     while True:
         try:
@@ -1402,7 +1780,6 @@ def main():
         if not raw:
             continue
 
-        # number aliases for the initial menu (1. scan  2. clear  3. quit)
         _init_map = {'1': 'scan', '2': 'clear', '3': 'quit'}
         if raw in _init_map:
             raw = _init_map[raw]
@@ -1416,15 +1793,21 @@ def main():
             print_banner()
             continue
 
-        if raw.lower() in ('reset-key', 'apikey', 'api-key'):
+        # config set yt_api_key  (replaces old reset-key / api-key)
+        if raw.lower() in ('reset-key', 'apikey', 'api-key') or raw.lower().startswith('config set yt_api_key'):
             prompt_api_key()
             continue
 
-        if raw.lower() == 'scan':
-            print(f"\n  {DIM}Enter a folder path to scan.{RST}\n")
+        if raw.lower().startswith('config '):
+            parts = raw.split()
+            _repl_config(parts[1:], cfg)
             continue
 
-        # ── URL mode ─────────────────────────────────────────────────
+        if raw.lower() == 'scan':
+            print(f"\n  {DIM}Enter a folder path or YouTube URL to scan.{RST}\n")
+            continue
+
+        # ── URL ──────────────────────────────────────────────────────
         if _is_url(raw):
             url_prog = _make_url_progress()
             try:
@@ -1434,13 +1817,13 @@ def main():
                 continue
 
             print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.".ljust(60))
-            print_url_results(raw, label, total_sec, total_count, entries, top_n=args.top)
+            print_url_results(raw, label, total_sec, total_count, entries, top_n=default_top)
 
             last_scan = {
                 "folder":      raw,
                 "total_sec":   total_sec,
                 "total_count": total_count,
-                "tree":        None,   # no tree for URL scans
+                "tree":        None,
                 "durations":   {e['title']: e['duration'] for e in entries},
                 "sizes":       {},
                 "dupe_groups": [],
@@ -1451,25 +1834,23 @@ def main():
             print_post_scan_menu(current_sort)
             continue
 
-        # ── Local folder mode ────────────────────────────────────────
+        # ── Local folder ──────────────────────────────────────────────
         folder = Path(raw)
 
         if not folder.exists():
-            print(f"\n  {R}Path not found:{RST} {raw}\n")
+            print(f"\n  {R}[ERROR]{RST} Path not found: {raw}\n")
             continue
-
         if not folder.is_dir():
-            print(f"\n  {R}That is a file, not a folder.{RST}\n")
+            print(f"\n  {R}[ERROR]{RST} That is a file, not a folder.\n")
             continue
-
         if not check_ffprobe():
-            print(f"\n  {R}ffprobe not found on PATH.{RST} Download FFmpeg from https://ffmpeg.org/download.html\n")
+            print(f"\n  {R}[ERROR]{RST} ffprobe not found. Install FFmpeg: {C}https://ffmpeg.org/download.html{RST}\n")
             continue
 
         print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
         try:
             total_sec, total_count, tree, durations, sizes, hits = _run_scan(
-                folder, on_progress, current_sort, not args.no_cache)
+                folder, on_progress, current_sort, use_cache)
         except KeyboardInterrupt:
             print(f"\n\n  {Y}Scan cancelled.{RST}\n")
             continue
@@ -1477,9 +1858,9 @@ def main():
         probed     = total_count - hits
         cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
         print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} {'video' if total_count == 1 else 'videos'} found.{cache_info}".ljust(60))
-        print_results(folder, total_sec, total_count, tree, durations, sizes, args.top, show_files=getattr(args, "files", False))
+        print_results(folder, total_sec, total_count, tree, durations, sizes, default_top,
+                      show_files=False)
 
-        # dupe warning — result cached in last_scan so menu option 6 doesn't re-run it
         groups = find_duplicates(durations, sizes)
         print_dupe_warning(groups)
 
@@ -1502,7 +1883,6 @@ def main():
                 print(f"\n\n  {G}Goodbye!{RST}\n")
                 sys.exit(0)
 
-            # number aliases
             _menu_map = {'1': 'scan', '2': 'sort', '3': 'export', '4': 'clear', '5': 'quit', '6': 'duplicates'}
             if choice in _menu_map:
                 choice = _menu_map[choice]
@@ -1533,7 +1913,6 @@ def main():
                 _field_opts = ('name', 'duration', 'count')
                 _field_map  = {'1': 'name', '2': 'duration', '3': 'count'}
 
-                # Step 1: pick field — loop until valid or back
                 while field not in _field_opts:
                     sug  = _fuzzy_suggest(field, list(_field_opts) + list(_field_map.keys())) if field else None
                     hint = f"  {DIM}Did you mean {W}{_field_map.get(sug, sug)}{RST}{DIM}?{RST}" if sug else ""
@@ -1554,7 +1933,6 @@ def main():
                 if field is None:
                     continue
 
-                # Step 2: pick direction — loop until valid or back
                 _dir_aliases = {
                     'asc': 'asc', 'ascending': 'asc', 'a': 'asc', '1': 'asc',
                     'desc': 'desc', 'descending': 'desc', 'd': 'desc', '2': 'desc',
@@ -1587,7 +1965,7 @@ def main():
                     sug  = _fuzzy_suggest(direc, list(_dir_aliases.keys()))
                     hint = f"  {DIM}Did you mean {W}{sug}{RST}{DIM}?{RST}" if sug else ""
                     print(f"  {R}Unknown direction.{RST}{hint}")
-                    direc = None  # re-prompt
+                    direc = None
 
                 if direc is None:
                     continue
@@ -1598,10 +1976,9 @@ def main():
                 last_scan["tree"]      = new_tree
                 last_scan["durations"] = new_durations
                 last_scan["sizes"]     = new_sizes
-                show_f = getattr(args, "files", False)
                 print_results(last_scan["folder"], last_scan["total_sec"],
                               last_scan["total_count"], new_tree,
-                              new_durations, last_scan["sizes"], args.top, show_files=show_f)
+                              new_durations, last_scan["sizes"], default_top, show_files=False)
                 print_post_scan_menu(current_sort)
 
             elif choice.split()[0] == 'export' or choice == 'export':
@@ -1614,7 +1991,6 @@ def main():
                 _fmt_opts = ('txt', 'csv', 'json')
                 _fmt_map  = {'1': 'txt', '2': 'csv', '3': 'json'}
 
-                # Loop until valid format or back
                 while fmt not in _fmt_opts:
                     sug  = _fuzzy_suggest(fmt, list(_fmt_opts) + list(_fmt_map.keys())) if fmt else None
                     hint = f"  {DIM}Did you mean {W}{_fmt_map.get(sug, sug)}{RST}{DIM}?{RST}" if sug else ""
@@ -1635,11 +2011,13 @@ def main():
 
                 if fmt is None:
                     continue
+                out_dir = cfg.get('export_dir') or None
+                out_path_default = (Path(out_dir) / f"aevum_{Path(last_scan['folder']).name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{fmt}") if out_dir else None
                 try:
                     dest = export_results(
                         last_scan["folder"], last_scan["total_sec"],
                         last_scan["total_count"], last_scan["tree"],
-                        last_scan["durations"], fmt,
+                        last_scan["durations"], fmt, out_path_default,
                     )
                     print(f"\n  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
                 except Exception as e:
@@ -1654,7 +2032,6 @@ def main():
                     print(f"  {R}No scan yet.{RST} Run a scan first.\n")
                     print_post_scan_menu(current_sort)
                     continue
-                # reuse groups computed at scan time — no need to re-run find_duplicates
                 print_duplicates(last_scan["dupe_groups"], last_scan["durations"])
                 print_post_scan_menu(current_sort)
 
@@ -1665,6 +2042,199 @@ def main():
                 else:
                     print(f"  {R}Invalid command.{RST} Type  {G}1. scan{RST}   {B}2. sort{RST}   {M}3. export{RST}   {Y}4. clear{RST}   {R}5. quit{RST}   {C}6. duplicates{RST}")
                 print_post_scan_menu(current_sort)
+
+
+# ── COMMAND IMPLEMENTATIONS ───────────────────────────────────────────
+
+def _cmd_doctor(cfg):
+    """aevum doctor — environment check."""
+    print()
+    print(f"  {C}{LINE}{RST}")
+    print(f"  {C}  Aevum Doctor{RST}  {DIM}|{RST}  {W}Environment Check{RST}")
+    print(f"  {C}{LINE}{RST}")
+    print()
+
+    # Python
+    pv = sys.version.split()[0]
+    print(f"  {G}[OK]{RST}   Python {pv}")
+
+    # ffprobe
+    try:
+        r = subprocess.run(['ffprobe', '-version'], capture_output=True, text=True)
+        fv = r.stdout.splitlines()[0] if r.stdout else "unknown"
+        print(f"  {G}[OK]{RST}   {fv}")
+    except FileNotFoundError:
+        print(f"  {R}[FAIL]{RST}  ffprobe not found on PATH")
+        print(f"         Install FFmpeg: {C}https://ffmpeg.org/download.html{RST}")
+
+    # YouTube API key
+    api_key = load_api_key()
+    if api_key:
+        masked = api_key[:6] + '...' + api_key[-4:] if len(api_key) > 10 else '***'
+        print(f"  {G}[OK]{RST}   YouTube API key set  {DIM}({masked}){RST}")
+    else:
+        print(f"  {Y}[WARN]{RST}  YouTube API key not set")
+        print(f"         Set it with: {W}aevum config set yt_api_key <key>{RST}")
+
+    # Cache
+    try:
+        files = list(CACHE_DIR.glob("*.json")) if CACHE_DIR.exists() else []
+        total_bytes = sum(f.stat().st_size for f in files)
+        print(f"  {G}[OK]{RST}   Cache: {len(files)} entries, {format_size(total_bytes)} at {CACHE_DIR}")
+    except Exception:
+        print(f"  {Y}[WARN]{RST}  Could not read cache directory: {CACHE_DIR}")
+
+    # Config file
+    if CONFIG_FILE.exists():
+        print(f"  {G}[OK]{RST}   Config: {CONFIG_FILE}")
+    else:
+        print(f"  {DIM}[INFO]{RST}  No config file (using defaults). {DIM}{CONFIG_FILE}{RST}")
+
+    print()
+
+
+def _cmd_cache(args):
+    """aevum cache [list|clear|path] [folder]"""
+    action = args.action or 'list'
+
+    if action == 'path':
+        print(f"  {W}{CACHE_DIR}{RST}")
+        return
+
+    if action == 'list':
+        if not CACHE_DIR.exists() or not list(CACHE_DIR.glob("*.json")):
+            print(f"  {DIM}Cache is empty.{RST}  {W}{CACHE_DIR}{RST}")
+            return
+        files = sorted(CACHE_DIR.glob("*.json"))
+        print()
+        print(f"  {C}{LINE}{RST}")
+        print(f"  {W}  Cache  {DIM}|{RST}  {CACHE_DIR}{RST}")
+        print(f"  {C}{LINE}{RST}")
+        print()
+        total = 0
+        for f in files:
+            sz = f.stat().st_size
+            total += sz
+            try:
+                data = json.loads(f.read_text(encoding='utf-8'))
+                folder_path = data[0]['path'].rsplit('\\', 1)[0] if data else '?'
+                count = len(data)
+            except Exception:
+                folder_path = '?'
+                count = 0
+            print(f"  {DIM}{f.name[:16]}{RST}  {W}{folder_path}{RST}  {DIM}({count} files, {format_size(sz)}){RST}")
+        print()
+        print(f"  {DIM}Total: {len(files)} cache files, {format_size(total)}{RST}")
+        print()
+        return
+
+    if action == 'clear':
+        target_folder = getattr(args, 'folder', None)
+        if target_folder:
+            key = _cache_key(target_folder)
+            if key.exists():
+                key.unlink()
+                print(f"  {G}[OK]{RST}  Cleared cache for {target_folder}")
+            else:
+                print(f"  {DIM}[SKIP]{RST}  No cache found for {target_folder}")
+        else:
+            if not CACHE_DIR.exists():
+                print(f"  {DIM}Cache is already empty.{RST}")
+                return
+            files = list(CACHE_DIR.glob("*.json"))
+            for f in files:
+                f.unlink()
+            print(f"  {G}[OK]{RST}  Cleared {len(files)} cache files from {CACHE_DIR}")
+
+
+def _cmd_config(args, cfg):
+    """aevum config get|set|list|reset [key] [value]"""
+    action = args.action
+
+    # yt_api_key is stored separately — bridge it into config commands
+    YT_KEY = 'yt_api_key'
+
+    if action == 'list':
+        print()
+        print(f"  {C}{LINE}{RST}")
+        print(f"  {W}  Configuration{RST}  {DIM}|{RST}  {CONFIG_FILE}")
+        print(f"  {C}{LINE}{RST}")
+        print()
+        for k, v in cfg.items():
+            print(f"  {G}{k:<18}{RST}  {W}{v}{RST}")
+        api_key = load_api_key()
+        masked = (api_key[:6] + '...' + api_key[-4:]) if api_key and len(api_key) > 10 else (api_key or '(not set)')
+        print(f"  {G}{YT_KEY:<18}{RST}  {W}{masked}{RST}")
+        print()
+        return
+
+    if action == 'reset':
+        save_config(dict(CONFIG_DEFAULTS))
+        print(f"  {G}[OK]{RST}  Configuration reset to defaults.")
+        return
+
+    key = args.key
+    if not key:
+        print(f"  {R}[ERROR]{RST} Key required. Run 'aevum config list' to see all keys.", file=sys.stderr)
+        sys.exit(1)
+
+    if action == 'get':
+        if key == YT_KEY:
+            api_key = load_api_key()
+            print(api_key or '(not set)')
+        elif _config_key_valid(key):
+            print(cfg.get(key, CONFIG_DEFAULTS.get(key)))
+        else:
+            print(f"  {R}[ERROR]{RST} Unknown key: {key}", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    if action == 'set':
+        value = args.value
+        if key == YT_KEY:
+            if not value:
+                # Interactive prompt
+                value = prompt_api_key()
+                return
+            save_api_key(value)
+            print(f"  {G}[OK]{RST}  yt_api_key saved.")
+            return
+        if not _config_key_valid(key):
+            print(f"  {R}[ERROR]{RST} Unknown key: {key}. Run 'aevum config list' to see all keys.", file=sys.stderr)
+            sys.exit(1)
+        if value is None:
+            print(f"  {R}[ERROR]{RST} Value required: aevum config set {key} <value>", file=sys.stderr)
+            sys.exit(1)
+        # Coerce types
+        default = CONFIG_DEFAULTS[key]
+        try:
+            if isinstance(default, bool):
+                coerced = value.lower() in ('1', 'true', 'yes')
+            elif isinstance(default, int):
+                coerced = int(value)
+            else:
+                coerced = value
+        except (ValueError, AttributeError):
+            print(f"  {R}[ERROR]{RST} Invalid value for {key}: {value}", file=sys.stderr)
+            sys.exit(1)
+        cfg[key] = coerced
+        save_config(cfg)
+        print(f"  {G}[OK]{RST}  {key} = {coerced}")
+
+
+def _repl_config(parts, cfg):
+    """Handle 'config ...' typed inside the REPL."""
+    import types
+    if not parts:
+        print(f"  {DIM}Usage: config get <key> | config set <key> <value> | config list | config reset{RST}\n")
+        return
+    ns = types.SimpleNamespace(
+        action=parts[0] if parts else 'list',
+        key=parts[1] if len(parts) > 1 else None,
+        value=parts[2] if len(parts) > 2 else None,
+        no_color=False,
+    )
+    _cmd_config(ns, cfg)
 
 
 if __name__ == "__main__":
