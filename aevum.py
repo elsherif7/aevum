@@ -878,7 +878,7 @@ def export_results(folder, total_sec, total_count, tree, durations, fmt, out_pat
         buf = io.StringIO()
         # Strip ANSI by temporarily redirecting — we rebuild the text cleanly
         fd = format_duration(total_sec)
-        buf.write(f"AEVUM  |  Video Library Duration Scanner\n")
+        buf.write(f"AEVUM  |  Media Library Scanner\n")
         buf.write(f"Scanned : {folder}\n")
         buf.write(f"Date    : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         buf.write("=" * 64 + "\n\n")
@@ -1094,7 +1094,7 @@ def print_comparison(folder_a, folder_b, data_a, data_b):
 def print_banner(post_scan=False, current_sort="name:asc"):
     print()
     print(f"  {C}{LINE}{RST}")
-    print(f"  {C}  A E V U M{RST}  {DIM}|{RST}  {W}Video Library Duration Scanner{RST}")
+    print(f"  {C}  A E V U M{RST}  {DIM}|{RST}  {W}Media Library Scanner{RST}")
     print(f"  {C}{LINE}{RST}")
     print()
     print(f"  {W}Type a folder path or YouTube URL (video/playlist/channel) and press Enter.{RST}")
@@ -1444,7 +1444,7 @@ def _dispatch_subcommand(sub, argv):
 
 def _print_global_help():
     print(f"""
-  {C}aevum {__version__}{RST}  {DIM}—{RST}  {W}Video library duration scanner{RST}
+  {C}aevum {__version__}{RST}  {DIM}—{RST}  {W}Media Library Scanner{RST}
 
   {W}USAGE{RST}
     aevum [command] [options]
