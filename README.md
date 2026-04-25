@@ -1,13 +1,13 @@
 # Aevum
 
-**Video library duration scanner for Windows.**  
-Point it at any folder and instantly see the total watch time — broken down by subfolder, with a grand total at the end.
+**Media Library Scanner for Windows.**  
+Point it at any folder or YouTube URL and instantly see the total duration — broken down by subfolder, with a grand total, size, playback speeds, and top longest files.
 
 ---
 
 ## Features
 
-- Recursively scans any folder for video files
+- Scans local folders recursively for video and audio files
 - Displays duration and size per subfolder in a tree view
 - Grand total in days, hours, and minutes, plus total library size
 - Playback speed breakdown (1x → 2x)
@@ -19,15 +19,16 @@ Point it at any folder and instantly see the total watch time — broken down by
 - Folder comparison mode — diff two libraries side by side
 - Sortable tree (by name, duration, or count; ascending or descending)
 - Export results to TXT, CSV, or JSON
-- Supports external drives, USB sticks, network paths — anything Windows can see
-- Drag-and-drop a folder into the terminal window
+- YouTube support — scan any video, playlist, or channel by URL
+- Persistent config system (`sort`, `top`, `no_color`, `export_dir`, etc.)
 - Clean, colored terminal UI with `--no-color` for plain output
+- Interactive REPL mode and full headless CLI with subcommands
 
 ---
 
 ## Requirements
 
-- **Python 3** — https://python.org
+- **Python 3.8+** — https://python.org
 - **FFmpeg** (includes `ffprobe`) — https://ffmpeg.org/download.html  
   After downloading, make sure FFmpeg is on your system PATH.
 
@@ -35,123 +36,159 @@ Point it at any folder and instantly see the total watch time — broken down by
 
 ## Installation
 
-1. Download or clone this repo
-2. Right-click `install.bat` → **Run as administrator**
-3. Open a new Command Prompt and type:
-
 ```
-aevum
+git clone <repo-url>
+cd Aevum
+pip install .
 ```
 
-The installer copies `aevum.py` to `%LOCALAPPDATA%\Aevum` and drops a launcher into your Python Scripts folder so `aevum` works from any terminal.
+That's it. `aevum` will work from any terminal window after install.
+
+### Update
+
+```
+cd Aevum
+pip install . --upgrade
+```
+
+### Uninstall
+
+```
+pip uninstall aevum
+```
 
 ---
 
 ## Usage
 
-### Interactive mode
+### Interactive mode (REPL)
 
 ```
 aevum
 ```
 
-Then enter any folder path at the prompt. After each scan a menu appears with options to scan again, sort, export, check duplicates, or quit.
+Type any folder path or YouTube URL at the prompt. After each scan a menu appears with options to scan again, sort, export, check duplicates, or quit.
 
-### Headless mode
-
-```
-aevum D:\Movies
-```
-
-Scans the folder, prints results, and exits. Combine with flags for automation:
+### Headless mode — scan a folder
 
 ```
-aevum D:\Movies --export csv
-aevum D:\Movies --sort duration --top 20 --no-color
+aevum scan D:\Movies
+aevum scan D:\Movies --sort duration --top 20
+aevum scan D:\Movies --files --out report.csv
 ```
 
-### Subcommands
+### Scan a YouTube URL
 
 ```
-aevum compare D:\Movies E:\Backup    # side-by-side comparison of two folders
-aevum dupes D:\Movies                # find duplicate video files
+aevum scan https://youtube.com/@mkbhd
+aevum scan https://youtube.com/playlist?list=PLxxx
 ```
 
----
-
-## Example output
+### Compare two folders
 
 ```
-  ================================================================
-    A E V U M  |  Video Library Duration Scanner
-  ================================================================
+aevum compare D:\Movies E:\Movies-Backup
+```
 
-  aevum> D:\Movies
-  Scanning...  ████████████████░░░░░░░░  288/312  (92%)
+### Find duplicates
 
-  Done!  312 videos found.  (180 cached, 132 probed)
+```
+aevum dupes D:\Movies
+aevum dupes D:\Movies -o dupes.txt
+```
 
-  ================================================================
-    Video Library  |  Folder Summary
-  ================================================================
+### Export results
 
-  Movies
-      +--  438h 12m 05s  |  312 videos  |  241.3 GB
+```
+aevum export D:\Movies csv
+aevum export D:\Movies json -o D:\Reports\library.json
+```
 
-      1.  Action
-          +--  82h 44m 11s  |  58 videos  |  61.2 GB
-      ...
+### Config
 
-  ================================================================
-    Grand Total
-  ================================================================
-  Total videos  :  312
-  Total size    :  241.3 GB
-  Days          :  18d 06h 12m 05s
-  Hours         :  438h 12m 05s
-  Minutes       :  26292m 05s
-  ================================================================
-    Playback Speed
-  ================================================================
-  1x      :  438h 12m 05s  (18d 06h 12m 05s)
-  1.25x   :  350h 33m 38s  (14d 14h 33m 38s)
-  ...
-  ================================================================
+```
+aevum config list
+aevum config set sort duration:desc
+aevum config set top 20
+aevum config set yt_api_key AIzaSy...
+aevum config reset
+```
+
+### Cache management
+
+```
+aevum cache list
+aevum cache clear
+aevum cache path
+```
+
+### Environment check
+
+```
+aevum doctor
 ```
 
 ---
 
-## Interactive commands
+## All commands
 
-| Input | Action |
-|---|---|
-| Any folder path | Scan that folder |
-| `clear` / `c` | Clear the screen |
-| `exit` / `quit` / `q` | Quit |
-| `Ctrl+C` | Cancel a scan or quit |
+```
+aevum                           Open interactive shell
+aevum <path|url>                Quick scan (shorthand for 'aevum scan')
+aevum scan      <path|url>      Scan a folder or YouTube URL
+aevum compare   <path> <path>   Compare two libraries side-by-side
+aevum dupes     <path>          Find duplicate files
+aevum export    <path> <fmt>    Scan and write results to a file
+aevum cache                     Manage the duration cache
+aevum config                    Read/write configuration
+aevum doctor                    Check environment (ffprobe, API key, cache)
+aevum version                   Print version and exit
+```
 
-Post-scan menu options: `scan`, `sort`, `export`, `clear`, `quit`, `duplicates`
+Run `aevum <command> --help` for options on any command.
 
 ---
 
-## CLI flags
+## Scan options
 
 | Flag | Description |
 |---|---|
-| `--export` / `-e` `txt\|csv\|json` | Export results to a file |
-| `--out` / `-o` `PATH` | Output path for `--export` (default: auto-named next to folder) |
-| `--sort` / `-s` `FIELD[:DIR]` | Sort tree: `name`, `duration`, or `count`; optionally `:asc` or `:desc` |
-| `--top` / `-t` `N` | Show top N longest files (default: 10, set 0 to hide) |
-| `--files` / `-f` | Show individual files under each folder in the tree |
+| `-s, --sort FIELD[:DIR]` | Sort tree: `name`, `duration`, or `count`; optionally `:asc` or `:desc` |
+| `-t, --top N` | Show top N longest files (default: 10, set 0 to hide) |
+| `-f, --files` | Show individual files under each folder in the tree |
+| `-o, --out FILE` | Write results to FILE (format inferred from extension) |
+| `--format txt\|csv\|json` | Explicit export format |
 | `--no-cache` | Bypass the duration cache and re-probe every file |
 | `--no-color` | Strip ANSI colors from output |
-| `--version` / `-v` | Print version and exit |
 
 ---
 
 ## Supported formats
 
-`.mp4` `.mkv` `.avi` `.mov` `.webm` `.flv` `.wmv` `.m4v` `.mpg` `.mpeg` `.3gp` `.ts` `.vob` `.ogv` `.divx` `.rmvb` `.asf` `.m2ts`
+**Video:** `.mp4` `.mkv` `.avi` `.mov` `.webm` `.flv` `.wmv` `.m4v` `.mpg` `.mpeg` `.3gp` `.ts` `.vob` `.ogv` and many more
+
+**Audio:** `.mp3` `.aac` `.flac` `.wav` `.ogg` `.wma` `.m4a` `.opus` `.flac` and many more
+
+---
+
+## Project structure
+
+```
+Aevum/
+  aevum.py           — entry point
+  pyproject.toml     — pip install config
+  aevum_pkg/
+    _cli.py          — main(), arg parsing, REPL
+    _scan.py         — ffprobe, native parsers, tree builder
+    _youtube.py      — YouTube Data API v3 integration
+    _display.py      — all print/display functions
+    _dupes.py        — duplicate detection
+    _compare.py      — folder comparison
+    _export.py       — TXT/CSV/JSON export
+    _config.py       — config, cache commands, doctor
+    _cache.py        — cache read/write
+    _color.py        — ANSI color constants
+```
 
 ---
 
@@ -161,6 +198,15 @@ Aevum caches video durations in `%LOCALAPPDATA%\Aevum\cache\` so repeat scans of
 
 ---
 
-## Uninstall
+## Config
 
-Run `uninstall.bat` as administrator. It removes the app folder and launcher — nothing else is touched.
+Config is stored at `%LOCALAPPDATA%\Aevum\config.json`.
+
+| Key | Default | Description |
+|---|---|---|
+| `sort` | `name:asc` | Default sort field and direction |
+| `top` | `10` | Default number of top files to show |
+| `no_color` | `false` | Disable ANSI colors globally |
+| `cache_enabled` | `true` | Enable/disable the duration cache |
+| `export_dir` | `` | Default directory for exported files |
+| `yt_api_key` | `` | YouTube Data API v3 key |
