@@ -216,7 +216,9 @@ def _print_global_help():
     {clr.G}dupes{clr.RST}     <path>                Find duplicate-duration files
     {clr.G}export{clr.RST}    <path|url> <format>   Scan and write results to a file
     {clr.G}watch{clr.RST}     <path>                Re-scan automatically when folder changes
+    {clr.G}alias{clr.RST}                           Manage short aliases for folder paths
     {clr.G}cache{clr.RST}                           Manage the duration cache
+    {clr.G}update{clr.RST}                          Upgrade Aevum to the latest version
     {clr.G}config{clr.RST}                          Read/write configuration
     {clr.G}doctor{clr.RST}                          Check environment (ffprobe, API key, cache)
     {clr.G}version{clr.RST}                         Print version and exit
@@ -276,9 +278,11 @@ def _parse_args():
     if argv[0] in ('-V', '--version'):
         print(f"aevum {__version__}")
         sys.exit(EX.OK)
+    if argv[0] in ('-U', '--upgrade'):
+        argv = ['update'] + argv[1:]
 
     subcommand = argv[0]
-    SUBCOMMANDS = ('scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config', 'doctor', 'version', 'shell')
+    SUBCOMMANDS = ('scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config', 'alias', 'doctor', 'version', 'update', 'shell')
 
     if subcommand not in SUBCOMMANDS:
         from ._display import _fuzzy_suggest
@@ -424,6 +428,37 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("--no-color", action="store_true")
         args = p.parse_args(argv); args.command = sub; return args
 
+    if sub == 'update':
+        p = argparse.ArgumentParser(prog="aevum update",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            description="Upgrade Aevum to the latest version via pip.",
+            epilog=("Examples:\n"
+                    "  aevum update\n"
+                    "  aevum -U\n"))
+        p.add_argument("--dry-run", action="store_true",
+                       help="Show what would run without actually upgrading")
+        _add_common_flags(p)
+        args = p.parse_args(argv); args.command = sub; return args
+
+    if sub == 'alias':
+        p = argparse.ArgumentParser(prog="aevum alias",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            description="Manage short aliases for long folder paths.",
+            epilog=("Examples:\n"
+                    "  aevum alias list\n"
+                    "  aevum alias set M D:\\02-Media\n"
+                    "  aevum alias set Media D:\\02-Media\n"
+                    "  aevum alias remove M\n"
+                    "  aevum scan M\n"))
+        p.add_argument("action", nargs="?", default="list",
+                       choices=["list", "set", "remove", "rm"])
+        p.add_argument("name",  nargs="?", default=None,
+                       help="Alias name (e.g. M, Media)")
+        p.add_argument("path",  nargs="?", default=None,
+                       help="Full folder path to bind the alias to")
+        p.add_argument("--no-color", action="store_true")
+        args = p.parse_args(argv); args.command = sub; return args
+
     if sub == 'doctor':
         p = argparse.ArgumentParser(prog="aevum doctor",
             description="Check environment: ffprobe, API key, cache, Python version.")
@@ -472,6 +507,62 @@ def _build_filters(args, use_json=False):
         filters['folder_pat'] = folder_pat
     return filters
 
+def _repl_alias(parts, cfg):
+    """Handle 'alias ...' typed inside the interactive REPL."""
+    import types as _types
+    action   = parts[0] if parts else "list"
+    name     = parts[1] if len(parts) > 1 else None
+    path_val = parts[2] if len(parts) > 2 else None
+    ns = _types.SimpleNamespace(command="alias", action=action,
+                                name=name, path=path_val, no_color=False)
+    # Delegate to the same logic as the CLI command by re-using main() internals.
+    # Simpler: just inline the same short logic here.
+    aliases = cfg.setdefault("aliases", {})
+    if action == "list":
+        if not aliases:
+            print(f"  {clr.DIM}No aliases defined.{clr.RST}  "
+                  f"Add one with: {clr.W}alias set <name> <path>{clr.RST}\n")
+            return
+        from ._color import LINE
+        print()
+        print(f"  {clr.C}{LINE}{clr.RST}")
+        print(f"  {clr.W}  Aliases{clr.RST}")
+        print(f"  {clr.C}{LINE}{clr.RST}")
+        for k, v in sorted(aliases.items()):
+            exists = Path(v).is_dir()
+            status = f"{clr.G}✓{clr.RST}" if exists else f"{clr.R}✗ (not found){clr.RST}"
+            print(f"  {clr.G}{k:<15}{clr.RST}  {clr.W}{v}{clr.RST}  {status}")
+        print()
+    elif action in ("remove", "rm"):
+        if not name:
+            print(f"  {clr.R}[ERROR]{clr.RST} Usage: alias remove <name>\n"); return
+        if name not in aliases:
+            print(f"  {clr.Y}[WARN]{clr.RST}  Alias '{name}' not found.\n"); return
+        del aliases[name]
+        save_config(cfg)
+        print(f"  {clr.G}[OK]{clr.RST}  Alias '{name}' removed.\n")
+    elif action == "set":
+        if not name or not path_val:
+            print(f"  {clr.R}[ERROR]{clr.RST} Usage: alias set <name> <path>\n"); return
+        resolved = Path(path_val.strip().strip("'\""))
+        if not resolved.exists():
+            print(f"  {clr.Y}[WARN]{clr.RST}  Path does not exist: {resolved}")
+        aliases[name] = str(resolved)
+        save_config(cfg)
+        print(f"  {clr.G}[OK]{clr.RST}  {clr.W}{name}{clr.RST}  {clr.DIM}→{clr.RST}  {clr.W}{resolved}{clr.RST}\n")
+    else:
+        print(f"  {clr.DIM}Usage: alias list | alias set <name> <path> | alias remove <name>{clr.RST}\n")
+
+
+def _resolve_alias(raw, cfg):
+    """
+    If ``raw`` matches a known alias (case-insensitive), return the real path.
+    Otherwise return ``raw`` unchanged.
+    """
+    aliases = cfg.get("aliases") or {}
+    return aliases.get(raw) or aliases.get(raw.upper()) or aliases.get(raw.lower()) or raw
+
+
 def main():
     args = _parse_args()
     cfg  = load_config()
@@ -490,6 +581,68 @@ def main():
             _json_out({"status": "ok", "version": __version__})
         else:
             print(f"aevum {__version__}")
+        sys.exit(EX.OK)
+
+    # ── update ───────────────────────────────────────────────────────────
+    if cmd == 'update':
+        import subprocess as _sp
+        pip_cmd = [sys.executable, "-m", "pip", "install", "aevum", "--upgrade"]
+        if getattr(args, 'dry_run', False):
+            print(f"  {clr.DIM}Would run:{clr.RST}  {clr.W}{' '.join(pip_cmd)}{clr.RST}")
+            sys.exit(EX.OK)
+        if not quiet:
+            print(f"  {clr.C}Upgrading Aevum...{clr.RST}")
+        result = _sp.run(pip_cmd)
+        sys.exit(result.returncode)
+
+    # ── alias ────────────────────────────────────────────────────────────
+    if cmd == 'alias':
+        aliases  = cfg.setdefault("aliases", {})
+        action   = getattr(args, 'action', 'list') or 'list'
+        name     = getattr(args, 'name', None)
+        path_val = getattr(args, 'path', None)
+
+        if action == 'list':
+            if not aliases:
+                print(f"  {clr.DIM}No aliases defined.{clr.RST}  "
+                      f"Add one with: {clr.W}aevum alias set <name> <path>{clr.RST}\n")
+                sys.exit(EX.OK)
+            from ._color import LINE
+            print()
+            print(f"  {clr.C}{LINE}{clr.RST}")
+            print(f"  {clr.W}  Aliases{clr.RST}")
+            print(f"  {clr.C}{LINE}{clr.RST}")
+            for k, v in sorted(aliases.items()):
+                exists = Path(v).is_dir()
+                status = f"{clr.G}✓{clr.RST}" if exists else f"{clr.R}✗ (not found){clr.RST}"
+                print(f"  {clr.G}{k:<15}{clr.RST}  {clr.W}{v}{clr.RST}  {status}")
+            print()
+            sys.exit(EX.OK)
+
+        if action in ('remove', 'rm'):
+            if not name:
+                print(f"  {clr.R}[ERROR]{clr.RST} Alias name required.", file=sys.stderr)
+                sys.exit(EX.ERR_ARGS)
+            if name not in aliases:
+                print(f"  {clr.Y}[WARN]{clr.RST}  Alias '{name}' not found.")
+                sys.exit(EX.OK)
+            del aliases[name]
+            save_config(cfg)
+            print(f"  {clr.G}[OK]{clr.RST}  Alias '{name}' removed.")
+            sys.exit(EX.OK)
+
+        if action == 'set':
+            if not name or not path_val:
+                print(f"  {clr.R}[ERROR]{clr.RST} Usage: aevum alias set <name> <path>", file=sys.stderr)
+                sys.exit(EX.ERR_ARGS)
+            resolved = Path(path_val.strip().strip("'\""))
+            if not resolved.exists():
+                print(f"  {clr.Y}[WARN]{clr.RST}  Path does not exist: {resolved}")
+            aliases[name] = str(resolved)
+            save_config(cfg)
+            print(f"  {clr.G}[OK]{clr.RST}  {clr.W}{name}{clr.RST}  {clr.DIM}→{clr.RST}  {clr.W}{resolved}{clr.RST}")
+            sys.exit(EX.OK)
+
         sys.exit(EX.OK)
 
     # ── doctor ────────────────────────────────────────────────────────
@@ -534,7 +687,7 @@ def main():
     # ── watch ─────────────────────────────────────────────────────────
     if cmd == 'watch':
         import time
-        folder = Path(args.folder.strip().strip("'\""))
+        folder = Path(_resolve_alias(args.folder.strip().strip("'\""), cfg))
         if not folder.exists() or not folder.is_dir():
             if use_json:
                 _json_error(f"Not a valid folder: {folder}", EX.ERR_ARGS)
@@ -641,8 +794,8 @@ def main():
 
     # ── compare ───────────────────────────────────────────────────────
     if cmd == 'compare':
-        folder_a = Path(args.folder_a.strip().strip("'\""))
-        folder_b = Path(args.folder_b.strip().strip("'\""))
+        folder_a = Path(_resolve_alias(args.folder_a.strip().strip("'\""), cfg))
+        folder_b = Path(_resolve_alias(args.folder_b.strip().strip("'\""), cfg))
         for f in (folder_a, folder_b):
             if not f.exists() or not f.is_dir():
                 if use_json:
@@ -667,7 +820,7 @@ def main():
 
     # ── dupes ─────────────────────────────────────────────────────────
     if cmd == 'dupes':
-        folder = Path(args.folder.strip().strip("'\""))
+        folder = Path(_resolve_alias(args.folder.strip().strip("'\""), cfg))
         if not folder.exists() or not folder.is_dir():
             if use_json:
                 _json_error(f"Not a valid folder: {folder}", EX.ERR_ARGS)
@@ -716,7 +869,7 @@ def main():
 
     # ── export ────────────────────────────────────────────────────────
     if cmd == 'export':
-        raw       = args.target.strip().strip("'\"")
+        raw       = _resolve_alias(args.target.strip().strip("'\""), cfg)
         sort      = _resolve_sort(args, cfg)
         use_cache = not args.no_cache and cfg.get('cache_enabled', True)
         out_path  = args.out or None
@@ -800,7 +953,7 @@ def main():
             pass
         elif len(targets) == 1:
             # ── single target (original behaviour) ───────────────────
-            raw     = targets[0]
+            raw     = _resolve_alias(targets[0], cfg)
             filters = _build_filters(args, use_json)
             if _is_url(raw):
                 url_prog = None if (quiet or use_json) else _make_url_progress()
@@ -1095,6 +1248,16 @@ def main():
             parts = raw.split()
             repl_config(parts[1:], cfg); continue
 
+        if raw.lower().startswith('alias'):
+            parts = raw.split()
+            _repl_alias(parts[1:], cfg); continue
+
+        if raw.lower() in ('update', 'upgrade'):
+            import subprocess as _sp
+            print(f"  {clr.C}Upgrading Aevum...{clr.RST}")
+            _sp.run([sys.executable, '-m', 'pip', 'install', 'aevum', '--upgrade'])
+            continue
+
         if raw.lower() == 'scan':
             print(f"\n  {clr.DIM}Enter a folder path or YouTube URL to scan.{clr.RST}\n"); continue
 
@@ -1112,6 +1275,7 @@ def main():
                          "entries": entries, "label": label}
             print_post_scan_menu(current_sort); continue
 
+        raw    = _resolve_alias(raw, cfg)
         folder = Path(raw)
         if not folder.exists():
             print(f"\n  {clr.R}[ERROR]{clr.RST} Path not found: {raw}\n"); continue

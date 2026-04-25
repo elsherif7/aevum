@@ -17,6 +17,7 @@ CONFIG_DEFAULTS = {
     "no_color":      False,
     "cache_enabled": True,
     "export_dir":    "",
+    "aliases":       {},   # user-defined path shortcuts, e.g. {"M": "D:\\02-Media"}
 }
 
 
