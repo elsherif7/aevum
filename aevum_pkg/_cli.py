@@ -305,7 +305,7 @@ def _dispatch_subcommand(sub, argv):
                     "  aevum scan D:\\Movies --sort duration --top 20\n"
                     "  aevum scan D:\\Movies --json\n"
                     "  aevum scan https://youtube.com/@mkbhd --json\n"))
-        p.add_argument("target", nargs="?", default=None, metavar="PATH|URL")
+        p.add_argument("targets", nargs="*", default=[], metavar="PATH|URL")
         p.add_argument("-s", "--sort",  default=None, metavar="FIELD[:DIR]")
         p.add_argument("-t", "--top",   type=int, default=None, metavar="N")
         p.add_argument("-f", "--files", action="store_true")
@@ -313,6 +313,8 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("--format", dest="fmt", choices=["txt","csv","json"], default=None)
         p.add_argument("--depth",  type=int, default=None, metavar="N")
         p.add_argument("--no-cache", action="store_true")
+        p.add_argument("--merge", action="store_true",
+                       help="Aggregate all targets into one combined grand total")
         _add_common_flags(p)
         args = p.parse_args(argv); args.command = sub; return args
 
@@ -613,89 +615,256 @@ def main():
         sys.exit(EX.OK)
 
     # ── scan (headless) ───────────────────────────────────────────────
-    if cmd == 'scan' and getattr(args, 'target', None) is not None:
-        raw       = args.target.strip().strip("'\"")
+    if cmd == 'scan' and getattr(args, 'targets', None) is not None:
+        targets   = [t.strip().strip("'\"") for t in args.targets]
         sort      = _resolve_sort(args, cfg)
         top       = _resolve_top(args, cfg)
         use_cache = not args.no_cache and cfg.get('cache_enabled', True)
         out_path  = getattr(args, 'out', None)
         fmt       = _resolve_out_format(out_path, getattr(args, 'fmt', None))
+        do_merge  = getattr(args, 'merge', False)
 
-        if _is_url(raw):
-            url_prog = None if (quiet or use_json) else _make_url_progress()
+        if not targets:
+            # No targets given — fall through to interactive shell
+            pass
+        elif len(targets) == 1:
+            # ── single target (original behaviour) ───────────────────
+            raw = targets[0]
+            if _is_url(raw):
+                url_prog = None if (quiet or use_json) else _make_url_progress()
+                try:
+                    total_sec, total_count, entries, label = scan_url(raw, url_prog)
+                except KeyboardInterrupt:
+                    if use_json:
+                        _json_error("Fetch interrupted", EX.ERR_SCAN)
+                    print(f"\n\n  {Y}Fetch cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
+                except Exception as e:
+                    if use_json:
+                        _json_error(str(e), EX.ERR_API)
+                    print(f"\n  {R}[ERROR]{RST} {e}\n", file=sys.stderr); sys.exit(EX.ERR_API)
+                if use_json:
+                    _json_out(_url_to_json(raw, label, total_sec, total_count, entries))
+                else:
+                    if not quiet:
+                        print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} videos found.".ljust(60))
+                    print_url_results(raw, label, total_sec, total_count, entries, top_n=top)
+                sys.exit(EX.OK)
+
+            folder = Path(raw)
+            if not folder.exists():
+                if use_json:
+                    _json_error(f"Path not found: {folder}", EX.ERR_ARGS)
+                print(f"\n  {R}[ERROR]{RST} Path not found: {folder}", file=sys.stderr)
+                try:
+                    sug = _fuzzy_suggest(folder.name,
+                                         [p.name for p in folder.parent.iterdir() if p.is_dir()])
+                    if sug:
+                        print(f"  {DIM}Did you mean:{RST}  {W}{folder.parent / sug}{RST}", file=sys.stderr)
+                except Exception:
+                    pass
+                print(); sys.exit(EX.ERR_ARGS)
+            if not folder.is_dir():
+                if use_json:
+                    _json_error(f"That is a file, not a folder: {folder}", EX.ERR_ARGS)
+                print(f"\n  {R}[ERROR]{RST} That is a file, not a folder: {folder}\n", file=sys.stderr)
+                sys.exit(EX.ERR_ARGS)
+            _require_ffprobe("scan", use_json)
+
+            on_progress = _make_progress_bar(quiet, use_json)
+            if not quiet:
+                print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
             try:
-                total_sec, total_count, entries, label = scan_url(raw, url_prog)
+                total_sec, total_count, tree, durations, sizes, hits = _run_scan(
+                    folder, on_progress, sort, use_cache)
             except KeyboardInterrupt:
                 if use_json:
-                    _json_error("Fetch interrupted", EX.ERR_SCAN)
-                print(f"\n\n  {Y}Fetch cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
-            except Exception as e:
-                if use_json:
-                    _json_error(str(e), EX.ERR_API)
-                print(f"\n  {R}[ERROR]{RST} {e}\n", file=sys.stderr); sys.exit(EX.ERR_API)
+                    _json_error("Scan interrupted", EX.ERR_SCAN)
+                print(f"\n\n  {Y}Scan cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
+
             if use_json:
-                _json_out(_url_to_json(raw, label, total_sec, total_count, entries))
+                _json_out(_scan_to_json(folder, total_sec, total_count, tree, durations, sizes, hits))
+                sys.exit(EX.OK)
+
+            if not quiet:
+                probed     = total_count - hits
+                cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
+                print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} files found.{cache_info}".ljust(60))
+            print_results(folder, total_sec, total_count, tree, durations, sizes, top,
+                          show_files=getattr(args, 'files', False))
+            groups = find_duplicates(durations, sizes)
+            if not quiet:
+                print_dupe_warning(groups)
+            if fmt and out_path:
+                try:
+                    dest = export_results(folder, total_sec, total_count, tree, durations, fmt, out_path)
+                    if not quiet:
+                        print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
+                except Exception as e:
+                    if use_json:
+                        _json_error(f"Export failed: {e}", EX.ERR_EXPORT)
+                    print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr)
+                    sys.exit(EX.ERR_EXPORT)
+            sys.exit(EX.OK)
+
+        else:
+            # ── multi-target batch ────────────────────────────────────
+            _require_ffprobe("scan", use_json)
+
+            # validate all paths upfront before scanning anything
+            folders = []
+            for raw in targets:
+                if _is_url(raw):
+                    if use_json:
+                        _json_error("Batch mode does not support URLs — use a single URL target", EX.ERR_ARGS)
+                    print(f"\n  {R}[ERROR]{RST} Batch mode does not support URLs: {raw}\n", file=sys.stderr)
+                    sys.exit(EX.ERR_ARGS)
+                f = Path(raw)
+                if not f.exists() or not f.is_dir():
+                    if use_json:
+                        _json_error(f"Not a valid folder: {f}", EX.ERR_ARGS)
+                    print(f"\n  {R}[ERROR]{RST} Not a valid folder: {f}\n", file=sys.stderr)
+                    sys.exit(EX.ERR_ARGS)
+                folders.append(f)
+
+            # scan each folder
+            results = []  # list of (folder, total_sec, total_count, tree, durations, sizes, hits)
+            for i, folder in enumerate(folders, 1):
+                if not quiet:
+                    label_w = 40
+                    print(f"  {DIM}[{i}/{len(folders)}]{RST}  {W}{folder.name:<{label_w}}{RST}  "
+                          f"{DIM}scanning...{RST}", end='', flush=True)
+                on_progress = _make_progress_bar(quiet=True)  # suppress bar in batch — too noisy
+                try:
+                    total_sec, total_count, tree, durations, sizes, hits = _run_scan(
+                        folder, on_progress, sort, use_cache)
+                except KeyboardInterrupt:
+                    if use_json:
+                        _json_error("Scan interrupted", EX.ERR_SCAN)
+                    print(f"\n\n  {Y}Scan cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
+                results.append((folder, total_sec, total_count, tree, durations, sizes, hits))
+                if not quiet:
+                    fmt_dur = format_duration(total_sec)["hours_fmt"]
+                    print(f"\r  {G}[{i}/{len(folders)}]{RST}  {W}{folder.name:<{label_w}}{RST}  "
+                          f"{Y}{fmt_dur}{RST}  {DIM}{total_count} files{RST}".ljust(80))
+
+            if do_merge:
+                # ── merged grand total ────────────────────────────────
+                merged_sec   = sum(r[1] for r in results)
+                merged_count = sum(r[2] for r in results)
+                merged_dur   = {}
+                merged_sizes = {}
+                merged_hits  = sum(r[6] for r in results)
+                for _, _, _, _, durations, sizes, _ in results:
+                    merged_dur.update(durations)
+                    merged_sizes.update(sizes)
+
+                if use_json:
+                    from ._scan import format_duration as _fd
+                    _json_out({
+                        "status":      "ok",
+                        "command":     "scan",
+                        "mode":        "batch_merged",
+                        "paths":       [str(f.resolve()) for f in folders],
+                        "total_files": merged_count,
+                        "total_bytes": sum(merged_sizes.values()),
+                        "total_sec":   round(merged_sec, 2),
+                        "duration":    format_duration(merged_sec),
+                        "cache_hits":  merged_hits,
+                        "per_folder": [
+                            {
+                                "path":        str(r[0].resolve()),
+                                "name":        r[0].name,
+                                "total_files": r[2],
+                                "total_sec":   round(r[1], 2),
+                                "duration":    format_duration(r[1])["hours_fmt"],
+                            }
+                            for r in results
+                        ],
+                        "files": [
+                            {
+                                "path":     str(p),
+                                "filename": p.name,
+                                "folder":   p.parent.name,
+                                "seconds":  round(s, 2),
+                                "duration": format_duration(s)["hours_fmt"],
+                            }
+                            for p, s in sorted(merged_dur.items(), key=lambda x: x[1], reverse=True)
+                        ],
+                    })
+                    sys.exit(EX.OK)
+
+                # human merged output
+                fmt_merged = format_duration(merged_sec)
+                print()
+                print(f"  {C}{LINE}{RST}")
+                print(f"  {W}  Batch Scan  {DIM}|{RST}  {len(folders)} folders  {DIM}(merged){RST}{RST}")
+                print(f"  {C}{LINE}{RST}")
+                for r in results:
+                    fd = format_duration(r[1])["hours_fmt"]
+                    print(f"  {DIM}→{RST}  {W}{r[0].name:<35}{RST}  {Y}{fd}{RST}  {DIM}{r[2]} files{RST}")
+                print()
+                print(f"  {C}{LINE}{RST}")
+                print(f"  {W}  Grand Total{RST}")
+                print(f"  {C}{LINE}{RST}")
+                total_bytes = sum(merged_sizes.values())
+                print(f"  {W}  Total files   {DIM}:{RST}  {W}{merged_count}{RST}")
+                print(f"  {W}  Total size    {DIM}:{RST}  {W}{format_size(total_bytes)}{RST}")
+                print(f"  {W}  Days          {DIM}:{RST}  {W}{fmt_merged['days_fmt']}{RST}")
+                print(f"  {W}  Hours         {DIM}:{RST}  {W}{fmt_merged['hours_fmt']}{RST}")
+                print()
+                print(f"  {C}{LINE}{RST}")
+                print(f"  {W}  Playback Speed{RST}")
+                print(f"  {C}{LINE}{RST}")
+                for speed in (1.0, 1.25, 1.5, 1.75, 2.0):
+                    adj   = format_duration(merged_sec / speed)
+                    slbl  = f"{speed:.2f}".rstrip('0').rstrip('.') + "x"
+                    print(f"  {W}  {slbl:<6}        {DIM}:{RST}  {W}{adj['hours_fmt']}{RST}  {DIM}({adj['days_fmt']}){RST}")
+                print()
+                if top > 0:
+                    from ._display import print_top_files
+                    print_top_files(merged_dur, top)
             else:
-                if not quiet:
-                    print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} videos found.".ljust(60))
-                print_url_results(raw, label, total_sec, total_count, entries, top_n=top)
-            sys.exit(EX.OK)
-
-        folder = Path(raw)
-        if not folder.exists():
-            if use_json:
-                _json_error(f"Path not found: {folder}", EX.ERR_ARGS)
-            print(f"\n  {R}[ERROR]{RST} Path not found: {folder}", file=sys.stderr)
-            try:
-                sug = _fuzzy_suggest(folder.name,
-                                     [p.name for p in folder.parent.iterdir() if p.is_dir()])
-                if sug:
-                    print(f"  {DIM}Did you mean:{RST}  {W}{folder.parent / sug}{RST}", file=sys.stderr)
-            except Exception:
-                pass
-            print(); sys.exit(EX.ERR_ARGS)
-        if not folder.is_dir():
-            if use_json:
-                _json_error(f"That is a file, not a folder: {folder}", EX.ERR_ARGS)
-            print(f"\n  {R}[ERROR]{RST} That is a file, not a folder: {folder}\n", file=sys.stderr)
-            sys.exit(EX.ERR_ARGS)
-        _require_ffprobe("scan", use_json)
-
-        on_progress = _make_progress_bar(quiet, use_json)
-        if not quiet:
-            print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
-        try:
-            total_sec, total_count, tree, durations, sizes, hits = _run_scan(
-                folder, on_progress, sort, use_cache)
-        except KeyboardInterrupt:
-            if use_json:
-                _json_error("Scan interrupted", EX.ERR_SCAN)
-            print(f"\n\n  {Y}Scan cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
-
-        if use_json:
-            _json_out(_scan_to_json(folder, total_sec, total_count, tree, durations, sizes, hits))
-            sys.exit(EX.OK)
-
-        if not quiet:
-            probed     = total_count - hits
-            cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
-            print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} files found.{cache_info}".ljust(60))
-        print_results(folder, total_sec, total_count, tree, durations, sizes, top,
-                      show_files=getattr(args, 'files', False))
-        groups = find_duplicates(durations, sizes)
-        if not quiet:
-            print_dupe_warning(groups)
-        if fmt and out_path:
-            try:
-                dest = export_results(folder, total_sec, total_count, tree, durations, fmt, out_path)
-                if not quiet:
-                    print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
-            except Exception as e:
+                # ── per-folder output ─────────────────────────────────
                 if use_json:
-                    _json_error(f"Export failed: {e}", EX.ERR_EXPORT)
-                print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr)
-                sys.exit(EX.ERR_EXPORT)
-        sys.exit(EX.OK)
+                    _json_out({
+                        "status":  "ok",
+                        "command": "scan",
+                        "mode":    "batch",
+                        "results": [
+                            _scan_to_json(r[0], r[1], r[2], r[3], r[4], r[5], r[6])
+                            for r in results
+                        ],
+                    })
+                    sys.exit(EX.OK)
+
+                for folder, total_sec, total_count, tree, durations, sizes, hits in results:
+                    if not quiet:
+                        probed = total_count - hits
+                        cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
+                    print_results(folder, total_sec, total_count, tree, durations, sizes, top,
+                                  show_files=getattr(args, 'files', False))
+                    groups = find_duplicates(durations, sizes)
+                    if not quiet:
+                        print_dupe_warning(groups)
+
+                # batch summary footer
+                batch_total_sec   = sum(r[1] for r in results)
+                batch_total_count = sum(r[2] for r in results)
+                batch_total_bytes = sum(sum(r[5].values()) for r in results)
+                print(f"  {C}{LINE}{RST}")
+                print(f"  {W}  Batch Summary  {DIM}|{RST}  {len(folders)} folders{RST}")
+                print(f"  {C}{LINE}{RST}")
+                for r in results:
+                    fd = format_duration(r[1])["hours_fmt"]
+                    print(f"  {DIM}→{RST}  {W}{r[0].name:<35}{RST}  {Y}{fd}{RST}  {DIM}{r[2]} files{RST}")
+                print()
+                bfmt = format_duration(batch_total_sec)
+                print(f"  {W}  Combined  {DIM}:{RST}  {W}{bfmt['hours_fmt']}{RST}  "
+                      f"{DIM}|{RST}  {W}{batch_total_count} files{RST}  "
+                      f"{DIM}|{RST}  {W}{format_size(batch_total_bytes)}{RST}")
+                print()
+
+            sys.exit(EX.OK)
 
     # ── INTERACTIVE / SHELL MODE ──────────────────────────────────────
     clear()
