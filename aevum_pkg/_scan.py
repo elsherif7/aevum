@@ -399,3 +399,79 @@ def _run_scan(folder, on_progress, sort_by="name", use_cache=True):
     if durations:
         save_cache(folder, durations)
     return result
+
+
+def parse_duration_arg(s):
+    """
+    Parse a human duration string into seconds (float).
+    Accepts: 30s, 5m, 1h, 1h30m, 90m, 1:30:00, 5400, 1.5h
+    Raises ValueError if the string cannot be parsed.
+    """
+    import re
+    s = s.strip().lower()
+    # plain number -> seconds
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    # HH:MM:SS or MM:SS
+    m = re.fullmatch(r'(\d+):(\d{1,2})(?::(\d{1,2}))?', s)
+    if m:
+        h, mn, sc = m.groups()
+        return int(h) * 3600 + int(mn) * 60 + int(sc or 0)
+    # compound like 1h30m45s, 1.5h, 90m
+    total = 0.0
+    found = False
+    for value, unit in re.findall(r'(\d+(?:\.\d+)?)([hms])', s):
+        found = True
+        v = float(value)
+        if unit == 'h':   total += v * 3600
+        elif unit == 'm': total += v * 60
+        elif unit == 's': total += v
+    if found:
+        return total
+    raise ValueError(f"Cannot parse duration: '{s}'  (try: 30s, 5m, 1h, 1h30m, 1:30:00)")
+
+
+def apply_filters(durations, sizes, filters):
+    """
+    Filter a durations dict by the given filter dict.
+    filters keys (all optional):
+      min_duration  float seconds
+      max_duration  float seconds
+      exts          set of lowercase extensions with dot e.g. {'.mkv', '.mp4'}
+      folder_pat    glob pattern matched against path.parent.name (case-insensitive)
+    Returns (filtered_durations, filtered_sizes).
+    """
+    import fnmatch
+    min_dur    = filters.get('min_duration')
+    max_dur    = filters.get('max_duration')
+    exts       = filters.get('exts')
+    folder_pat = filters.get('folder_pat')
+
+    out_dur  = {}
+    out_size = {}
+    for path, sec in durations.items():
+        if min_dur is not None and sec < min_dur:
+            continue
+        if max_dur is not None and sec > max_dur:
+            continue
+        if exts is not None and path.suffix.lower() not in exts:
+            continue
+        if folder_pat is not None:
+            if not fnmatch.fnmatch(path.parent.name.lower(), folder_pat.lower()):
+                continue
+        out_dur[path]  = sec
+        out_size[path] = sizes.get(path, 0)
+    return out_dur, out_size
+
+
+def rebuild_after_filter(root, durations, sizes, sort_by="name:asc"):
+    """Re-run tree builder and totals after filters have been applied."""
+    if not durations:
+        subfolders, direct, root_bytes = _build_tree(root, {}, sort_by)
+        return 0.0, 0, (subfolders, direct, root_bytes), durations, sizes
+    total_sec   = sum(durations.values())
+    total_count = len(durations)
+    subfolders, direct, root_bytes = _build_tree(root, durations, sort_by, sizes)
+    return total_sec, total_count, (subfolders, direct, root_bytes), durations, sizes

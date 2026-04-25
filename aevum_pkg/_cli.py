@@ -4,13 +4,15 @@ All business logic lives in the other modules.
 """
 import argparse
 import json
+import os
 import sys
 import types
 from datetime import datetime
 from pathlib import Path
 
 from ._color   import R, G, Y, B, M, C, W, DIM, RST, LINE, clear, _disable_color
-from ._scan    import check_ffprobe, format_duration, format_size, _run_scan
+from ._scan    import (check_ffprobe, format_duration, format_size, _run_scan,
+                       parse_duration_arg, apply_filters, rebuild_after_filter)
 from ._youtube import _is_url, scan_url, _make_url_progress
 from ._display import (print_results, print_url_results, print_banner,
                        print_post_scan_menu, _fuzzy_suggest)
@@ -213,6 +215,7 @@ def _print_global_help():
     {G}compare{RST}   <path> <path>         Compare two libraries side-by-side
     {G}dupes{RST}     <path>                Find duplicate-duration files
     {G}export{RST}    <path|url> <format>   Scan and write results to a file
+    {G}watch{RST}     <path>                Re-scan automatically when folder changes
     {G}cache{RST}                           Manage the duration cache
     {G}config{RST}                          Read/write configuration
     {G}doctor{RST}                          Check environment (ffprobe, API key, cache)
@@ -275,7 +278,7 @@ def _parse_args():
         sys.exit(EX.OK)
 
     subcommand = argv[0]
-    SUBCOMMANDS = ('scan', 'compare', 'dupes', 'export', 'cache', 'config', 'doctor', 'version', 'shell')
+    SUBCOMMANDS = ('scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config', 'doctor', 'version', 'shell')
 
     if subcommand not in SUBCOMMANDS:
         from ._display import _fuzzy_suggest
@@ -315,6 +318,38 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("--no-cache", action="store_true")
         p.add_argument("--merge", action="store_true",
                        help="Aggregate all targets into one combined grand total")
+        p.add_argument("--min-duration", default=None, metavar="DURATION",
+                       help="Exclude files shorter than this (e.g. 30s, 5m, 1h, 1:30:00)")
+        p.add_argument("--max-duration", default=None, metavar="DURATION",
+                       help="Exclude files longer than this")
+        p.add_argument("--ext", default=None, metavar="EXT[,EXT]",
+                       help="Only include these extensions, comma-separated (e.g. mkv,mp4)")
+        p.add_argument("--folder", dest="folder_pat", default=None, metavar="PATTERN",
+                       help="Only include files inside folders matching this glob (e.g. 'Action*')")
+        _add_common_flags(p)
+        args = p.parse_args(argv); args.command = sub; return args
+
+    if sub == 'watch':
+        p = argparse.ArgumentParser(prog="aevum watch",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            description="Re-scan a folder automatically whenever its contents change.",
+            epilog=("Examples:\n"
+                    "  aevum watch D:\\Movies\n"
+                    "  aevum watch D:\\Movies --interval 10\n"
+                    "  aevum watch D:\\Movies --no-clear\n"
+                    "  aevum watch D:\\Movies --json\n"
+                    "  aevum watch D:\\Downloads --ext mkv,mp4 --min-duration 5m\n"))
+        p.add_argument("folder", metavar="PATH")
+        p.add_argument("-i", "--interval", type=float, default=5.0, metavar="SECONDS",
+                       help="Poll interval in seconds (default: 5)")
+        p.add_argument("--no-clear", action="store_true",
+                       help="Don't clear the screen between updates")
+        p.add_argument("-s", "--sort",  default=None, metavar="FIELD[:DIR]")
+        p.add_argument("-t", "--top",   type=int, default=None, metavar="N")
+        p.add_argument("--min-duration", default=None, metavar="DURATION")
+        p.add_argument("--max-duration", default=None, metavar="DURATION")
+        p.add_argument("--ext", default=None, metavar="EXT[,EXT]")
+        p.add_argument("--folder", dest="folder_pat", default=None, metavar="PATTERN")
         _add_common_flags(p)
         args = p.parse_args(argv); args.command = sub; return args
 
@@ -469,6 +504,114 @@ def main():
     if cmd == 'cache':
         cmd_cache(args); sys.exit(EX.OK)
 
+    # ── watch ─────────────────────────────────────────────────────────
+    if cmd == 'watch':
+        import time
+        folder = Path(args.folder.strip().strip("'\""))
+        if not folder.exists() or not folder.is_dir():
+            if use_json:
+                _json_error(f"Not a valid folder: {folder}", EX.ERR_ARGS)
+            print(f"\n  {R}[ERROR]{RST} Not a valid folder: {folder}\n", file=sys.stderr)
+            sys.exit(EX.ERR_ARGS)
+        _require_ffprobe("watch", use_json)
+
+        interval   = max(1.0, args.interval)
+        no_clear   = args.no_clear or use_json  # never clear in JSON mode
+        sort       = _resolve_sort(args, cfg)
+        top        = _resolve_top(args, cfg)
+        filters    = _build_filters(args, use_json)
+
+        def _folder_snapshot(root):
+            """Return a dict of {path: mtime} for all immediate subdirs + root."""
+            snap = {}
+            try:
+                snap[str(root)] = root.stat().st_mtime
+                for entry in os.scandir(root):
+                    if entry.is_dir(follow_symlinks=False):
+                        snap[entry.path] = entry.stat().st_mtime
+            except OSError:
+                pass
+            return snap
+
+        def _do_scan():
+            total_sec, total_count, tree, durations, sizes, hits = _run_scan(
+                folder, None, sort, use_cache=True)
+            if filters:
+                durations, sizes = apply_filters(durations, sizes, filters)
+                total_sec, total_count, tree, durations, sizes = rebuild_after_filter(
+                    folder, durations, sizes, sort)
+            return total_sec, total_count, tree, durations, sizes, hits
+
+        if not quiet:
+            print(f"\n  {C}Watching{RST}  {W}{folder}{RST}  "
+                  f"{DIM}(interval: {interval}s — Ctrl+C to stop){RST}\n")
+
+        update_n  = 0
+        last_snap = {}
+        last_sec  = None
+
+        while True:
+            try:
+                snap = _folder_snapshot(folder)
+                changed = snap != last_snap
+
+                if changed or update_n == 0:
+                    last_snap = snap
+                    try:
+                        total_sec, total_count, tree, durations, sizes, hits = _do_scan()
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception as e:
+                        if use_json:
+                            print(json.dumps({"status": "error", "error": str(e),
+                                              "timestamp": datetime.now().isoformat()}), flush=True)
+                        else:
+                            print(f"  {R}[ERROR]{RST} Scan failed: {e}", file=sys.stderr)
+                        time.sleep(interval); continue
+
+                    update_n += 1
+                    ts = datetime.now().strftime("%H:%M:%S")
+
+                    if use_json:
+                        payload = _scan_to_json(folder, total_sec, total_count,
+                                                tree, durations, sizes, hits)
+                        payload["watch_update"]    = update_n
+                        payload["timestamp"]       = datetime.now().isoformat()
+                        payload["changed"]         = changed
+                        payload["total_sec_delta"] = round(total_sec - (last_sec or total_sec), 2)
+                        # newline-delimited JSON — one object per update
+                        print(json.dumps(payload, ensure_ascii=False), flush=True)
+                    else:
+                        if not no_clear:
+                            clear()
+                        fmt = format_duration(total_sec)
+                        delta_str = ""
+                        if last_sec is not None and last_sec != total_sec:
+                            delta  = total_sec - last_sec
+                            sign   = "+" if delta >= 0 else ""
+                            dfmt   = format_duration(abs(delta))["hours_fmt"]
+                            dcol   = G if delta >= 0 else R
+                            delta_str = f"  {dcol}{sign}{dfmt}{RST}"
+                        print(f"  {C}{LINE}{RST}")
+                        print(f"  {C}  Watching{RST}  {DIM}|{RST}  {W}{folder.name}{RST}  "
+                              f"{DIM}|{RST}  {G}#{update_n}{RST}  {DIM}@ {ts}{RST}{delta_str}")
+                        print(f"  {C}{LINE}{RST}")
+                        print()
+                        print_results(folder, total_sec, total_count, tree,
+                                      durations, sizes, top, show_files=False)
+                        print(f"  {DIM}Next check in {interval}s — Ctrl+C to stop{RST}\n")
+                    last_sec = total_sec
+
+                time.sleep(interval)
+
+            except KeyboardInterrupt:
+                if use_json:
+                    print(json.dumps({"status": "stopped", "updates": update_n,
+                                      "timestamp": datetime.now().isoformat()}), flush=True)
+                else:
+                    print(f"\n\n  {G}Watch stopped.{RST}  {DIM}{update_n} update(s) shown.{RST}\n")
+                sys.exit(EX.OK)
+
     # ── compare ───────────────────────────────────────────────────────
     if cmd == 'compare':
         folder_a = Path(args.folder_a.strip().strip("'\""))
@@ -614,6 +757,34 @@ def main():
             sys.exit(EX.ERR_EXPORT)
         sys.exit(EX.OK)
 
+def _build_filters(args, use_json=False):
+    """
+    Parse filter-related args into a filters dict for apply_filters().
+    Returns {} if no filters were requested.
+    Exits with ERR_ARGS on bad input.
+    """
+    filters = {}
+    for attr, key in (('min_duration', 'min_duration'), ('max_duration', 'max_duration')):
+        raw = getattr(args, attr, None)
+        if raw:
+            try:
+                filters[key] = parse_duration_arg(raw)
+            except ValueError as e:
+                if use_json:
+                    _json_error(str(e), EX.ERR_ARGS)
+                print(f"\n  {R}[ERROR]{RST} {e}\n", file=sys.stderr)
+                sys.exit(EX.ERR_ARGS)
+    raw_ext = getattr(args, 'ext', None)
+    if raw_ext:
+        filters['exts'] = {
+            ('.' + x.lstrip('.').lower()) for x in raw_ext.split(',') if x.strip()
+        }
+    folder_pat = getattr(args, 'folder_pat', None)
+    if folder_pat:
+        filters['folder_pat'] = folder_pat
+    return filters
+
+
     # ── scan (headless) ───────────────────────────────────────────────
     if cmd == 'scan' and getattr(args, 'targets', None) is not None:
         targets   = [t.strip().strip("'\"") for t in args.targets]
@@ -629,7 +800,8 @@ def main():
             pass
         elif len(targets) == 1:
             # ── single target (original behaviour) ───────────────────
-            raw = targets[0]
+            raw     = targets[0]
+            filters = _build_filters(args, use_json)
             if _is_url(raw):
                 url_prog = None if (quiet or use_json) else _make_url_progress()
                 try:
@@ -681,6 +853,15 @@ def main():
                     _json_error("Scan interrupted", EX.ERR_SCAN)
                 print(f"\n\n  {Y}Scan cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
 
+            # apply filters if any were requested
+            if filters:
+                durations, sizes = apply_filters(durations, sizes, filters)
+                total_sec, total_count, tree, durations, sizes = rebuild_after_filter(
+                    folder, durations, sizes, sort)
+                if not quiet and not use_json:
+                    removed = hits + (total_count - len(durations))  # rough
+                    print(f"  {DIM}Filters applied — {len(durations)} files match.{RST}")
+
             if use_json:
                 _json_out(_scan_to_json(folder, total_sec, total_count, tree, durations, sizes, hits))
                 sys.exit(EX.OK)
@@ -709,6 +890,7 @@ def main():
         else:
             # ── multi-target batch ────────────────────────────────────
             _require_ffprobe("scan", use_json)
+            filters = _build_filters(args, use_json)
 
             # validate all paths upfront before scanning anything
             folders = []
@@ -741,6 +923,10 @@ def main():
                     if use_json:
                         _json_error("Scan interrupted", EX.ERR_SCAN)
                     print(f"\n\n  {Y}Scan cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
+                if filters:
+                    durations, sizes = apply_filters(durations, sizes, filters)
+                    total_sec, total_count, tree, durations, sizes = rebuild_after_filter(
+                        folder, durations, sizes, sort)
                 results.append((folder, total_sec, total_count, tree, durations, sizes, hits))
                 if not quiet:
                     fmt_dur = format_duration(total_sec)["hours_fmt"]
