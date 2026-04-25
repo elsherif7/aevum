@@ -219,6 +219,7 @@ def _print_global_help():
     {clr.G}alias{clr.RST}                           Manage short aliases for folder paths
     {clr.G}cache{clr.RST}                           Manage the duration cache
     {clr.G}update{clr.RST}                          Upgrade Aevum to the latest version
+    {clr.G}clearpath{clr.RST}                       Clear saved project path for updates
     {clr.G}config{clr.RST}                          Read/write configuration
     {clr.G}doctor{clr.RST}                          Check environment (ffprobe, API key, cache)
     {clr.G}version{clr.RST}                         Print version and exit
@@ -282,7 +283,7 @@ def _parse_args():
         argv = ['update'] + argv[1:]
 
     subcommand = argv[0]
-    SUBCOMMANDS = ('scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config', 'alias', 'doctor', 'version', 'update', 'shell')
+    SUBCOMMANDS = ('scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config', 'alias', 'doctor', 'version', 'update', 'clearpath', 'shell')
 
     if subcommand not in SUBCOMMANDS:
         from ._display import _fuzzy_suggest
@@ -640,6 +641,24 @@ def main():
             print(f"  {clr.C}Upgrading Aevum from {clr.W}{_src_dir}{clr.C}...{clr.RST}")
         result = _sp.run(pip_cmd)
         sys.exit(result.returncode)
+    
+    # ── clearpath ────────────────────────────────────────────────────────
+    if cmd == 'clearpath':
+        if 'project_dir' in cfg:
+            cleared = cfg['project_dir']
+            del cfg['project_dir']
+            save_config(cfg)
+            if use_json:
+                _json_out({"status": "ok", "message": "Saved path cleared", "path": cleared})
+            else:
+                print(f"  {clr.G}[OK]{clr.RST}  Saved path cleared: {clr.DIM}{cleared}{clr.RST}")
+        else:
+            if use_json:
+                _json_out({"status": "ok", "message": "No saved path to clear"})
+            else:
+                print(f"  {clr.DIM}No saved path to clear.{clr.RST}")
+        sys.exit(EX.OK)
+    
     # ── alias ────────────────────────────────────────────────────────────
     if cmd == 'alias':
         aliases  = cfg.setdefault("aliases", {})
@@ -1318,31 +1337,63 @@ def main():
             import subprocess as _sp
             _saved = cfg.get('project_dir', '')
             _src_dir = None
+            
+            # Check if saved path exists and is valid
             if _saved and (Path(_saved) / "pyproject.toml").exists():
                 _src_dir = Path(_saved)
-            elif (Path.cwd() / "pyproject.toml").exists():
-                _src_dir = Path.cwd()
+            
+            # Warn if saved path is invalid
             if _saved and not (Path(_saved) / "pyproject.toml").exists():
                 print(f"  {clr.Y}[WARN]{clr.RST}  Saved project path no longer exists: {clr.W}{_saved}{clr.RST}")
                 _src_dir = None
-            if _src_dir is None:
-                print(f"  {clr.Y}Aevum project folder not found.{clr.RST}")
-                print(f"  {clr.DIM}Option 1:{clr.RST}  Go to your Aevum folder and run {clr.W}aevum update{clr.RST} from there.")
-                print(f"  {clr.DIM}Option 2:{clr.RST}  Paste the path below to save it for next time.")
-                try:
-                    _pasted = input(f"  {clr.C}Aevum folder path{clr.RST} (or Enter to cancel)> ").strip().strip("'\"")
-                except (KeyboardInterrupt, EOFError):
-                    print(); continue
-                if not _pasted:
-                    continue
-                _src_dir = Path(_pasted)
-                if not (_src_dir / "pyproject.toml").exists():
-                    print(f"  {clr.R}[ERROR]{clr.RST} No pyproject.toml at {_src_dir}.\n"); continue
-                cfg['project_dir'] = str(_src_dir)
-                save_config(cfg)
-                print(f"  {clr.G}[OK]{clr.RST}  Path saved. You can run {clr.W}aevum update{clr.RST} from anywhere now.\n")
+            
+            # If we have a valid saved path, just run the update
+            if _src_dir is not None:
+                print(f"  {clr.C}Upgrading Aevum from {clr.W}{_src_dir}{clr.C}...{clr.RST}")
+                _sp.run([sys.executable, '-m', 'pip', 'install', str(_src_dir), '--upgrade'])
+                continue
+            
+            # No saved path - check if we're in the project folder
+            if (Path.cwd() / "pyproject.toml").exists():
+                print(f"  {clr.G}You're already in the Aevum project folder.{clr.RST}")
+                print(f"  {clr.W}Run:{clr.RST}  {clr.C}pip install . --upgrade{clr.RST}\n")
+                continue
+            
+            # Not in project folder and no saved path - show options
+            print(f"  {clr.Y}Aevum project folder not found.{clr.RST}")
+            print()
+            print(f"  {clr.DIM}Option 1:{clr.RST}  Go to your Aevum folder and run: {clr.C}pip install . --upgrade{clr.RST}")
+            print(f"  {clr.DIM}Option 2:{clr.RST}  Enter the path below to save it for future updates")
+            print()
+            
+            try:
+                _pasted = input(f"  {clr.C}Aevum folder path{clr.RST} (or Enter to cancel)> ").strip().strip("'\"")
+            except (KeyboardInterrupt, EOFError):
+                print(); continue
+            
+            if not _pasted:
+                continue
+            
+            _src_dir = Path(_pasted)
+            if not (_src_dir / "pyproject.toml").exists():
+                print(f"  {clr.R}[ERROR]{clr.RST} No pyproject.toml at {_src_dir}.\n")
+                continue
+            
+            cfg['project_dir'] = str(_src_dir)
+            save_config(cfg)
+            print(f"  {clr.G}[OK]{clr.RST}  Path saved. You can run {clr.W}aevum update{clr.RST} from anywhere now.\n")
             print(f"  {clr.C}Upgrading Aevum from {clr.W}{_src_dir}{clr.C}...{clr.RST}")
             _sp.run([sys.executable, '-m', 'pip', 'install', str(_src_dir), '--upgrade'])
+            continue
+        
+        if raw.lower() in ('clearpath', 'clear-path'):
+            if 'project_dir' in cfg:
+                _cleared = cfg['project_dir']
+                del cfg['project_dir']
+                save_config(cfg)
+                print(f"  {clr.G}[OK]{clr.RST}  Saved path cleared: {clr.DIM}{_cleared}{clr.RST}\n")
+            else:
+                print(f"  {clr.DIM}No saved path to clear.{clr.RST}\n")
             continue
 
         if raw.lower() == 'scan':
