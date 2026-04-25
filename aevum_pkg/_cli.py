@@ -592,16 +592,46 @@ def main():
     # ── update ───────────────────────────────────────────────────────────
     if cmd == 'update':
         import subprocess as _sp
-        _src_dir = None
-        for _parent in Path(__file__).resolve().parents:
-            if (_parent / "pyproject.toml").exists():
-                _src_dir = _parent
-                break
+
+        def _find_project_dir():
+            """Return the saved or auto-detected project dir, or None."""
+            # 1. Saved in config
+            saved = cfg.get('project_dir', '')
+            if saved and (Path(saved) / "pyproject.toml").exists():
+                return Path(saved)
+            # 2. cwd
+            if (Path.cwd() / "pyproject.toml").exists():
+                return Path.cwd()
+            return None
+
+        _src_dir = _find_project_dir()
+
+        # Saved path no longer valid — tell user and ask again
+        saved_path = cfg.get('project_dir', '')
+        if saved_path and not (Path(saved_path) / "pyproject.toml").exists():
+            print(f"\n  {clr.Y}[WARN]{clr.RST}  Saved project path no longer exists: {clr.W}{saved_path}{clr.RST}")
+            print(f"  The project folder may have moved or been renamed.")
+            _src_dir = None
+
         if _src_dir is None:
-            print(f"  {clr.R}[ERROR]{clr.RST} Could not find pyproject.toml. "
-                  f"Run {clr.W}pip install . --upgrade{clr.RST} manually from your Aevum folder.",
-                  file=sys.stderr)
-            sys.exit(EX.ERR_ARGS)
+            print(f"\n  {clr.Y}Aevum project folder not found.{clr.RST}")
+            print(f"  {clr.DIM}Option 1:{clr.RST}  cd to your Aevum folder and run {clr.W}aevum update{clr.RST} from there.")
+            print(f"  {clr.DIM}Option 2:{clr.RST}  Paste the path to your Aevum folder below and it will be saved for next time.")
+            print()
+            try:
+                pasted = input(f"  {clr.C}Aevum folder path{clr.RST} (or Enter to cancel)> ").strip().strip("'\"")
+            except (KeyboardInterrupt, EOFError):
+                print(); sys.exit(EX.OK)
+            if not pasted:
+                sys.exit(EX.OK)
+            _src_dir = Path(pasted)
+            if not (_src_dir / "pyproject.toml").exists():
+                print(f"\n  {clr.R}[ERROR]{clr.RST} No pyproject.toml found at {_src_dir}. Please check the path.\n", file=sys.stderr)
+                sys.exit(EX.ERR_ARGS)
+            cfg['project_dir'] = str(_src_dir)
+            save_config(cfg)
+            print(f"  {clr.G}[OK]{clr.RST}  Path saved. You can run {clr.W}aevum update{clr.RST} from anywhere now.\n")
+
         pip_cmd = [sys.executable, "-m", "pip", "install", str(_src_dir), "--upgrade"]
         if getattr(args, 'dry_run', False):
             print(f"  {clr.DIM}Would run:{clr.RST}  {clr.W}{' '.join(pip_cmd)}{clr.RST}")
@@ -1286,16 +1316,33 @@ def main():
 
         if raw.lower() in ('update', 'upgrade'):
             import subprocess as _sp
-            print(f"  {clr.C}Upgrading Aevum...{clr.RST}")
+            _saved = cfg.get('project_dir', '')
             _src_dir = None
-            for _parent in Path(__file__).resolve().parents:
-                if (_parent / "pyproject.toml").exists():
-                    _src_dir = _parent
-                    break
+            if _saved and (Path(_saved) / "pyproject.toml").exists():
+                _src_dir = Path(_saved)
+            elif (Path.cwd() / "pyproject.toml").exists():
+                _src_dir = Path.cwd()
+            if _saved and not (Path(_saved) / "pyproject.toml").exists():
+                print(f"  {clr.Y}[WARN]{clr.RST}  Saved project path no longer exists: {clr.W}{_saved}{clr.RST}")
+                _src_dir = None
             if _src_dir is None:
-                print(f"  {clr.R}[ERROR]{clr.RST} Could not find pyproject.toml.\n")
-            else:
-                _sp.run([sys.executable, '-m', 'pip', 'install', str(_src_dir), '--upgrade'])
+                print(f"  {clr.Y}Aevum project folder not found.{clr.RST}")
+                print(f"  {clr.DIM}Option 1:{clr.RST}  Go to your Aevum folder and run {clr.W}aevum update{clr.RST} from there.")
+                print(f"  {clr.DIM}Option 2:{clr.RST}  Paste the path below to save it for next time.")
+                try:
+                    _pasted = input(f"  {clr.C}Aevum folder path{clr.RST} (or Enter to cancel)> ").strip().strip("'\"")
+                except (KeyboardInterrupt, EOFError):
+                    print(); continue
+                if not _pasted:
+                    continue
+                _src_dir = Path(_pasted)
+                if not (_src_dir / "pyproject.toml").exists():
+                    print(f"  {clr.R}[ERROR]{clr.RST} No pyproject.toml at {_src_dir}.\n"); continue
+                cfg['project_dir'] = str(_src_dir)
+                save_config(cfg)
+                print(f"  {clr.G}[OK]{clr.RST}  Path saved. You can run {clr.W}aevum update{clr.RST} from anywhere now.\n")
+            print(f"  {clr.C}Upgrading Aevum from {clr.W}{_src_dir}{clr.C}...{clr.RST}")
+            _sp.run([sys.executable, '-m', 'pip', 'install', str(_src_dir), '--upgrade'])
             continue
 
         if raw.lower() == 'scan':
