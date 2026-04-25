@@ -3,6 +3,7 @@ CLI entry point: argument parsing, subcommand dispatch, and main().
 All business logic lives in the other modules.
 """
 import argparse
+import json
 import sys
 import types
 from datetime import datetime
@@ -19,13 +20,136 @@ from ._export  import export_results
 from ._config  import (CONFIG_DEFAULTS, load_config, save_config,
                        cmd_doctor, cmd_cache, cmd_config, repl_config)
 from ._youtube import load_api_key, prompt_api_key
+from . import _exit as EX
 
 __version__ = "1.0.0"
 
 
+# ── JSON OUTPUT ───────────────────────────────────────────────────────
+
+def _json_out(data: dict):
+    """Write JSON to stdout and flush."""
+    print(json.dumps(data, ensure_ascii=False, indent=2), flush=True)
+
+
+def _json_error(msg: str, code: int, extra: dict = None):
+    d = {"status": "error", "code": code, "error": msg}
+    if extra:
+        d.update(extra)
+    _json_out(d)
+    sys.exit(code)
+
+
+def _scan_to_json(folder, total_sec, total_count, tree, durations, sizes, hits):
+    """Convert a completed local scan to a JSON-serialisable dict."""
+    from ._export import _tree_to_dict
+    subfolders, direct, root_bytes = tree
+    fmt = format_duration(total_sec)
+    return {
+        "status":      "ok",
+        "command":     "scan",
+        "path":        str(Path(folder).resolve()),
+        "total_files": total_count,
+        "total_bytes": sum(sizes.values()),
+        "total_sec":   round(total_sec, 2),
+        "duration":    fmt,
+        "cache_hits":  hits,
+        "tree":        _tree_to_dict(Path(folder).name, total_sec, total_count, subfolders, direct),
+        "files": [
+            {
+                "path":     str(p),
+                "filename": p.name,
+                "folder":   p.parent.name,
+                "seconds":  round(s, 2),
+                "bytes":    sizes.get(p, 0),
+                "duration": format_duration(s)["hours_fmt"],
+            }
+            for p, s in sorted(durations.items(), key=lambda x: x[1], reverse=True)
+        ],
+    }
+
+
+def _url_to_json(url, label, total_sec, total_count, entries):
+    fmt = format_duration(total_sec)
+    return {
+        "status":      "ok",
+        "command":     "scan",
+        "url":         url,
+        "label":       label,
+        "total_files": total_count,
+        "total_sec":   round(total_sec, 2),
+        "duration":    fmt,
+        "videos": [
+            {
+                "title":    e["title"],
+                "channel":  e.get("channel", ""),
+                "url":      e.get("url", ""),
+                "seconds":  round(e["duration"], 2),
+                "duration": format_duration(e["duration"])["hours_fmt"],
+            }
+            for e in sorted(entries, key=lambda x: x["duration"], reverse=True)
+        ],
+    }
+
+
+def _dupes_to_json(groups, durations, sizes):
+    total_wasted = 0.0
+    out_groups   = []
+    for group in groups:
+        sec    = durations.get(group[0], 0.0)
+        wasted = sec * (len(group) - 1)
+        total_wasted += wasted
+        out_groups.append({
+            "copies":      len(group),
+            "seconds":     round(sec, 2),
+            "wasted_sec":  round(wasted, 2),
+            "wasted_fmt":  format_duration(wasted)["hours_fmt"],
+            "files": [{"path": str(p), "bytes": sizes.get(p, 0)} for p in group],
+        })
+    return {
+        "status":           "ok",
+        "command":          "dupes",
+        "groups_found":     len(groups),
+        "total_wasted_sec": round(total_wasted, 2),
+        "total_wasted_fmt": format_duration(total_wasted)["hours_fmt"],
+        "groups":           out_groups,
+    }
+
+
+def _compare_to_json(folder_a, folder_b, data_a, data_b):
+    sec_a, count_a, _ = data_a
+    sec_b, count_b, _ = data_b
+    delta = sec_b - sec_a
+    return {
+        "status":  "ok",
+        "command": "compare",
+        "a": {
+            "path":        str(Path(folder_a).resolve()),
+            "total_files": count_a,
+            "total_sec":   round(sec_a, 2),
+            "duration":    format_duration(sec_a)["hours_fmt"],
+        },
+        "b": {
+            "path":        str(Path(folder_b).resolve()),
+            "total_files": count_b,
+            "total_sec":   round(sec_b, 2),
+            "duration":    format_duration(sec_b)["hours_fmt"],
+        },
+        "delta": {
+            "seconds":  round(delta, 2),
+            "duration": format_duration(abs(delta))["hours_fmt"],
+            "sign":     "+" if delta >= 0 else "-",
+            "files":    count_b - count_a,
+        },
+    }
+
+
 # ── HELPERS ───────────────────────────────────────────────────────────
 
-def _make_progress_bar():
+def _make_progress_bar(quiet=False, use_json=False):
+    """Return None in machine-output modes; suppress all progress noise."""
+    if quiet or use_json:
+        return None
     def on_progress(done, total):
         pct    = int((done / total) * 100)
         filled = int(24 * done / total)
@@ -35,14 +159,19 @@ def _make_progress_bar():
     return on_progress
 
 
-def _require_ffprobe(context=""):
+def _require_ffprobe(context="", use_json=False):
     if not check_ffprobe():
         ctx = f" ({context})" if context else ""
-        print(f"\n  {R}[ERROR]{RST} ffprobe not found on PATH{ctx}.")
-        print(f"  {DIM}ffprobe is required for local folder scanning.{RST}")
-        print(f"  Install FFmpeg: {C}https://ffmpeg.org/download.html{RST}")
-        print(f"  Then re-run:    {W}aevum doctor{RST}\n")
-        sys.exit(2)
+        if use_json:
+            _json_error(
+                f"ffprobe not found on PATH{ctx}. Install FFmpeg: https://ffmpeg.org/download.html",
+                EX.ERR_DEPS,
+            )
+        print(f"\n  {R}[ERROR]{RST} ffprobe not found on PATH{ctx}.", file=sys.stderr)
+        print(f"  {DIM}ffprobe is required for local folder scanning.{RST}", file=sys.stderr)
+        print(f"  Install FFmpeg: {C}https://ffmpeg.org/download.html{RST}", file=sys.stderr)
+        print(f"  Then re-run:    {W}aevum doctor{RST}\n", file=sys.stderr)
+        sys.exit(EX.ERR_DEPS)
 
 
 def _resolve_sort(args, cfg):
@@ -91,21 +220,35 @@ def _print_global_help():
 
   {W}GLOBAL OPTIONS{RST}
     --no-color                      Disable ANSI color output
+    --json                          Machine-readable JSON output to stdout
+    -q, --quiet                     Suppress decorative output (errors → stderr only)
     -h, --help                      Show this help
     -V, --version                   Show version
 
-  {W}EXAMPLES{RST}
-    aevum scan D:\\Movies
-    aevum scan D:\\Movies --sort duration --top 20
-    aevum scan https://youtube.com/@mkbhd
-    aevum export D:\\Movies json -o library.json
-    aevum dupes D:\\Movies
-    aevum compare D:\\Movies E:\\Backup
-    aevum config set sort duration:desc
-    aevum doctor
+  {W}EXIT CODES{RST}
+    0  success
+    1  bad arguments / path not found
+    2  missing dependency (ffprobe)
+    3  scan error / interrupted
+    4  export / write failed
+    5  YouTube API error
+
+  {W}PIPE EXAMPLES{RST}
+    aevum scan D:\\Movies --json
+    aevum scan D:\\Movies --json | python -m json.tool
+    aevum dupes D:\\Movies --json | python -c "import sys,json; d=json.load(sys.stdin); print(d['groups_found'])"
+    aevum scan D:\\Movies -q; echo "exit $?"
 
   {DIM}Run 'aevum <command> --help' for command-specific options.{RST}
 """)
+
+
+def _add_common_flags(p):
+    """Attach --no-color / --json / --quiet to any subcommand parser."""
+    p.add_argument("--no-color", action="store_true", help="Disable ANSI colors")
+    p.add_argument("--json",     action="store_true", help="Output JSON to stdout")
+    p.add_argument("-q", "--quiet", action="store_true",
+                   help="Suppress all decorative output; only errors go to stderr")
 
 
 def _parse_args():
@@ -126,19 +269,17 @@ def _parse_args():
 
     if not argv or argv[0] in ('-h', '--help'):
         _print_global_help()
-        sys.exit(0)
+        sys.exit(EX.OK)
     if argv[0] in ('-V', '--version'):
         print(f"aevum {__version__}")
-        sys.exit(0)
+        sys.exit(EX.OK)
 
     subcommand = argv[0]
     SUBCOMMANDS = ('scan', 'compare', 'dupes', 'export', 'cache', 'config', 'doctor', 'version', 'shell')
 
     if subcommand not in SUBCOMMANDS:
-        # Check if it looks like a typo of a real subcommand — git-style suggestion
         from ._display import _fuzzy_suggest
         suggestion = _fuzzy_suggest(subcommand, list(SUBCOMMANDS))
-        # If it looks like a path or URL, treat as implicit scan
         if (subcommand.startswith(('/', '\\', '.')) or
                 ':' in subcommand or
                 subcommand.startswith(('http://', 'https://', 'www.'))):
@@ -146,10 +287,10 @@ def _parse_args():
             subcommand = 'scan'
         elif suggestion:
             print(f"\n  {R}aevum: '{subcommand}' is not a command.{RST}  {DIM}Did you mean{RST}  {W}{suggestion}{RST}{DIM}?{RST}\n")
-            sys.exit(1)
+            sys.exit(EX.ERR_ARGS)
         else:
             print(f"\n  {R}aevum: '{subcommand}' is not a command.{RST}  {DIM}Run{RST}  {W}aevum --help{RST}  {DIM}for a list of commands.{RST}\n")
-            sys.exit(1)
+            sys.exit(EX.ERR_ARGS)
 
     return _dispatch_subcommand(subcommand, argv[1:])
 
@@ -162,10 +303,9 @@ def _dispatch_subcommand(sub, argv):
             epilog=("Examples:\n"
                     "  aevum scan D:\\Movies\n"
                     "  aevum scan D:\\Movies --sort duration --top 20\n"
-                    "  aevum scan D:\\Movies --files --out report.csv\n"
-                    "  aevum scan https://youtube.com/@mkbhd\n"))
-        p.add_argument("target", nargs="?", default=None, metavar="PATH|URL",
-                       help="local folder path or YouTube URL")
+                    "  aevum scan D:\\Movies --json\n"
+                    "  aevum scan https://youtube.com/@mkbhd --json\n"))
+        p.add_argument("target", nargs="?", default=None, metavar="PATH|URL")
         p.add_argument("-s", "--sort",  default=None, metavar="FIELD[:DIR]")
         p.add_argument("-t", "--top",   type=int, default=None, metavar="N")
         p.add_argument("-f", "--files", action="store_true")
@@ -173,7 +313,7 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("--format", dest="fmt", choices=["txt","csv","json"], default=None)
         p.add_argument("--depth",  type=int, default=None, metavar="N")
         p.add_argument("--no-cache", action="store_true")
-        p.add_argument("--no-color", action="store_true")
+        _add_common_flags(p)
         args = p.parse_args(argv); args.command = sub; return args
 
     if sub == 'compare':
@@ -181,11 +321,12 @@ def _dispatch_subcommand(sub, argv):
             formatter_class=argparse.RawDescriptionHelpFormatter,
             description="Compare the duration totals of two local libraries.",
             epilog=("Examples:\n"
-                    "  aevum compare D:\\Movies E:\\Movies-Backup\n"))
+                    "  aevum compare D:\\Movies E:\\Movies-Backup\n"
+                    "  aevum compare D:\\Movies E:\\Movies-Backup --json\n"))
         p.add_argument("folder_a"); p.add_argument("folder_b")
         p.add_argument("-s", "--sort", default=None, metavar="FIELD[:DIR]")
         p.add_argument("--no-cache", action="store_true")
-        p.add_argument("--no-color", action="store_true")
+        _add_common_flags(p)
         args = p.parse_args(argv); args.command = sub; return args
 
     if sub == 'dupes':
@@ -194,11 +335,12 @@ def _dispatch_subcommand(sub, argv):
             description="Find duplicate files (by size + partial hash) in a folder.",
             epilog=("Examples:\n"
                     "  aevum dupes D:\\Movies\n"
+                    "  aevum dupes D:\\Movies --json\n"
                     "  aevum dupes D:\\Movies -o dupes.txt\n"))
         p.add_argument("folder")
         p.add_argument("-o", "--out", default=None, metavar="FILE")
         p.add_argument("--no-cache", action="store_true")
-        p.add_argument("--no-color", action="store_true")
+        _add_common_flags(p)
         args = p.parse_args(argv); args.command = sub; return args
 
     if sub == 'export':
@@ -213,7 +355,7 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("-o", "--out",  default=None, metavar="FILE")
         p.add_argument("-s", "--sort", default=None, metavar="FIELD[:DIR]")
         p.add_argument("--no-cache", action="store_true")
-        p.add_argument("--no-color", action="store_true")
+        _add_common_flags(p)
         args = p.parse_args(argv); args.command = sub; return args
 
     if sub == 'cache':
@@ -248,19 +390,20 @@ def _dispatch_subcommand(sub, argv):
     if sub == 'doctor':
         p = argparse.ArgumentParser(prog="aevum doctor",
             description="Check environment: ffprobe, API key, cache, Python version.")
-        p.add_argument("--no-color", action="store_true")
+        _add_common_flags(p)
         args = p.parse_args(argv); args.command = sub; return args
 
     if sub == 'version':
-        print(f"aevum {__version__}"); sys.exit(0)
+        print(f"aevum {__version__}"); sys.exit(EX.OK)
 
     if sub == 'shell':
-        ns = types.SimpleNamespace(command='shell', no_color=False, sort=None, top=None)
+        ns = types.SimpleNamespace(command='shell', no_color=False, json=False,
+                                   quiet=False, sort=None, top=None)
         for a in argv:
             if a == '--no-color': ns.no_color = True
         return ns
 
-    _print_global_help(); sys.exit(1)
+    _print_global_help(); sys.exit(EX.ERR_ARGS)
 
 
 # ── MAIN ──────────────────────────────────────────────────────────────
@@ -269,51 +412,114 @@ def main():
     args = _parse_args()
     cfg  = load_config()
 
-    if getattr(args, 'no_color', False) or cfg.get('no_color'):
+    use_json = getattr(args, 'json', False)
+    quiet    = getattr(args, 'quiet', False) or use_json  # --json implies quiet UI
+
+    if getattr(args, 'no_color', False) or cfg.get('no_color') or use_json:
         _disable_color()
 
     cmd = args.command
 
+    # ── version ───────────────────────────────────────────────────────
     if cmd == 'version':
-        print(f"aevum {__version__}"); sys.exit(0)
+        if use_json:
+            _json_out({"status": "ok", "version": __version__})
+        else:
+            print(f"aevum {__version__}")
+        sys.exit(EX.OK)
 
+    # ── doctor ────────────────────────────────────────────────────────
     if cmd == 'doctor':
-        cmd_doctor(cfg); sys.exit(0)
+        if use_json:
+            import subprocess as _sp
+            from ._cache import CACHE_DIR
+            ffprobe_ok = check_ffprobe()
+            try:
+                r = _sp.run(['ffprobe', '-version'], capture_output=True, text=True)
+                ffprobe_ver = r.stdout.splitlines()[0] if r.stdout else None
+            except Exception:
+                ffprobe_ver = None
+            api_key = load_api_key()
+            try:
+                files = list(CACHE_DIR.glob("*.json")) if CACHE_DIR.exists() else []
+                cache_bytes = sum(f.stat().st_size for f in files)
+            except Exception:
+                files = []; cache_bytes = 0
+            _json_out({
+                "status":          "ok",
+                "command":         "doctor",
+                "python":          sys.version.split()[0],
+                "ffprobe":         ffprobe_ok,
+                "ffprobe_version": ffprobe_ver,
+                "yt_api_key_set":  bool(api_key),
+                "cache_files":     len(files),
+                "cache_bytes":     cache_bytes,
+                "cache_dir":       str(CACHE_DIR),
+            })
+            sys.exit(EX.OK)
+        cmd_doctor(cfg); sys.exit(EX.OK)
 
+    # ── config ────────────────────────────────────────────────────────
     if cmd == 'config':
-        cmd_config(args, cfg); sys.exit(0)
+        cmd_config(args, cfg); sys.exit(EX.OK)
 
+    # ── cache ─────────────────────────────────────────────────────────
     if cmd == 'cache':
-        cmd_cache(args); sys.exit(0)
+        cmd_cache(args); sys.exit(EX.OK)
 
+    # ── compare ───────────────────────────────────────────────────────
     if cmd == 'compare':
         folder_a = Path(args.folder_a.strip().strip("'\""))
         folder_b = Path(args.folder_b.strip().strip("'\""))
         for f in (folder_a, folder_b):
             if not f.exists() or not f.is_dir():
+                if use_json:
+                    _json_error(f"Not a valid folder: {f}", EX.ERR_ARGS)
                 print(f"\n  {R}[ERROR]{RST} Not a valid folder: {f}\n", file=sys.stderr)
-                sys.exit(1)
-        _require_ffprobe("compare")
+                sys.exit(EX.ERR_ARGS)
+        _require_ffprobe("compare", use_json)
         sort    = _resolve_sort(args, cfg)
-        on_prog = _make_progress_bar()
-        data_a, data_b = run_compare(folder_a, folder_b, on_prog, sort, not args.no_cache)
-        print_comparison(folder_a, folder_b, data_a, data_b)
-        sys.exit(0)
+        on_prog = _make_progress_bar(quiet, use_json)
+        try:
+            data_a, data_b = run_compare(folder_a, folder_b, on_prog, sort,
+                                         not args.no_cache)
+        except KeyboardInterrupt:
+            if use_json:
+                _json_error("Scan interrupted", EX.ERR_SCAN)
+            print(f"\n\n  {Y}Cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
+        if use_json:
+            _json_out(_compare_to_json(folder_a, folder_b, data_a, data_b))
+        else:
+            print_comparison(folder_a, folder_b, data_a, data_b)
+        sys.exit(EX.OK)
 
+    # ── dupes ─────────────────────────────────────────────────────────
     if cmd == 'dupes':
         folder = Path(args.folder.strip().strip("'\""))
         if not folder.exists() or not folder.is_dir():
+            if use_json:
+                _json_error(f"Not a valid folder: {folder}", EX.ERR_ARGS)
             print(f"\n  {R}[ERROR]{RST} Not a valid folder: {folder}\n", file=sys.stderr)
-            sys.exit(1)
-        _require_ffprobe("dupes")
-        on_prog   = _make_progress_bar()
+            sys.exit(EX.ERR_ARGS)
+        _require_ffprobe("dupes", use_json)
+        on_prog   = _make_progress_bar(quiet, use_json)
         use_cache = not args.no_cache and cfg.get('cache_enabled', True)
-        print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
-        _, _, _, durations, sizes, hits = _run_scan(folder, on_prog, "name", use_cache)
-        probed     = len(durations) - hits
-        cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
-        print(f"\r  {G}Done!{RST}  {W}{len(durations)}{RST} files found.{cache_info}".ljust(60))
+        if not quiet:
+            print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
+        try:
+            _, _, _, durations, sizes, hits = _run_scan(folder, on_prog, "name", use_cache)
+        except KeyboardInterrupt:
+            if use_json:
+                _json_error("Scan interrupted", EX.ERR_SCAN)
+            print(f"\n\n  {Y}Scan cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
+        if not quiet:
+            probed = len(durations) - hits
+            cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
+            print(f"\r  {G}Done!{RST}  {W}{len(durations)}{RST} files found.{cache_info}".ljust(60))
         groups = find_duplicates(durations, sizes)
+        if use_json:
+            _json_out(_dupes_to_json(groups, durations, sizes))
+            sys.exit(EX.OK)
         print_duplicates(groups, durations)
         if args.out:
             import io
@@ -329,11 +535,14 @@ def main():
                     buf.write("\n")
             try:
                 Path(args.out).write_text(buf.getvalue(), encoding="utf-8")
-                print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{args.out}{RST}\n")
+                if not quiet:
+                    print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{args.out}{RST}\n")
             except Exception as e:
-                print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr); sys.exit(4)
-        sys.exit(0)
+                print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr)
+                sys.exit(EX.ERR_EXPORT)
+        sys.exit(EX.OK)
 
+    # ── export ────────────────────────────────────────────────────────
     if cmd == 'export':
         raw       = args.target.strip().strip("'\"")
         sort      = _resolve_sort(args, cfg)
@@ -341,12 +550,19 @@ def main():
         out_path  = args.out or None
         fmt       = args.format
         if _is_url(raw):
-            url_prog = _make_url_progress()
+            url_prog = None if (quiet or use_json) else _make_url_progress()
             try:
                 total_sec, total_count, entries, label = scan_url(raw, url_prog)
             except KeyboardInterrupt:
-                print(f"\n\n  {Y}Fetch cancelled.{RST}\n"); sys.exit(0)
-            print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} videos found.".ljust(60))
+                if use_json:
+                    _json_error("Fetch interrupted", EX.ERR_SCAN)
+                print(f"\n\n  {Y}Fetch cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
+            except Exception as e:
+                if use_json:
+                    _json_error(str(e), EX.ERR_API)
+                print(f"\n  {R}[ERROR]{RST} {e}\n", file=sys.stderr); sys.exit(EX.ERR_API)
+            if not quiet:
+                print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} videos found.".ljust(60))
             import io
             buf = io.StringIO()
             buf.write(f"AEVUM  |  {label}\n{'=' * 64}\n")
@@ -357,28 +573,46 @@ def main():
             dest = Path(out_path) if out_path else Path(f"aevum_url_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{fmt}")
             try:
                 dest.write_text(buf.getvalue(), encoding="utf-8")
-                print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
+                if not quiet:
+                    print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
             except Exception as e:
-                print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr); sys.exit(4)
-            sys.exit(0)
+                if use_json:
+                    _json_error(f"Export failed: {e}", EX.ERR_EXPORT)
+                print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr)
+                sys.exit(EX.ERR_EXPORT)
+            sys.exit(EX.OK)
+
         folder = Path(raw)
         if not folder.exists() or not folder.is_dir():
-            print(f"\n  {R}[ERROR]{RST} Not a valid folder: {folder}\n", file=sys.stderr); sys.exit(1)
-        _require_ffprobe("export")
-        on_prog = _make_progress_bar()
-        print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
+            if use_json:
+                _json_error(f"Not a valid folder: {folder}", EX.ERR_ARGS)
+            print(f"\n  {R}[ERROR]{RST} Not a valid folder: {folder}\n", file=sys.stderr)
+            sys.exit(EX.ERR_ARGS)
+        _require_ffprobe("export", use_json)
+        on_prog = _make_progress_bar(quiet, use_json)
+        if not quiet:
+            print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
         try:
-            total_sec, total_count, tree, durations, sizes, hits = _run_scan(folder, on_prog, sort, use_cache)
+            total_sec, total_count, tree, durations, sizes, hits = _run_scan(
+                folder, on_prog, sort, use_cache)
         except KeyboardInterrupt:
-            print(f"\n\n  {Y}Scan cancelled.{RST}\n"); sys.exit(0)
-        print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} files found.".ljust(60))
+            if use_json:
+                _json_error("Scan interrupted", EX.ERR_SCAN)
+            print(f"\n\n  {Y}Scan cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
+        if not quiet:
+            print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} files found.".ljust(60))
         try:
             dest = export_results(folder, total_sec, total_count, tree, durations, fmt, out_path)
-            print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
+            if not quiet:
+                print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
         except Exception as e:
-            print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr); sys.exit(4)
-        sys.exit(0)
+            if use_json:
+                _json_error(f"Export failed: {e}", EX.ERR_EXPORT)
+            print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr)
+            sys.exit(EX.ERR_EXPORT)
+        sys.exit(EX.OK)
 
+    # ── scan (headless) ───────────────────────────────────────────────
     if cmd == 'scan' and getattr(args, 'target', None) is not None:
         raw       = args.target.strip().strip("'\"")
         sort      = _resolve_sort(args, cfg)
@@ -388,50 +622,80 @@ def main():
         fmt       = _resolve_out_format(out_path, getattr(args, 'fmt', None))
 
         if _is_url(raw):
-            url_prog = _make_url_progress()
+            url_prog = None if (quiet or use_json) else _make_url_progress()
             try:
                 total_sec, total_count, entries, label = scan_url(raw, url_prog)
             except KeyboardInterrupt:
-                print(f"\n\n  {Y}Fetch cancelled.{RST}\n"); sys.exit(0)
-            print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} videos found.".ljust(60))
-            print_url_results(raw, label, total_sec, total_count, entries, top_n=top)
-            sys.exit(0)
+                if use_json:
+                    _json_error("Fetch interrupted", EX.ERR_SCAN)
+                print(f"\n\n  {Y}Fetch cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
+            except Exception as e:
+                if use_json:
+                    _json_error(str(e), EX.ERR_API)
+                print(f"\n  {R}[ERROR]{RST} {e}\n", file=sys.stderr); sys.exit(EX.ERR_API)
+            if use_json:
+                _json_out(_url_to_json(raw, label, total_sec, total_count, entries))
+            else:
+                if not quiet:
+                    print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} videos found.".ljust(60))
+                print_url_results(raw, label, total_sec, total_count, entries, top_n=top)
+            sys.exit(EX.OK)
 
         folder = Path(raw)
         if not folder.exists():
+            if use_json:
+                _json_error(f"Path not found: {folder}", EX.ERR_ARGS)
             print(f"\n  {R}[ERROR]{RST} Path not found: {folder}", file=sys.stderr)
             try:
-                sug = _fuzzy_suggest(folder.name, [p.name for p in folder.parent.iterdir() if p.is_dir()])
+                sug = _fuzzy_suggest(folder.name,
+                                     [p.name for p in folder.parent.iterdir() if p.is_dir()])
                 if sug:
                     print(f"  {DIM}Did you mean:{RST}  {W}{folder.parent / sug}{RST}", file=sys.stderr)
             except Exception:
                 pass
-            print(); sys.exit(1)
+            print(); sys.exit(EX.ERR_ARGS)
         if not folder.is_dir():
-            print(f"\n  {R}[ERROR]{RST} That is a file, not a folder: {folder}\n", file=sys.stderr); sys.exit(1)
-        _require_ffprobe("scan")
+            if use_json:
+                _json_error(f"That is a file, not a folder: {folder}", EX.ERR_ARGS)
+            print(f"\n  {R}[ERROR]{RST} That is a file, not a folder: {folder}\n", file=sys.stderr)
+            sys.exit(EX.ERR_ARGS)
+        _require_ffprobe("scan", use_json)
 
-        on_progress = _make_progress_bar()
-        print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
+        on_progress = _make_progress_bar(quiet, use_json)
+        if not quiet:
+            print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
         try:
-            total_sec, total_count, tree, durations, sizes, hits = _run_scan(folder, on_progress, sort, use_cache)
+            total_sec, total_count, tree, durations, sizes, hits = _run_scan(
+                folder, on_progress, sort, use_cache)
         except KeyboardInterrupt:
-            print(f"\n\n  {Y}Scan cancelled.{RST}\n"); sys.exit(0)
+            if use_json:
+                _json_error("Scan interrupted", EX.ERR_SCAN)
+            print(f"\n\n  {Y}Scan cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
 
-        probed     = total_count - hits
-        cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
-        print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} files found.{cache_info}".ljust(60))
+        if use_json:
+            _json_out(_scan_to_json(folder, total_sec, total_count, tree, durations, sizes, hits))
+            sys.exit(EX.OK)
+
+        if not quiet:
+            probed     = total_count - hits
+            cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
+            print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} files found.{cache_info}".ljust(60))
         print_results(folder, total_sec, total_count, tree, durations, sizes, top,
                       show_files=getattr(args, 'files', False))
         groups = find_duplicates(durations, sizes)
-        print_dupe_warning(groups)
+        if not quiet:
+            print_dupe_warning(groups)
         if fmt and out_path:
             try:
                 dest = export_results(folder, total_sec, total_count, tree, durations, fmt, out_path)
-                print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
+                if not quiet:
+                    print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
             except Exception as e:
-                print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr); sys.exit(4)
-        sys.exit(0)
+                if use_json:
+                    _json_error(f"Export failed: {e}", EX.ERR_EXPORT)
+                print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr)
+                sys.exit(EX.ERR_EXPORT)
+        sys.exit(EX.OK)
 
     # ── INTERACTIVE / SHELL MODE ──────────────────────────────────────
     clear()
@@ -451,7 +715,7 @@ def main():
         try:
             raw = input(f"  {C}aevum{RST}> ").strip()
         except (KeyboardInterrupt, EOFError):
-            print(f"\n\n  {G}Goodbye!{RST}\n"); sys.exit(0)
+            print(f"\n\n  {G}Goodbye!{RST}\n"); sys.exit(EX.OK)
 
         if not raw:
             continue
@@ -464,7 +728,7 @@ def main():
             raw = _init_map[raw]
 
         if raw.lower() in ('exit', 'quit', 'q'):
-            print(f"\n  {G}Goodbye!{RST}\n"); sys.exit(0)
+            print(f"\n  {G}Goodbye!{RST}\n"); sys.exit(EX.OK)
 
         if raw.lower() in ('clear', 'c'):
             clear(); print_banner(); continue
@@ -523,7 +787,7 @@ def main():
             try:
                 choice = input(f"  {C}aevum{RST}> ").strip().lower()
             except (KeyboardInterrupt, EOFError):
-                print(f"\n\n  {G}Goodbye!{RST}\n"); sys.exit(0)
+                print(f"\n\n  {G}Goodbye!{RST}\n"); sys.exit(EX.OK)
 
             _menu_map = {'1': 'scan', '2': 'sort', '3': 'export', '4': 'clear', '5': 'quit', '6': 'duplicates'}
             if choice in _menu_map:
@@ -533,7 +797,7 @@ def main():
             first_word = choice.split()[0] if choice else ''
 
             if choice in ('quit', 'exit', 'q'):
-                print(f"\n  {G}Goodbye!{RST}\n"); sys.exit(0)
+                print(f"\n  {G}Goodbye!{RST}\n"); sys.exit(EX.OK)
             elif choice == 'clear':
                 clear(); print_banner(); break
             elif choice == 'scan':
