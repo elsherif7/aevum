@@ -9,7 +9,8 @@ description = "Media Library Scanner"
 requires-python = ">=3.8"
 
 [project.scripts]
-aevum = "aevum:main"
+aevum = "aevum_pkg._cli:main"
 
-[tool.setuptools]
-py-modules = ["aevum"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["aevum_pkg*"]
