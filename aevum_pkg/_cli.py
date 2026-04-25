@@ -290,7 +290,13 @@ def _parse_args():
         if (subcommand.startswith(('/', '\\', '.')) or
                 ':' in subcommand or
                 subcommand.startswith(('http://', 'https://', 'www.'))):
-            argv       = ['scan'] + argv
+            # Separate flag tokens (start with -) from path tokens, then
+            # join all non-flag tokens as a single path so unquoted paths
+            # with spaces work: aevum D:\My Folder\With Spaces
+            flags      = [t for t in argv if t.startswith('-')]
+            path_parts = [t for t in argv if not t.startswith('-')]
+            joined_path = ' '.join(path_parts)
+            argv       = ['scan', joined_path] + flags
             subcommand = 'scan'
         elif suggestion:
             print(f"\n  {clr.R}aevum: '{subcommand}' is not a command.{clr.RST}  {clr.DIM}Did you mean{clr.RST}  {clr.W}{suggestion}{clr.RST}{clr.DIM}?{clr.RST}\n")
@@ -940,7 +946,24 @@ def main():
 
     # ── scan (headless) ───────────────────────────────────────────────
     if cmd == 'scan' and getattr(args, 'targets', None) is not None:
-        targets   = [t.strip().strip("'\"") for t in args.targets]
+        targets = [t.strip().strip("'\"") for t in args.targets]
+
+        # If the user typed an unquoted path with spaces, argparse splits it
+        # into multiple tokens (e.g. ["D:\\My", "Folder", "With", "Spaces"]).
+        # Heuristic: if the first token looks like a Windows/Unix path (not a URL,
+        # not a flag, contains a drive letter or path separator) and none of the
+        # other tokens look like independent paths, join them all as one path.
+        if len(targets) > 1 and not any(_is_url(t) for t in targets):
+            first = targets[0]
+            first_looks_like_path = (
+                (':' in first) or
+                first.startswith(('/', '\\', '.'))
+            )
+            rest_look_like_paths = any(
+                (':' in t or t.startswith(('/', '\\'))) for t in targets[1:]
+            )
+            if first_looks_like_path and not rest_look_like_paths:
+                targets = [' '.join(targets)]
         sort      = _resolve_sort(args, cfg)
         top       = _resolve_top(args, cfg)
         use_cache = not args.no_cache and cfg.get('cache_enabled', True)
