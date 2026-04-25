@@ -110,6 +110,20 @@ def _print_global_help():
 
 def _parse_args():
     argv = sys.argv[1:]
+
+    # On Windows, "D:\" can arrive as two tokens: ["D:", "\"] — rejoin them.
+    rejoined = []
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok.endswith(':') and i + 1 < len(argv) and argv[i + 1] in ('\\', '/'):
+            rejoined.append(tok + argv[i + 1])
+            i += 2
+        else:
+            rejoined.append(tok)
+            i += 1
+    argv = rejoined
+
     if not argv or argv[0] in ('-h', '--help'):
         _print_global_help()
         sys.exit(0)
@@ -119,9 +133,24 @@ def _parse_args():
 
     subcommand = argv[0]
     SUBCOMMANDS = ('scan', 'compare', 'dupes', 'export', 'cache', 'config', 'doctor', 'version', 'shell')
+
     if subcommand not in SUBCOMMANDS:
-        argv       = ['scan'] + argv
-        subcommand = 'scan'
+        # Check if it looks like a typo of a real subcommand — git-style suggestion
+        from ._display import _fuzzy_suggest
+        suggestion = _fuzzy_suggest(subcommand, list(SUBCOMMANDS))
+        # If it looks like a path or URL, treat as implicit scan
+        if (subcommand.startswith(('/', '\\', '.')) or
+                ':' in subcommand or
+                subcommand.startswith(('http://', 'https://', 'www.'))):
+            argv       = ['scan'] + argv
+            subcommand = 'scan'
+        elif suggestion:
+            print(f"\n  {R}aevum: '{subcommand}' is not a command.{RST}  {DIM}Did you mean{RST}  {W}{suggestion}{RST}{DIM}?{RST}\n")
+            sys.exit(1)
+        else:
+            print(f"\n  {R}aevum: '{subcommand}' is not a command.{RST}  {DIM}Run{RST}  {W}aevum --help{RST}  {DIM}for a list of commands.{RST}\n")
+            sys.exit(1)
+
     return _dispatch_subcommand(subcommand, argv[1:])
 
 
@@ -135,7 +164,8 @@ def _dispatch_subcommand(sub, argv):
                     "  aevum scan D:\\Movies --sort duration --top 20\n"
                     "  aevum scan D:\\Movies --files --out report.csv\n"
                     "  aevum scan https://youtube.com/@mkbhd\n"))
-        p.add_argument("target", nargs="?", default=None, metavar="PATH|URL")
+        p.add_argument("target", nargs="?", default=None, metavar="PATH|URL",
+                       help="local folder path or YouTube URL")
         p.add_argument("-s", "--sort",  default=None, metavar="FIELD[:DIR]")
         p.add_argument("-t", "--top",   type=int, default=None, metavar="N")
         p.add_argument("-f", "--files", action="store_true")
