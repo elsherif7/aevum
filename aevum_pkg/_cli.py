@@ -10,7 +10,7 @@ import types
 from datetime import datetime
 from pathlib import Path
 
-from ._color   import R, G, Y, B, M, C, W, DIM, RST, LINE, clear, _disable_color
+from ._color   import clr, LINE, clear, _disable_color
 from ._scan    import (check_ffprobe, format_duration, format_size, _run_scan,
                        parse_duration_arg, apply_filters, rebuild_after_filter)
 from ._youtube import _is_url, scan_url, _make_url_progress
@@ -156,7 +156,7 @@ def _make_progress_bar(quiet=False, use_json=False):
         pct    = int((done / total) * 100)
         filled = int(24 * done / total)
         bar    = "█" * filled + "░" * (24 - filled)
-        print(f"\r  {C}Scanning...{RST}  {bar}  {Y}{done}/{total}{RST}  {DIM}({pct}%){RST}",
+        print(f"\r  {clr.C}Scanning...{clr.RST}  {bar}  {clr.Y}{done}/{total}{clr.RST}  {clr.DIM}({pct}%){clr.RST}",
               end='', flush=True)
     return on_progress
 
@@ -169,10 +169,10 @@ def _require_ffprobe(context="", use_json=False):
                 f"ffprobe not found on PATH{ctx}. Install FFmpeg: https://ffmpeg.org/download.html",
                 EX.ERR_DEPS,
             )
-        print(f"\n  {R}[ERROR]{RST} ffprobe not found on PATH{ctx}.", file=sys.stderr)
-        print(f"  {DIM}ffprobe is required for local folder scanning.{RST}", file=sys.stderr)
-        print(f"  Install FFmpeg: {C}https://ffmpeg.org/download.html{RST}", file=sys.stderr)
-        print(f"  Then re-run:    {W}aevum doctor{RST}\n", file=sys.stderr)
+        print(f"\n  {clr.R}[ERROR]{clr.RST} ffprobe not found on PATH{ctx}.", file=sys.stderr)
+        print(f"  {clr.DIM}ffprobe is required for local folder scanning.{clr.RST}", file=sys.stderr)
+        print(f"  Install FFmpeg: {clr.C}https://ffmpeg.org/download.html{clr.RST}", file=sys.stderr)
+        print(f"  Then re-run:    {clr.W}aevum doctor{clr.RST}\n", file=sys.stderr)
         sys.exit(EX.ERR_DEPS)
 
 
@@ -203,32 +203,32 @@ def _resolve_out_format(out_path, explicit_fmt):
 
 def _print_global_help():
     print(f"""
-  {C}aevum {__version__}{RST}  {DIM}—{RST}  {W}Media Library Scanner{RST}
+  {clr.C}aevum {__version__}{clr.RST}  {clr.DIM}—{clr.RST}  {clr.W}Media Library Scanner{clr.RST}
 
-  {W}USAGE{RST}
+  {clr.W}USAGE{clr.RST}
     aevum [command] [options]
     aevum                           Open interactive shell
     aevum <path|url>                Quick scan (shorthand for 'aevum scan')
 
-  {W}COMMANDS{RST}
-    {G}scan{RST}      <path|url>            Scan a folder or YouTube URL
-    {G}compare{RST}   <path> <path>         Compare two libraries side-by-side
-    {G}dupes{RST}     <path>                Find duplicate-duration files
-    {G}export{RST}    <path|url> <format>   Scan and write results to a file
-    {G}watch{RST}     <path>                Re-scan automatically when folder changes
-    {G}cache{RST}                           Manage the duration cache
-    {G}config{RST}                          Read/write configuration
-    {G}doctor{RST}                          Check environment (ffprobe, API key, cache)
-    {G}version{RST}                         Print version and exit
+  {clr.W}COMMANDS{clr.RST}
+    {clr.G}scan{clr.RST}      <path|url>            Scan a folder or YouTube URL
+    {clr.G}compare{clr.RST}   <path> <path>         Compare two libraries side-by-side
+    {clr.G}dupes{clr.RST}     <path>                Find duplicate-duration files
+    {clr.G}export{clr.RST}    <path|url> <format>   Scan and write results to a file
+    {clr.G}watch{clr.RST}     <path>                Re-scan automatically when folder changes
+    {clr.G}cache{clr.RST}                           Manage the duration cache
+    {clr.G}config{clr.RST}                          Read/write configuration
+    {clr.G}doctor{clr.RST}                          Check environment (ffprobe, API key, cache)
+    {clr.G}version{clr.RST}                         Print version and exit
 
-  {W}GLOBAL OPTIONS{RST}
+  {clr.W}GLOBAL OPTIONS{clr.RST}
     --no-color                      Disable ANSI color output
     --json                          Machine-readable JSON output to stdout
     -q, --quiet                     Suppress decorative output (errors → stderr only)
     -h, --help                      Show this help
     -V, --version                   Show version
 
-  {W}EXIT CODES{RST}
+  {clr.W}EXIT CODES{clr.RST}
     0  success
     1  bad arguments / path not found
     2  missing dependency (ffprobe)
@@ -236,13 +236,13 @@ def _print_global_help():
     4  export / write failed
     5  YouTube API error
 
-  {W}PIPE EXAMPLES{RST}
+  {clr.W}PIPE EXAMPLES{clr.RST}
     aevum scan D:\\Movies --json
     aevum scan D:\\Movies --json | python -m json.tool
     aevum dupes D:\\Movies --json | python -c "import sys,json; d=json.load(sys.stdin); print(d['groups_found'])"
     aevum scan D:\\Movies -q; echo "exit $?"
 
-  {DIM}Run 'aevum <command> --help' for command-specific options.{RST}
+  {clr.DIM}Run 'aevum <command> --help' for command-specific options.{clr.RST}
 """)
 
 
@@ -289,10 +289,10 @@ def _parse_args():
             argv       = ['scan'] + argv
             subcommand = 'scan'
         elif suggestion:
-            print(f"\n  {R}aevum: '{subcommand}' is not a command.{RST}  {DIM}Did you mean{RST}  {W}{suggestion}{RST}{DIM}?{RST}\n")
+            print(f"\n  {clr.R}aevum: '{subcommand}' is not a command.{clr.RST}  {clr.DIM}Did you mean{clr.RST}  {clr.W}{suggestion}{clr.RST}{clr.DIM}?{clr.RST}\n")
             sys.exit(EX.ERR_ARGS)
         else:
-            print(f"\n  {R}aevum: '{subcommand}' is not a command.{RST}  {DIM}Run{RST}  {W}aevum --help{RST}  {DIM}for a list of commands.{RST}\n")
+            print(f"\n  {clr.R}aevum: '{subcommand}' is not a command.{clr.RST}  {clr.DIM}Run{clr.RST}  {clr.W}aevum --help{clr.RST}  {clr.DIM}for a list of commands.{clr.RST}\n")
             sys.exit(EX.ERR_ARGS)
 
     return _dispatch_subcommand(subcommand, argv[1:])
@@ -460,7 +460,7 @@ def _build_filters(args, use_json=False):
             except ValueError as e:
                 if use_json:
                     _json_error(str(e), EX.ERR_ARGS)
-                print(f"\n  {R}[ERROR]{RST} {e}\n", file=sys.stderr)
+                print(f"\n  {clr.R}[ERROR]{clr.RST} {e}\n", file=sys.stderr)
                 sys.exit(EX.ERR_ARGS)
     raw_ext = getattr(args, 'ext', None)
     if raw_ext:
@@ -538,7 +538,7 @@ def main():
         if not folder.exists() or not folder.is_dir():
             if use_json:
                 _json_error(f"Not a valid folder: {folder}", EX.ERR_ARGS)
-            print(f"\n  {R}[ERROR]{RST} Not a valid folder: {folder}\n", file=sys.stderr)
+            print(f"\n  {clr.R}[ERROR]{clr.RST} Not a valid folder: {folder}\n", file=sys.stderr)
             sys.exit(EX.ERR_ARGS)
         _require_ffprobe("watch", use_json)
 
@@ -570,8 +570,8 @@ def main():
             return total_sec, total_count, tree, durations, sizes, hits
 
         if not quiet:
-            print(f"\n  {C}Watching{RST}  {W}{folder}{RST}  "
-                  f"{DIM}(interval: {interval}s — Ctrl+C to stop){RST}\n")
+            print(f"\n  {clr.C}Watching{clr.RST}  {clr.W}{folder}{clr.RST}  "
+                  f"{clr.DIM}(interval: {interval}s — Ctrl+C to stop){clr.RST}\n")
 
         update_n  = 0
         last_snap = {}
@@ -593,7 +593,7 @@ def main():
                             print(json.dumps({"status": "error", "error": str(e),
                                               "timestamp": datetime.now().isoformat()}), flush=True)
                         else:
-                            print(f"  {R}[ERROR]{RST} Scan failed: {e}", file=sys.stderr)
+                            print(f"  {clr.R}[ERROR]{clr.RST} Scan failed: {e}", file=sys.stderr)
                         time.sleep(interval); continue
 
                     update_n += 1
@@ -618,15 +618,15 @@ def main():
                             sign   = "+" if delta >= 0 else ""
                             dfmt   = format_duration(abs(delta))["hours_fmt"]
                             dcol   = G if delta >= 0 else R
-                            delta_str = f"  {dcol}{sign}{dfmt}{RST}"
-                        print(f"  {C}{LINE}{RST}")
-                        print(f"  {C}  Watching{RST}  {DIM}|{RST}  {W}{folder.name}{RST}  "
-                              f"{DIM}|{RST}  {G}#{update_n}{RST}  {DIM}@ {ts}{RST}{delta_str}")
-                        print(f"  {C}{LINE}{RST}")
+                            delta_str = f"  {dcol}{sign}{dfmt}{clr.RST}"
+                        print(f"  {clr.C}{LINE}{clr.RST}")
+                        print(f"  {clr.C}  Watching{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{folder.name}{clr.RST}  "
+                              f"{clr.DIM}|{clr.RST}  {clr.G}#{update_n}{clr.RST}  {clr.DIM}@ {ts}{clr.RST}{delta_str}")
+                        print(f"  {clr.C}{LINE}{clr.RST}")
                         print()
                         print_results(folder, total_sec, total_count, tree,
                                       durations, sizes, top, show_files=False)
-                        print(f"  {DIM}Next check in {interval}s — Ctrl+C to stop{RST}\n")
+                        print(f"  {clr.DIM}Next check in {interval}s — Ctrl+C to stop{clr.RST}\n")
                     last_sec = total_sec
 
                 time.sleep(interval)
@@ -636,7 +636,7 @@ def main():
                     print(json.dumps({"status": "stopped", "updates": update_n,
                                       "timestamp": datetime.now().isoformat()}), flush=True)
                 else:
-                    print(f"\n\n  {G}Watch stopped.{RST}  {DIM}{update_n} update(s) shown.{RST}\n")
+                    print(f"\n\n  {clr.G}Watch stopped.{clr.RST}  {clr.DIM}{update_n} update(s) shown.{clr.RST}\n")
                 sys.exit(EX.OK)
 
     # ── compare ───────────────────────────────────────────────────────
@@ -647,7 +647,7 @@ def main():
             if not f.exists() or not f.is_dir():
                 if use_json:
                     _json_error(f"Not a valid folder: {f}", EX.ERR_ARGS)
-                print(f"\n  {R}[ERROR]{RST} Not a valid folder: {f}\n", file=sys.stderr)
+                print(f"\n  {clr.R}[ERROR]{clr.RST} Not a valid folder: {f}\n", file=sys.stderr)
                 sys.exit(EX.ERR_ARGS)
         _require_ffprobe("compare", use_json)
         sort    = _resolve_sort(args, cfg)
@@ -658,7 +658,7 @@ def main():
         except KeyboardInterrupt:
             if use_json:
                 _json_error("Scan interrupted", EX.ERR_SCAN)
-            print(f"\n\n  {Y}Cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
+            print(f"\n\n  {clr.Y}Cancelled.{clr.RST}\n"); sys.exit(EX.ERR_SCAN)
         if use_json:
             _json_out(_compare_to_json(folder_a, folder_b, data_a, data_b))
         else:
@@ -671,23 +671,23 @@ def main():
         if not folder.exists() or not folder.is_dir():
             if use_json:
                 _json_error(f"Not a valid folder: {folder}", EX.ERR_ARGS)
-            print(f"\n  {R}[ERROR]{RST} Not a valid folder: {folder}\n", file=sys.stderr)
+            print(f"\n  {clr.R}[ERROR]{clr.RST} Not a valid folder: {folder}\n", file=sys.stderr)
             sys.exit(EX.ERR_ARGS)
         _require_ffprobe("dupes", use_json)
         on_prog   = _make_progress_bar(quiet, use_json)
         use_cache = not args.no_cache and cfg.get('cache_enabled', True)
         if not quiet:
-            print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
+            print(f"  {clr.DIM}Collecting files...{clr.RST}", end='', flush=True)
         try:
             _, _, _, durations, sizes, hits = _run_scan(folder, on_prog, "name", use_cache)
         except KeyboardInterrupt:
             if use_json:
                 _json_error("Scan interrupted", EX.ERR_SCAN)
-            print(f"\n\n  {Y}Scan cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
+            print(f"\n\n  {clr.Y}Scan cancelled.{clr.RST}\n"); sys.exit(EX.ERR_SCAN)
         if not quiet:
             probed = len(durations) - hits
-            cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
-            print(f"\r  {G}Done!{RST}  {W}{len(durations)}{RST} files found.{cache_info}".ljust(60))
+            cache_info = f"  {clr.DIM}({hits} cached, {probed} probed){clr.RST}" if hits > 0 else ""
+            print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{len(durations)}{clr.RST} files found.{cache_info}".ljust(60))
         groups = find_duplicates(durations, sizes)
         if use_json:
             _json_out(_dupes_to_json(groups, durations, sizes))
@@ -708,9 +708,9 @@ def main():
             try:
                 Path(args.out).write_text(buf.getvalue(), encoding="utf-8")
                 if not quiet:
-                    print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{args.out}{RST}\n")
+                    print(f"  {clr.G}Exported{clr.RST}  {clr.DIM}→{clr.RST}  {clr.W}{args.out}{clr.RST}\n")
             except Exception as e:
-                print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr)
+                print(f"  {clr.R}Export failed:{clr.RST} {e}\n", file=sys.stderr)
                 sys.exit(EX.ERR_EXPORT)
         sys.exit(EX.OK)
 
@@ -728,13 +728,13 @@ def main():
             except KeyboardInterrupt:
                 if use_json:
                     _json_error("Fetch interrupted", EX.ERR_SCAN)
-                print(f"\n\n  {Y}Fetch cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
+                print(f"\n\n  {clr.Y}Fetch cancelled.{clr.RST}\n"); sys.exit(EX.ERR_SCAN)
             except Exception as e:
                 if use_json:
                     _json_error(str(e), EX.ERR_API)
-                print(f"\n  {R}[ERROR]{RST} {e}\n", file=sys.stderr); sys.exit(EX.ERR_API)
+                print(f"\n  {clr.R}[ERROR]{clr.RST} {e}\n", file=sys.stderr); sys.exit(EX.ERR_API)
             if not quiet:
-                print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} videos found.".ljust(60))
+                print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} videos found.".ljust(60))
             import io
             buf = io.StringIO()
             buf.write(f"AEVUM  |  {label}\n{'=' * 64}\n")
@@ -746,11 +746,11 @@ def main():
             try:
                 dest.write_text(buf.getvalue(), encoding="utf-8")
                 if not quiet:
-                    print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
+                    print(f"  {clr.G}Exported{clr.RST}  {clr.DIM}→{clr.RST}  {clr.W}{dest}{clr.RST}\n")
             except Exception as e:
                 if use_json:
                     _json_error(f"Export failed: {e}", EX.ERR_EXPORT)
-                print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr)
+                print(f"  {clr.R}Export failed:{clr.RST} {e}\n", file=sys.stderr)
                 sys.exit(EX.ERR_EXPORT)
             sys.exit(EX.OK)
 
@@ -758,29 +758,29 @@ def main():
         if not folder.exists() or not folder.is_dir():
             if use_json:
                 _json_error(f"Not a valid folder: {folder}", EX.ERR_ARGS)
-            print(f"\n  {R}[ERROR]{RST} Not a valid folder: {folder}\n", file=sys.stderr)
+            print(f"\n  {clr.R}[ERROR]{clr.RST} Not a valid folder: {folder}\n", file=sys.stderr)
             sys.exit(EX.ERR_ARGS)
         _require_ffprobe("export", use_json)
         on_prog = _make_progress_bar(quiet, use_json)
         if not quiet:
-            print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
+            print(f"  {clr.DIM}Collecting files...{clr.RST}", end='', flush=True)
         try:
             total_sec, total_count, tree, durations, sizes, hits = _run_scan(
                 folder, on_prog, sort, use_cache)
         except KeyboardInterrupt:
             if use_json:
                 _json_error("Scan interrupted", EX.ERR_SCAN)
-            print(f"\n\n  {Y}Scan cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
+            print(f"\n\n  {clr.Y}Scan cancelled.{clr.RST}\n"); sys.exit(EX.ERR_SCAN)
         if not quiet:
-            print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} files found.".ljust(60))
+            print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} files found.".ljust(60))
         try:
             dest = export_results(folder, total_sec, total_count, tree, durations, fmt, out_path)
             if not quiet:
-                print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
+                print(f"  {clr.G}Exported{clr.RST}  {clr.DIM}→{clr.RST}  {clr.W}{dest}{clr.RST}\n")
         except Exception as e:
             if use_json:
                 _json_error(f"Export failed: {e}", EX.ERR_EXPORT)
-            print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr)
+            print(f"  {clr.R}Export failed:{clr.RST} {e}\n", file=sys.stderr)
             sys.exit(EX.ERR_EXPORT)
         sys.exit(EX.OK)
 
@@ -809,16 +809,16 @@ def main():
                 except KeyboardInterrupt:
                     if use_json:
                         _json_error("Fetch interrupted", EX.ERR_SCAN)
-                    print(f"\n\n  {Y}Fetch cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
+                    print(f"\n\n  {clr.Y}Fetch cancelled.{clr.RST}\n"); sys.exit(EX.ERR_SCAN)
                 except Exception as e:
                     if use_json:
                         _json_error(str(e), EX.ERR_API)
-                    print(f"\n  {R}[ERROR]{RST} {e}\n", file=sys.stderr); sys.exit(EX.ERR_API)
+                    print(f"\n  {clr.R}[ERROR]{clr.RST} {e}\n", file=sys.stderr); sys.exit(EX.ERR_API)
                 if use_json:
                     _json_out(_url_to_json(raw, label, total_sec, total_count, entries))
                 else:
                     if not quiet:
-                        print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} videos found.".ljust(60))
+                        print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} videos found.".ljust(60))
                     print_url_results(raw, label, total_sec, total_count, entries, top_n=top)
                 sys.exit(EX.OK)
 
@@ -826,32 +826,32 @@ def main():
             if not folder.exists():
                 if use_json:
                     _json_error(f"Path not found: {folder}", EX.ERR_ARGS)
-                print(f"\n  {R}[ERROR]{RST} Path not found: {folder}", file=sys.stderr)
+                print(f"\n  {clr.R}[ERROR]{clr.RST} Path not found: {folder}", file=sys.stderr)
                 try:
                     sug = _fuzzy_suggest(folder.name,
                                          [p.name for p in folder.parent.iterdir() if p.is_dir()])
                     if sug:
-                        print(f"  {DIM}Did you mean:{RST}  {W}{folder.parent / sug}{RST}", file=sys.stderr)
+                        print(f"  {clr.DIM}Did you mean:{clr.RST}  {clr.W}{folder.parent / sug}{clr.RST}", file=sys.stderr)
                 except Exception:
                     pass
                 print(); sys.exit(EX.ERR_ARGS)
             if not folder.is_dir():
                 if use_json:
                     _json_error(f"That is a file, not a folder: {folder}", EX.ERR_ARGS)
-                print(f"\n  {R}[ERROR]{RST} That is a file, not a folder: {folder}\n", file=sys.stderr)
+                print(f"\n  {clr.R}[ERROR]{clr.RST} That is a file, not a folder: {folder}\n", file=sys.stderr)
                 sys.exit(EX.ERR_ARGS)
             _require_ffprobe("scan", use_json)
 
             on_progress = _make_progress_bar(quiet, use_json)
             if not quiet:
-                print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
+                print(f"  {clr.DIM}Collecting files...{clr.RST}", end='', flush=True)
             try:
                 total_sec, total_count, tree, durations, sizes, hits = _run_scan(
                     folder, on_progress, sort, use_cache)
             except KeyboardInterrupt:
                 if use_json:
                     _json_error("Scan interrupted", EX.ERR_SCAN)
-                print(f"\n\n  {Y}Scan cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
+                print(f"\n\n  {clr.Y}Scan cancelled.{clr.RST}\n"); sys.exit(EX.ERR_SCAN)
 
             # apply filters if any were requested
             if filters:
@@ -860,7 +860,7 @@ def main():
                     folder, durations, sizes, sort)
                 if not quiet and not use_json:
                     removed = hits + (total_count - len(durations))  # rough
-                    print(f"  {DIM}Filters applied — {len(durations)} files match.{RST}")
+                    print(f"  {clr.DIM}Filters applied — {len(durations)} files match.{clr.RST}")
 
             if use_json:
                 _json_out(_scan_to_json(folder, total_sec, total_count, tree, durations, sizes, hits))
@@ -868,8 +868,8 @@ def main():
 
             if not quiet:
                 probed     = total_count - hits
-                cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
-                print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} files found.{cache_info}".ljust(60))
+                cache_info = f"  {clr.DIM}({hits} cached, {probed} probed){clr.RST}" if hits > 0 else ""
+                print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} files found.{cache_info}".ljust(60))
             print_results(folder, total_sec, total_count, tree, durations, sizes, top,
                           show_files=getattr(args, 'files', False))
             groups = find_duplicates(durations, sizes)
@@ -879,11 +879,11 @@ def main():
                 try:
                     dest = export_results(folder, total_sec, total_count, tree, durations, fmt, out_path)
                     if not quiet:
-                        print(f"  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
+                        print(f"  {clr.G}Exported{clr.RST}  {clr.DIM}→{clr.RST}  {clr.W}{dest}{clr.RST}\n")
                 except Exception as e:
                     if use_json:
                         _json_error(f"Export failed: {e}", EX.ERR_EXPORT)
-                    print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr)
+                    print(f"  {clr.R}Export failed:{clr.RST} {e}\n", file=sys.stderr)
                     sys.exit(EX.ERR_EXPORT)
             sys.exit(EX.OK)
 
@@ -898,13 +898,13 @@ def main():
                 if _is_url(raw):
                     if use_json:
                         _json_error("Batch mode does not support URLs — use a single URL target", EX.ERR_ARGS)
-                    print(f"\n  {R}[ERROR]{RST} Batch mode does not support URLs: {raw}\n", file=sys.stderr)
+                    print(f"\n  {clr.R}[ERROR]{clr.RST} Batch mode does not support URLs: {raw}\n", file=sys.stderr)
                     sys.exit(EX.ERR_ARGS)
                 f = Path(raw)
                 if not f.exists() or not f.is_dir():
                     if use_json:
                         _json_error(f"Not a valid folder: {f}", EX.ERR_ARGS)
-                    print(f"\n  {R}[ERROR]{RST} Not a valid folder: {f}\n", file=sys.stderr)
+                    print(f"\n  {clr.R}[ERROR]{clr.RST} Not a valid folder: {f}\n", file=sys.stderr)
                     sys.exit(EX.ERR_ARGS)
                 folders.append(f)
 
@@ -913,8 +913,8 @@ def main():
             for i, folder in enumerate(folders, 1):
                 if not quiet:
                     label_w = 40
-                    print(f"  {DIM}[{i}/{len(folders)}]{RST}  {W}{folder.name:<{label_w}}{RST}  "
-                          f"{DIM}scanning...{RST}", end='', flush=True)
+                    print(f"  {clr.DIM}[{i}/{len(folders)}]{clr.RST}  {clr.W}{folder.name:<{label_w}}{clr.RST}  "
+                          f"{clr.DIM}scanning...{clr.RST}", end='', flush=True)
                 on_progress = _make_progress_bar(quiet=True)  # suppress bar in batch — too noisy
                 try:
                     total_sec, total_count, tree, durations, sizes, hits = _run_scan(
@@ -922,7 +922,7 @@ def main():
                 except KeyboardInterrupt:
                     if use_json:
                         _json_error("Scan interrupted", EX.ERR_SCAN)
-                    print(f"\n\n  {Y}Scan cancelled.{RST}\n"); sys.exit(EX.ERR_SCAN)
+                    print(f"\n\n  {clr.Y}Scan cancelled.{clr.RST}\n"); sys.exit(EX.ERR_SCAN)
                 if filters:
                     durations, sizes = apply_filters(durations, sizes, filters)
                     total_sec, total_count, tree, durations, sizes = rebuild_after_filter(
@@ -930,8 +930,8 @@ def main():
                 results.append((folder, total_sec, total_count, tree, durations, sizes, hits))
                 if not quiet:
                     fmt_dur = format_duration(total_sec)["hours_fmt"]
-                    print(f"\r  {G}[{i}/{len(folders)}]{RST}  {W}{folder.name:<{label_w}}{RST}  "
-                          f"{Y}{fmt_dur}{RST}  {DIM}{total_count} files{RST}".ljust(80))
+                    print(f"\r  {clr.G}[{i}/{len(folders)}]{clr.RST}  {clr.W}{folder.name:<{label_w}}{clr.RST}  "
+                          f"{clr.Y}{fmt_dur}{clr.RST}  {clr.DIM}{total_count} files{clr.RST}".ljust(80))
 
             if do_merge:
                 # ── merged grand total ────────────────────────────────
@@ -982,29 +982,29 @@ def main():
                 # human merged output
                 fmt_merged = format_duration(merged_sec)
                 print()
-                print(f"  {C}{LINE}{RST}")
-                print(f"  {W}  Batch Scan  {DIM}|{RST}  {len(folders)} folders  {DIM}(merged){RST}{RST}")
-                print(f"  {C}{LINE}{RST}")
+                print(f"  {clr.C}{LINE}{clr.RST}")
+                print(f"  {clr.W}  Batch Scan  {clr.DIM}|{clr.RST}  {len(folders)} folders  {clr.DIM}(merged){clr.RST}{clr.RST}")
+                print(f"  {clr.C}{LINE}{clr.RST}")
                 for r in results:
                     fd = format_duration(r[1])["hours_fmt"]
-                    print(f"  {DIM}→{RST}  {W}{r[0].name:<35}{RST}  {Y}{fd}{RST}  {DIM}{r[2]} files{RST}")
+                    print(f"  {clr.DIM}→{clr.RST}  {clr.W}{r[0].name:<35}{clr.RST}  {clr.Y}{fd}{clr.RST}  {clr.DIM}{r[2]} files{clr.RST}")
                 print()
-                print(f"  {C}{LINE}{RST}")
-                print(f"  {W}  Grand Total{RST}")
-                print(f"  {C}{LINE}{RST}")
+                print(f"  {clr.C}{LINE}{clr.RST}")
+                print(f"  {clr.W}  Grand Total{clr.RST}")
+                print(f"  {clr.C}{LINE}{clr.RST}")
                 total_bytes = sum(merged_sizes.values())
-                print(f"  {W}  Total files   {DIM}:{RST}  {W}{merged_count}{RST}")
-                print(f"  {W}  Total size    {DIM}:{RST}  {W}{format_size(total_bytes)}{RST}")
-                print(f"  {W}  Days          {DIM}:{RST}  {W}{fmt_merged['days_fmt']}{RST}")
-                print(f"  {W}  Hours         {DIM}:{RST}  {W}{fmt_merged['hours_fmt']}{RST}")
+                print(f"  {clr.W}  Total files   {clr.DIM}:{clr.RST}  {clr.W}{merged_count}{clr.RST}")
+                print(f"  {clr.W}  Total size    {clr.DIM}:{clr.RST}  {clr.W}{format_size(total_bytes)}{clr.RST}")
+                print(f"  {clr.W}  Days          {clr.DIM}:{clr.RST}  {clr.W}{fmt_merged['days_fmt']}{clr.RST}")
+                print(f"  {clr.W}  Hours         {clr.DIM}:{clr.RST}  {clr.W}{fmt_merged['hours_fmt']}{clr.RST}")
                 print()
-                print(f"  {C}{LINE}{RST}")
-                print(f"  {W}  Playback Speed{RST}")
-                print(f"  {C}{LINE}{RST}")
+                print(f"  {clr.C}{LINE}{clr.RST}")
+                print(f"  {clr.W}  Playback Speed{clr.RST}")
+                print(f"  {clr.C}{LINE}{clr.RST}")
                 for speed in (1.0, 1.25, 1.5, 1.75, 2.0):
                     adj   = format_duration(merged_sec / speed)
                     slbl  = f"{speed:.2f}".rstrip('0').rstrip('.') + "x"
-                    print(f"  {W}  {slbl:<6}        {DIM}:{RST}  {W}{adj['hours_fmt']}{RST}  {DIM}({adj['days_fmt']}){RST}")
+                    print(f"  {clr.W}  {slbl:<6}        {clr.DIM}:{clr.RST}  {clr.W}{adj['hours_fmt']}{clr.RST}  {clr.DIM}({adj['days_fmt']}){clr.RST}")
                 print()
                 if top > 0:
                     from ._display import print_top_files
@@ -1026,7 +1026,7 @@ def main():
                 for folder, total_sec, total_count, tree, durations, sizes, hits in results:
                     if not quiet:
                         probed = total_count - hits
-                        cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
+                        cache_info = f"  {clr.DIM}({hits} cached, {probed} probed){clr.RST}" if hits > 0 else ""
                     print_results(folder, total_sec, total_count, tree, durations, sizes, top,
                                   show_files=getattr(args, 'files', False))
                     groups = find_duplicates(durations, sizes)
@@ -1037,17 +1037,17 @@ def main():
                 batch_total_sec   = sum(r[1] for r in results)
                 batch_total_count = sum(r[2] for r in results)
                 batch_total_bytes = sum(sum(r[5].values()) for r in results)
-                print(f"  {C}{LINE}{RST}")
-                print(f"  {W}  Batch Summary  {DIM}|{RST}  {len(folders)} folders{RST}")
-                print(f"  {C}{LINE}{RST}")
+                print(f"  {clr.C}{LINE}{clr.RST}")
+                print(f"  {clr.W}  Batch Summary  {clr.DIM}|{clr.RST}  {len(folders)} folders{clr.RST}")
+                print(f"  {clr.C}{LINE}{clr.RST}")
                 for r in results:
                     fd = format_duration(r[1])["hours_fmt"]
-                    print(f"  {DIM}→{RST}  {W}{r[0].name:<35}{RST}  {Y}{fd}{RST}  {DIM}{r[2]} files{RST}")
+                    print(f"  {clr.DIM}→{clr.RST}  {clr.W}{r[0].name:<35}{clr.RST}  {clr.Y}{fd}{clr.RST}  {clr.DIM}{r[2]} files{clr.RST}")
                 print()
                 bfmt = format_duration(batch_total_sec)
-                print(f"  {W}  Combined  {DIM}:{RST}  {W}{bfmt['hours_fmt']}{RST}  "
-                      f"{DIM}|{RST}  {W}{batch_total_count} files{RST}  "
-                      f"{DIM}|{RST}  {W}{format_size(batch_total_bytes)}{RST}")
+                print(f"  {clr.W}  Combined  {clr.DIM}:{clr.RST}  {clr.W}{bfmt['hours_fmt']}{clr.RST}  "
+                      f"{clr.DIM}|{clr.RST}  {clr.W}{batch_total_count} files{clr.RST}  "
+                      f"{clr.DIM}|{clr.RST}  {clr.W}{format_size(batch_total_bytes)}{clr.RST}")
                 print()
 
             sys.exit(EX.OK)
@@ -1057,8 +1057,8 @@ def main():
     print_banner()
 
     if not check_ffprobe():
-        print(f"  {Y}ffprobe not found on PATH.{RST}  {DIM}Local folder scanning won't work.{RST}")
-        print(f"  Download FFmpeg from {C}https://ffmpeg.org/download.html{RST}\n")
+        print(f"  {clr.Y}ffprobe not found on PATH.{clr.RST}  {clr.DIM}Local folder scanning won't work.{clr.RST}")
+        print(f"  Download FFmpeg from {clr.C}https://ffmpeg.org/download.html{clr.RST}\n")
 
     on_progress  = _make_progress_bar()
     last_scan    = {}
@@ -1068,9 +1068,9 @@ def main():
 
     while True:
         try:
-            raw = input(f"  {C}aevum{RST}> ").strip()
+            raw = input(f"  {clr.C}aevum{clr.RST}> ").strip()
         except (KeyboardInterrupt, EOFError):
-            print(f"\n\n  {G}Goodbye!{RST}\n"); sys.exit(EX.OK)
+            print(f"\n\n  {clr.G}Goodbye!{clr.RST}\n"); sys.exit(EX.OK)
 
         if not raw:
             continue
@@ -1083,7 +1083,7 @@ def main():
             raw = _init_map[raw]
 
         if raw.lower() in ('exit', 'quit', 'q'):
-            print(f"\n  {G}Goodbye!{RST}\n"); sys.exit(EX.OK)
+            print(f"\n  {clr.G}Goodbye!{clr.RST}\n"); sys.exit(EX.OK)
 
         if raw.lower() in ('clear', 'c'):
             clear(); print_banner(); continue
@@ -1096,15 +1096,15 @@ def main():
             repl_config(parts[1:], cfg); continue
 
         if raw.lower() == 'scan':
-            print(f"\n  {DIM}Enter a folder path or YouTube URL to scan.{RST}\n"); continue
+            print(f"\n  {clr.DIM}Enter a folder path or YouTube URL to scan.{clr.RST}\n"); continue
 
         if _is_url(raw):
             url_prog = _make_url_progress()
             try:
                 total_sec, total_count, entries, label = scan_url(raw, url_prog)
             except KeyboardInterrupt:
-                print(f"\n\n  {Y}Fetch cancelled.{RST}\n"); continue
-            print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} videos found.".ljust(60))
+                print(f"\n\n  {clr.Y}Fetch cancelled.{clr.RST}\n"); continue
+            print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} videos found.".ljust(60))
             print_url_results(raw, label, total_sec, total_count, entries, top_n=default_top)
             last_scan = {"folder": raw, "total_sec": total_sec, "total_count": total_count,
                          "tree": None, "durations": {e['title']: e['duration'] for e in entries},
@@ -1114,22 +1114,22 @@ def main():
 
         folder = Path(raw)
         if not folder.exists():
-            print(f"\n  {R}[ERROR]{RST} Path not found: {raw}\n"); continue
+            print(f"\n  {clr.R}[ERROR]{clr.RST} Path not found: {raw}\n"); continue
         if not folder.is_dir():
-            print(f"\n  {R}[ERROR]{RST} That is a file, not a folder.\n"); continue
+            print(f"\n  {clr.R}[ERROR]{clr.RST} That is a file, not a folder.\n"); continue
         if not check_ffprobe():
-            print(f"\n  {R}[ERROR]{RST} ffprobe not found. Install FFmpeg: {C}https://ffmpeg.org/download.html{RST}\n"); continue
+            print(f"\n  {clr.R}[ERROR]{clr.RST} ffprobe not found. Install FFmpeg: {clr.C}https://ffmpeg.org/download.html{clr.RST}\n"); continue
 
-        print(f"  {DIM}Collecting files...{RST}", end='', flush=True)
+        print(f"  {clr.DIM}Collecting files...{clr.RST}", end='', flush=True)
         try:
             total_sec, total_count, tree, durations, sizes, hits = _run_scan(
                 folder, on_progress, current_sort, use_cache)
         except KeyboardInterrupt:
-            print(f"\n\n  {Y}Scan cancelled.{RST}\n"); continue
+            print(f"\n\n  {clr.Y}Scan cancelled.{clr.RST}\n"); continue
 
         probed     = total_count - hits
-        cache_info = f"  {DIM}({hits} cached, {probed} probed){RST}" if hits > 0 else ""
-        print(f"\r  {G}Done!{RST}  {W}{total_count}{RST} files found.{cache_info}".ljust(60))
+        cache_info = f"  {clr.DIM}({hits} cached, {probed} probed){clr.RST}" if hits > 0 else ""
+        print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} files found.{cache_info}".ljust(60))
         print_results(folder, total_sec, total_count, tree, durations, sizes, default_top, show_files=False)
         groups = find_duplicates(durations, sizes)
         print_dupe_warning(groups)
@@ -1140,9 +1140,9 @@ def main():
 
         while True:
             try:
-                choice = input(f"  {C}aevum{RST}> ").strip().lower()
+                choice = input(f"  {clr.C}aevum{clr.RST}> ").strip().lower()
             except (KeyboardInterrupt, EOFError):
-                print(f"\n\n  {G}Goodbye!{RST}\n"); sys.exit(EX.OK)
+                print(f"\n\n  {clr.G}Goodbye!{clr.RST}\n"); sys.exit(EX.OK)
 
             _menu_map = {'1': 'scan', '2': 'sort', '3': 'export', '4': 'clear', '5': 'quit', '6': 'duplicates'}
             if choice in _menu_map:
@@ -1152,14 +1152,14 @@ def main():
             first_word = choice.split()[0] if choice else ''
 
             if choice in ('quit', 'exit', 'q'):
-                print(f"\n  {G}Goodbye!{RST}\n"); sys.exit(EX.OK)
+                print(f"\n  {clr.G}Goodbye!{clr.RST}\n"); sys.exit(EX.OK)
             elif choice == 'clear':
                 clear(); print_banner(); break
             elif choice == 'scan':
                 break
             elif first_word == 'sort' or choice == 'sort':
                 if last_scan.get("is_url"):
-                    print(f"  {Y}Sort is not available for URL scans.{RST}\n")
+                    print(f"  {clr.Y}Sort is not available for URL scans.{clr.RST}\n")
                     print_post_scan_menu(current_sort); continue
                 parts      = choice.split()
                 field      = parts[1] if len(parts) >= 2 else None
@@ -1168,12 +1168,12 @@ def main():
                 _field_map  = {'1': 'name', '2': 'duration', '3': 'count'}
                 while field not in _field_opts:
                     sug  = _fuzzy_suggest(field, list(_field_opts) + list(_field_map.keys())) if field else None
-                    hint = f"  {DIM}Did you mean {W}{_field_map.get(sug, sug)}{RST}{DIM}?{RST}" if sug else ""
+                    hint = f"  {clr.DIM}Did you mean {clr.W}{_field_map.get(sug, sug)}{clr.RST}{clr.DIM}?{clr.RST}" if sug else ""
                     if field is not None:
-                        print(f"  {R}Unknown.{RST}{hint}")
-                    print(f"  {DIM}Sort by?{RST}  {G}1. name{RST}   {B}2. duration{RST}   {M}3. count{RST}   {DIM}0. back{RST}")
+                        print(f"  {clr.R}Unknown.{clr.RST}{hint}")
+                    print(f"  {clr.DIM}Sort by?{clr.RST}  {clr.G}1. name{clr.RST}   {clr.B}2. duration{clr.RST}   {clr.M}3. count{clr.RST}   {clr.DIM}0. back{clr.RST}")
                     try:
-                        field = input(f"  {C}aevum{RST}> ").strip().lower()
+                        field = input(f"  {clr.C}aevum{clr.RST}> ").strip().lower()
                     except (KeyboardInterrupt, EOFError):
                         print(); field = 'back'
                     if field in _field_map: field = _field_map[field]
@@ -1183,13 +1183,13 @@ def main():
                 _dir_aliases = {'asc': 'asc', 'ascending': 'asc', 'a': 'asc', '1': 'asc',
                                 'desc': 'desc', 'descending': 'desc', 'd': 'desc', '2': 'desc'}
                 dir_def      = 'asc' if field == 'name' else 'desc'
-                dir_hint_str = (f"{G}1. ascending{RST} (a→z)   {B}2. descending{RST} (z→a)" if field == 'name'
-                                else f"{G}1. descending{RST} (high→low)   {B}2. ascending{RST} (low→high)")
+                dir_hint_str = (f"{clr.G}1. ascending{clr.RST} (a→z)   {clr.B}2. descending{clr.RST} (z→a)" if field == 'name'
+                                else f"{clr.G}1. descending{clr.RST} (high→low)   {clr.B}2. ascending{clr.RST} (low→high)")
                 while True:
                     if direc is None:
-                        print(f"  {DIM}Direction?{RST}  {dir_hint_str}   {DIM}0. back{RST}  {DIM}[Enter = default]{RST}")
+                        print(f"  {clr.DIM}Direction?{clr.RST}  {dir_hint_str}   {clr.DIM}0. back{clr.RST}  {clr.DIM}[Enter = default]{clr.RST}")
                         try:
-                            direc = input(f"  {C}aevum{RST}> ").strip().lower()
+                            direc = input(f"  {clr.C}aevum{clr.RST}> ").strip().lower()
                         except (KeyboardInterrupt, EOFError):
                             print(); direc = 'back'
                     if direc in ('back', '0'):
@@ -1198,8 +1198,8 @@ def main():
                     resolved = _dir_aliases.get(direc)
                     if resolved: direc = resolved; break
                     sug  = _fuzzy_suggest(direc, list(_dir_aliases.keys()))
-                    hint = f"  {DIM}Did you mean {W}{sug}{RST}{DIM}?{RST}" if sug else ""
-                    print(f"  {R}Unknown direction.{RST}{hint}"); direc = None
+                    hint = f"  {clr.DIM}Did you mean {clr.W}{sug}{clr.RST}{clr.DIM}?{clr.RST}" if sug else ""
+                    print(f"  {clr.R}Unknown direction.{clr.RST}{hint}"); direc = None
                 if direc is None: continue
                 current_sort = f"{field}:{direc}"
                 _, _, new_tree, new_durations, new_sizes, _ = _run_scan(
@@ -1211,7 +1211,7 @@ def main():
                 print_post_scan_menu(current_sort)
             elif first_word == 'export' or choice == 'export':
                 if last_scan.get("is_url"):
-                    print(f"  {Y}Export is not available for URL scans yet.{RST}\n")
+                    print(f"  {clr.Y}Export is not available for URL scans yet.{clr.RST}\n")
                     print_post_scan_menu(current_sort); continue
                 parts   = choice.split()
                 fmt     = parts[1] if len(parts) >= 2 else None
@@ -1219,11 +1219,11 @@ def main():
                 _fmt_map  = {'1': 'txt', '2': 'csv', '3': 'json'}
                 while fmt not in _fmt_opts:
                     sug  = _fuzzy_suggest(fmt, list(_fmt_opts) + list(_fmt_map.keys())) if fmt else None
-                    hint = f"  {DIM}Did you mean {W}{_fmt_map.get(sug, sug)}{RST}{DIM}?{RST}" if sug else ""
-                    if fmt is not None: print(f"  {R}Unknown format.{RST}{hint}")
-                    print(f"  {DIM}Export as?{RST}  {G}1. txt{RST}   {B}2. csv{RST}   {M}3. json{RST}   {DIM}0. back{RST}")
+                    hint = f"  {clr.DIM}Did you mean {clr.W}{_fmt_map.get(sug, sug)}{clr.RST}{clr.DIM}?{clr.RST}" if sug else ""
+                    if fmt is not None: print(f"  {clr.R}Unknown format.{clr.RST}{hint}")
+                    print(f"  {clr.DIM}Export as?{clr.RST}  {clr.G}1. txt{clr.RST}   {clr.B}2. csv{clr.RST}   {clr.M}3. json{clr.RST}   {clr.DIM}0. back{clr.RST}")
                     try:
-                        fmt = input(f"  {C}aevum{RST}> ").strip().lower()
+                        fmt = input(f"  {clr.C}aevum{clr.RST}> ").strip().lower()
                     except (KeyboardInterrupt, EOFError):
                         print(); fmt = 'back'
                     if fmt in _fmt_map: fmt = _fmt_map[fmt]
@@ -1236,19 +1236,19 @@ def main():
                     dest = export_results(last_scan["folder"], last_scan["total_sec"],
                                           last_scan["total_count"], last_scan["tree"],
                                           last_scan["durations"], fmt, out_path)
-                    print(f"\n  {G}Exported{RST}  {DIM}→{RST}  {W}{dest}{RST}\n")
+                    print(f"\n  {clr.G}Exported{clr.RST}  {clr.DIM}→{clr.RST}  {clr.W}{dest}{clr.RST}\n")
                 except Exception as e:
-                    print(f"\n  {R}Export failed:{RST} {e}\n")
+                    print(f"\n  {clr.R}Export failed:{clr.RST} {e}\n")
             elif choice in ('duplicates', 'dupes'):
                 if last_scan.get("is_url"):
-                    print(f"  {Y}Duplicate detection is not available for URL scans.{RST}\n")
+                    print(f"  {clr.Y}Duplicate detection is not available for URL scans.{clr.RST}\n")
                     print_post_scan_menu(current_sort); continue
                 print_duplicates(last_scan["dupe_groups"], last_scan["durations"])
                 print_post_scan_menu(current_sort)
             else:
                 sug = _fuzzy_suggest(first_word, _all_cmds) if first_word else None
                 if sug:
-                    print(f"  {R}Unknown command.{RST}  {DIM}Did you mean{RST}  {W}{sug}{RST}{DIM}?{RST}")
+                    print(f"  {clr.R}Unknown command.{clr.RST}  {clr.DIM}Did you mean{clr.RST}  {clr.W}{sug}{clr.RST}{clr.DIM}?{clr.RST}")
                 else:
-                    print(f"  {R}Invalid command.{RST} Type  {G}1. scan{RST}   {B}2. sort{RST}   {M}3. export{RST}   {Y}4. clear{RST}   {R}5. quit{RST}   {C}6. duplicates{RST}")
+                    print(f"  {clr.R}Invalid command.{clr.RST} Type  {clr.G}1. scan{clr.RST}   {clr.B}2. sort{clr.RST}   {clr.M}3. export{clr.RST}   {clr.Y}4. clear{clr.RST}   {clr.R}5. quit{clr.RST}   {clr.C}6. duplicates{clr.RST}")
                 print_post_scan_menu(current_sort)

@@ -1,4 +1,4 @@
-from ._color   import R, G, Y, B, M, C, W, DIM, RST, LINE, clear, _disable_color
+from ._color   import clr, LINE, clear, _disable_color
 from . import _exit
 from ._cache   import CACHE_DIR, _cache_key, load_cache, save_cache
 from ._scan    import (check_ffprobe, get_duration, format_duration, format_size,

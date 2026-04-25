@@ -36,7 +36,7 @@ video_extensions = (
     '.s16', '.s24', '.s32', '.u8', '.u16', '.u24',
     '.u32', '.w64', '.rf64', '.bwf', '.mid', '.midi',
     '.kar', '.xmf', '.mxmf', '.rtttl', '.rtx', '.ota',
-    '.imy', '.mp1', '.m3u', '.pls', '.xspf',
+    '.imy', '.mp1',
 )
 
 
@@ -351,19 +351,30 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None):
                 break
             ancestor = next_ancestor
 
+    # Pre-compute the parent→children mapping from the folders we already
+    # know about.  This avoids a second os.scandir() pass through the tree
+    # and correctly omits directories that contain no matching media files.
+    known_folders: set = set(folder_secs.keys()) | set(folder_direct.keys())
+    children_of: dict = {}
+    for folder in known_folders:
+        if folder == root:
+            continue
+        parent = folder.parent
+        if parent in known_folders or parent == root:
+            children_of.setdefault(parent, set()).add(folder)
+
     def build(node):
-        subfolders = []
-        try:
-            children = list(p for p in node.iterdir() if p.is_dir())
-        except PermissionError:
-            return subfolders, []
-        if sort_field == "duration":
-            children.sort(key=lambda p: folder_secs.get(p, 0.0), reverse=sort_rev)
-        elif sort_field == "count":
-            children.sort(key=lambda p: folder_count.get(p, 0), reverse=sort_rev)
-        else:
-            children.sort(reverse=sort_rev)
-        for child in children:
+        subfolders   = []
+        child_paths  = sorted(
+            children_of.get(node, set()),
+            key=lambda p: (
+                folder_secs.get(p, 0.0)   if sort_field == "duration" else
+                folder_count.get(p, 0)    if sort_field == "count"    else
+                p
+            ),
+            reverse=sort_rev,
+        )
+        for child in child_paths:
             secs         = folder_secs.get(child, 0.0)
             count        = folder_count.get(child, 0)
             fbytes       = folder_bytes.get(child, 0)

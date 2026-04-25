@@ -1,10 +1,15 @@
 from pathlib import Path
 
-from ._color import R, G, Y, B, M, C, W, DIM, RST, LINE
+from ._color import clr, LINE
 from ._scan  import format_duration, format_size
 
 
-depth_colors = [R, G, B, M, C]
+_DEPTH_ATTRS = ("R", "G", "B", "M", "C")
+
+
+def _dc(depth: int) -> str:
+    """Return the ANSI code for the given tree depth."""
+    return getattr(clr, _DEPTH_ATTRS[depth % len(_DEPTH_ATTRS)])
 
 
 def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number="",
@@ -14,16 +19,16 @@ def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number=""
     PAD    = "    "
     indent = PAD * depth
     fmt    = format_duration(seconds)
-    col    = depth_colors[depth % len(depth_colors)]
+    col    = _dc(depth)
     label  = f"{number}.  {name}" if number else name
 
     if count == 0:
-        print(f"{indent}{col}{label}{RST}")
-        print(f"{indent}    {DIM}+--  (empty){RST}")
+        print(f"{indent}{col}{label}{clr.RST}")
+        print(f"{indent}    {clr.DIM}+--  (empty){clr.RST}")
     else:
-        print(f"{indent}{col}{label}{RST}")
-        size_label = f"  {DIM}|{RST}  {W}{format_size(fbytes)}{RST}" if fbytes else ""
-        print(f"{indent}    {DIM}+--{RST}  {W}{fmt['hours_fmt']}{RST}  {DIM}|{RST}  {W}{count} {'video' if count == 1 else 'videos'}{RST}{size_label}")
+        print(f"{indent}{col}{label}{clr.RST}")
+        size_label = f"  {clr.DIM}|{clr.RST}  {clr.W}{format_size(fbytes)}{clr.RST}" if fbytes else ""
+        print(f"{indent}    {clr.DIM}+--{clr.RST}  {clr.W}{fmt['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{count} {'video' if count == 1 else 'videos'}{clr.RST}{size_label}")
 
     print()
 
@@ -31,22 +36,22 @@ def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number=""
         direct_sec   = sum(sec for _, sec in direct)
         direct_count = len(direct)
         dir_fmt      = format_duration(direct_sec)
-        child_col    = depth_colors[(depth + 1) % len(depth_colors)]
+        child_col    = _dc(depth + 1)
         virt_num     = f"{number}.0" if number else "0"
-        print(f"{indent}    {child_col}{virt_num}.  (no folder){RST}")
+        print(f"{indent}    {child_col}{virt_num}.  (no folder){clr.RST}")
         dir_bytes = 0
         for p, _ in direct:
             try:
                 dir_bytes += p.stat().st_size
             except OSError:
                 pass
-        dir_size_label = f"  {DIM}|{RST}  {W}{format_size(dir_bytes)}{RST}" if dir_bytes else ""
-        print(f"{indent}        {DIM}+--{RST}  {W}{dir_fmt['hours_fmt']}{RST}  {DIM}|{RST}  {W}{direct_count} {'video' if direct_count == 1 else 'videos'}{RST}{dir_size_label}")
+        dir_size_label = f"  {clr.DIM}|{clr.RST}  {clr.W}{format_size(dir_bytes)}{clr.RST}" if dir_bytes else ""
+        print(f"{indent}        {clr.DIM}+--{clr.RST}  {clr.W}{dir_fmt['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{direct_count} {'video' if direct_count == 1 else 'videos'}{clr.RST}{dir_size_label}")
         if show_files:
             print()
             for path, sec in direct:
                 fd = format_duration(sec)
-                print(f"{indent}        {DIM}|  {fd['hours_fmt']}  {path.name}{RST}")
+                print(f"{indent}        {clr.DIM}|  {fd['hours_fmt']}  {path.name}{clr.RST}")
         print()
 
     for i, (sub_name, sub_sec, sub_count, sub_fbytes, sub_direct_count, sub_sub, sub_direct) in enumerate(subfolders, start=1):
@@ -61,44 +66,44 @@ def print_top_files(durations, n=10):
     if not durations:
         return
     ranked = sorted(durations.items(), key=lambda x: x[1], reverse=True)[:n]
-    print(f"  {C}{LINE}{RST}")
-    print(f"  {W}  Top {n} Longest Files{RST}")
-    print(f"  {C}{LINE}{RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print(f"  {clr.W}  Top {n} Longest Files{clr.RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
     for i, (path, sec) in enumerate(ranked, start=1):
         fmt    = format_duration(sec)
         name   = path.name
         parent = path.parent.name
-        print(f"  {DIM}{i:>2}.{RST}  {W}{fmt['hours_fmt']}{RST}  {DIM}|{RST}  {W}{name}{RST}  {DIM}({parent}){RST}")
+        print(f"  {clr.DIM}{i:>2}.{clr.RST}  {clr.W}{fmt['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{name}{clr.RST}  {clr.DIM}({parent}){clr.RST}")
     print()
 
 
 def print_results(folder, total_sec, total_count, tree, durations=None, sizes=None, top_n=10, show_files=False):
-    fmt   = format_duration(total_sec)
-    sizes = sizes or {}
+    fmt        = format_duration(total_sec)
+    sizes      = sizes or {}
     subfolders, direct, root_bytes = tree
     print()
-    print(f"  {C}{LINE}{RST}")
-    print(f"  {W}  Media Library  |  Folder Summary{RST}")
-    print(f"  {C}{LINE}{RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print(f"  {clr.W}  Media Library  |  Folder Summary{clr.RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
     print()
     print_tree(Path(folder).name, total_sec, total_count, subfolders, direct, show_files=show_files, fbytes=root_bytes)
-    print(f"  {C}{LINE}{RST}")
-    print(f"  {W}  Grand Total{RST}")
-    print(f"  {C}{LINE}{RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print(f"  {clr.W}  Grand Total{clr.RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
     total_bytes = sum(sizes.values())
-    print(f"  {W}  Total files   {DIM}:{RST}  {W}{total_count}{RST}")
-    print(f"  {W}  Total size    {DIM}:{RST}  {W}{format_size(total_bytes)}{RST}")
-    print(f"  {W}  Days          {DIM}:{RST}  {W}{fmt['days_fmt']}{RST}")
-    print(f"  {W}  Hours         {DIM}:{RST}  {W}{fmt['hours_fmt']}{RST}")
-    print(f"  {W}  Minutes       {DIM}:{RST}  {W}{fmt['minutes_fmt']}{RST}")
+    print(f"  {clr.W}  Total files   {clr.DIM}:{clr.RST}  {clr.W}{total_count}{clr.RST}")
+    print(f"  {clr.W}  Total size    {clr.DIM}:{clr.RST}  {clr.W}{format_size(total_bytes)}{clr.RST}")
+    print(f"  {clr.W}  Days          {clr.DIM}:{clr.RST}  {clr.W}{fmt['days_fmt']}{clr.RST}")
+    print(f"  {clr.W}  Hours         {clr.DIM}:{clr.RST}  {clr.W}{fmt['hours_fmt']}{clr.RST}")
+    print(f"  {clr.W}  Minutes       {clr.DIM}:{clr.RST}  {clr.W}{fmt['minutes_fmt']}{clr.RST}")
     print()
-    print(f"  {C}{LINE}{RST}")
-    print(f"  {W}  Playback Speed{RST}")
-    print(f"  {C}{LINE}{RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print(f"  {clr.W}  Playback Speed{clr.RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
     for speed in (1.0, 1.25, 1.5, 1.75, 2.0):
         adjusted = format_duration(total_sec / speed)
-        label    = f"{speed:.2f}".rstrip('0').rstrip('.') + "x"
-        print(f"  {W}  {label:<6}        {DIM}:{RST}  {W}{adjusted['hours_fmt']}{RST}  {DIM}({adjusted['days_fmt']}){RST}")
+        label    = f"{speed:.2f}".rstrip("0").rstrip(".") + "x"
+        print(f"  {clr.W}  {label:<6}        {clr.DIM}:{clr.RST}  {clr.W}{adjusted['hours_fmt']}{clr.RST}  {clr.DIM}({adjusted['days_fmt']}){clr.RST}")
     print()
     if durations and top_n > 0:
         print_top_files(durations, top_n)
@@ -107,58 +112,60 @@ def print_results(folder, total_sec, total_count, tree, durations=None, sizes=No
 def print_url_results(url, label, total_sec, total_count, entries, top_n=10):
     fmt = format_duration(total_sec)
     print()
-    print(f"  {C}{LINE}{RST}")
-    print(f"  {W}  {label}{RST}")
-    print(f"  {DIM}  {url[:70]}{RST}")
-    print(f"  {C}{LINE}{RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print(f"  {clr.W}  {label}{clr.RST}")
+    print(f"  {clr.DIM}  {url[:70]}{clr.RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
     print()
-    print(f"  {W}  Total videos  {DIM}:{RST}  {W}{total_count}{RST}")
-    print(f"  {W}  Days          {DIM}:{RST}  {W}{fmt['days_fmt']}{RST}")
-    print(f"  {W}  Hours         {DIM}:{RST}  {W}{fmt['hours_fmt']}{RST}")
-    print(f"  {W}  Minutes       {DIM}:{RST}  {W}{fmt['minutes_fmt']}{RST}")
+    print(f"  {clr.W}  Total videos  {clr.DIM}:{clr.RST}  {clr.W}{total_count}{clr.RST}")
+    print(f"  {clr.W}  Days          {clr.DIM}:{clr.RST}  {clr.W}{fmt['days_fmt']}{clr.RST}")
+    print(f"  {clr.W}  Hours         {clr.DIM}:{clr.RST}  {clr.W}{fmt['hours_fmt']}{clr.RST}")
+    print(f"  {clr.W}  Minutes       {clr.DIM}:{clr.RST}  {clr.W}{fmt['minutes_fmt']}{clr.RST}")
     print()
-    print(f"  {C}{LINE}{RST}")
-    print(f"  {W}  Playback Speed{RST}")
-    print(f"  {C}{LINE}{RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print(f"  {clr.W}  Playback Speed{clr.RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
     for speed in (1.0, 1.25, 1.5, 1.75, 2.0):
         adjusted = format_duration(total_sec / speed)
-        slabel   = f"{speed:.2f}".rstrip('0').rstrip('.') + "x"
-        print(f"  {W}  {slabel:<6}        {DIM}:{RST}  {W}{adjusted['hours_fmt']}{RST}  {DIM}({adjusted['days_fmt']}){RST}")
+        slabel   = f"{speed:.2f}".rstrip("0").rstrip(".") + "x"
+        print(f"  {clr.W}  {slabel:<6}        {clr.DIM}:{clr.RST}  {clr.W}{adjusted['hours_fmt']}{clr.RST}  {clr.DIM}({adjusted['days_fmt']}){clr.RST}")
     print()
     if entries and top_n > 0:
-        ranked = sorted(entries, key=lambda e: e['duration'], reverse=True)[:top_n]
-        print(f"  {C}{LINE}{RST}")
-        print(f"  {W}  Top {top_n} Longest Videos{RST}")
-        print(f"  {C}{LINE}{RST}")
+        ranked = sorted(entries, key=lambda e: e["duration"], reverse=True)[:top_n]
+        print(f"  {clr.C}{LINE}{clr.RST}")
+        print(f"  {clr.W}  Top {top_n} Longest Videos{clr.RST}")
+        print(f"  {clr.C}{LINE}{clr.RST}")
         for i, e in enumerate(ranked, start=1):
-            dur_fmt = format_duration(e['duration'])
-            print(f"  {DIM}{i:>2}.{RST}  {W}{dur_fmt['hours_fmt']}{RST}  {DIM}|{RST}  {W}{e['title'][:60]}{RST}")
+            dur_fmt = format_duration(e["duration"])
+            print(f"  {clr.DIM}{i:>2}.{clr.RST}  {clr.W}{dur_fmt['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{e['title'][:60]}{clr.RST}")
         print()
 
 
 def print_banner():
     print()
-    print(f"  {C}{LINE}{RST}")
-    print(f"  {C}  A E V U M{RST}  {DIM}|{RST}  {W}Media Library Scanner{RST}")
-    print(f"  {C}{LINE}{RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print(f"  {clr.C}  A E V U M{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}Media Library Scanner{clr.RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
     print()
-    print(f"  {W}Type a folder path or YouTube URL (video/playlist/channel) and press Enter.{RST}")
+    print(f"  {clr.W}Type a folder path or YouTube URL (video/playlist/channel) and press Enter.{clr.RST}")
     print()
-    print(f"  {G}1. scan{RST}   {M}2. clear{RST}   {R}3. quit{RST}")
+    print(f"  {clr.G}1. scan{clr.RST}   {clr.M}2. clear{clr.RST}   {clr.R}3. quit{clr.RST}")
     print()
 
 
 def print_post_scan_menu(current_sort="name:asc"):
-    print(f"  {W}What do you want to do?{RST}")
-    print(f"  {G}1. scan{RST}   {B}2. sort{RST}   {M}3. export{RST}   {Y}4. clear{RST}   {R}5. quit{RST}   {C}6. duplicates{RST}")
+    print(f"  {clr.W}What do you want to do?{clr.RST}")
+    print(f"  {clr.G}1. scan{clr.RST}   {clr.B}2. sort{clr.RST}   {clr.M}3. export{clr.RST}   {clr.Y}4. clear{clr.RST}   {clr.R}5. quit{clr.RST}   {clr.C}6. duplicates{clr.RST}")
     print()
 
 
 def _fuzzy_suggest(word, candidates):
     def _dist(a, b):
-        if a == b: return 0
+        if a == b:
+            return 0
         la, lb = len(a), len(b)
-        if abs(la - lb) > 3: return 99
+        if abs(la - lb) > 3:
+            return 99
         prev = list(range(lb + 1))
         for i, ca in enumerate(a):
             curr = [i + 1]
