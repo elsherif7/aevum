@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 
-from ._color import Y, C, W, G, DIM, RST
+from ._color import clr
 
 YT_API_KEY_FILE = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Aevum" / "yt_api_key.txt"
 YT_API_BASE     = "https://www.googleapis.com/youtube/v3"
@@ -47,21 +47,21 @@ def save_api_key(key):
 
 def prompt_api_key():
     print()
-    print(f"  {Y}YouTube API key required.{RST}")
-    print(f"  {DIM}Get a free key in ~2 minutes:{RST}")
-    print(f"  {C}1.{RST} Go to {W}https://console.cloud.google.com/{RST}")
-    print(f"  {C}2.{RST} Create a project → Enable {W}YouTube Data API v3{RST}")
-    print(f"  {C}3.{RST} Credentials → Create API Key → copy it here")
+    print(f"  {clr.Y}YouTube API key required.{clr.RST}")
+    print(f"  {clr.DIM}Get a free key in ~2 minutes:{clr.RST}")
+    print(f"  {clr.C}1.{clr.RST} Go to {clr.W}https://console.cloud.google.com/{clr.RST}")
+    print(f"  {clr.C}2.{clr.RST} Create a project → Enable {clr.W}YouTube Data API v3{clr.RST}")
+    print(f"  {clr.C}3.{clr.RST} Credentials → Create API Key → copy it here")
     print()
     try:
-        key = input(f"  {C}Paste API key{RST}> ").strip()
+        key = input(f"  {clr.C}Paste API key{clr.RST}> ").strip()
     except (KeyboardInterrupt, EOFError):
         print()
         return None
     if not key:
         return None
     save_api_key(key)
-    print(f"  {G}Key saved to {YT_API_KEY_FILE}{RST}")
+    print(f"  {clr.G}Key saved to {YT_API_KEY_FILE}{clr.RST}")
     print()
     return key
 
@@ -178,7 +178,7 @@ def scan_url(url, on_progress=None):
             label = vid_id
         ids = _yt_fetch_playlist_video_ids(vid_id, api_key, on_progress)
         if on_progress:
-            print(f"\r  {C}Fetching video details...{RST}  {C}{len(ids)} videos{RST}  {DIM}(this may take a moment){RST}".ljust(70), flush=True)
+            print(f"\r  {clr.C}Fetching video details...{clr.RST}  {clr.C}{len(ids)} videos{clr.RST}  {clr.DIM}(this may take a moment){clr.RST}".ljust(70), flush=True)
         entries = _yt_fetch_video_details(ids, api_key)
 
     elif kind in ('channel_id', 'channel_handle'):
@@ -188,7 +188,7 @@ def scan_url(url, on_progress=None):
         label = channel_title or vid_id
         ids   = _yt_fetch_playlist_video_ids(uploads_pl, api_key, on_progress)
         if on_progress:
-            print(f"\r  {C}Fetching video details...{RST}  {C}{len(ids)} videos{RST}  {DIM}(this may take a moment){RST}".ljust(70), flush=True)
+            print(f"\r  {clr.C}Fetching video details...{clr.RST}  {clr.C}{len(ids)} videos{clr.RST}  {clr.DIM}(this may take a moment){clr.RST}".ljust(70), flush=True)
         entries = _yt_fetch_video_details(ids, api_key)
 
     total_sec   = sum(e['duration'] for e in entries)
@@ -198,5 +198,5 @@ def scan_url(url, on_progress=None):
 
 def _make_url_progress():
     def on_progress(done, _total):
-        print(f"\r  {C}Collecting video IDs...{RST}  {C}{done} found{RST}", end='', flush=True)
+        print(f"\r  {clr.C}Collecting video IDs...{clr.RST}  {clr.C}{done} found{clr.RST}", end='', flush=True)
     return on_progress
