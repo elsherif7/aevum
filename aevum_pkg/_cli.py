@@ -445,6 +445,33 @@ def _dispatch_subcommand(sub, argv):
 
 # ── MAIN ──────────────────────────────────────────────────────────────
 
+def _build_filters(args, use_json=False):
+    """
+    Parse filter-related args into a filters dict for apply_filters().
+    Returns {} if no filters were requested.
+    Exits with ERR_ARGS on bad input.
+    """
+    filters = {}
+    for attr, key in (('min_duration', 'min_duration'), ('max_duration', 'max_duration')):
+        raw = getattr(args, attr, None)
+        if raw:
+            try:
+                filters[key] = parse_duration_arg(raw)
+            except ValueError as e:
+                if use_json:
+                    _json_error(str(e), EX.ERR_ARGS)
+                print(f"\n  {R}[ERROR]{RST} {e}\n", file=sys.stderr)
+                sys.exit(EX.ERR_ARGS)
+    raw_ext = getattr(args, 'ext', None)
+    if raw_ext:
+        filters['exts'] = {
+            ('.' + x.lstrip('.').lower()) for x in raw_ext.split(',') if x.strip()
+        }
+    folder_pat = getattr(args, 'folder_pat', None)
+    if folder_pat:
+        filters['folder_pat'] = folder_pat
+    return filters
+
 def main():
     args = _parse_args()
     cfg  = load_config()
@@ -756,33 +783,6 @@ def main():
             print(f"  {R}Export failed:{RST} {e}\n", file=sys.stderr)
             sys.exit(EX.ERR_EXPORT)
         sys.exit(EX.OK)
-
-def _build_filters(args, use_json=False):
-    """
-    Parse filter-related args into a filters dict for apply_filters().
-    Returns {} if no filters were requested.
-    Exits with ERR_ARGS on bad input.
-    """
-    filters = {}
-    for attr, key in (('min_duration', 'min_duration'), ('max_duration', 'max_duration')):
-        raw = getattr(args, attr, None)
-        if raw:
-            try:
-                filters[key] = parse_duration_arg(raw)
-            except ValueError as e:
-                if use_json:
-                    _json_error(str(e), EX.ERR_ARGS)
-                print(f"\n  {R}[ERROR]{RST} {e}\n", file=sys.stderr)
-                sys.exit(EX.ERR_ARGS)
-    raw_ext = getattr(args, 'ext', None)
-    if raw_ext:
-        filters['exts'] = {
-            ('.' + x.lstrip('.').lower()) for x in raw_ext.split(',') if x.strip()
-        }
-    folder_pat = getattr(args, 'folder_pat', None)
-    if folder_pat:
-        filters['folder_pat'] = folder_pat
-    return filters
 
 
     # ── scan (headless) ───────────────────────────────────────────────
