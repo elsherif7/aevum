@@ -282,15 +282,6 @@ def _parse_args():
         argv = ['update'] + argv[1:]
 
     subcommand = argv[0]
-
-    # Resolve user-defined command aliases (e.g. 's' -> 'scan')
-    # We load config here so aliases are available before dispatch.
-    _early_cfg = load_config()
-    _cmd_mapped = _resolve_cmd_alias(subcommand, _early_cfg)
-    if _cmd_mapped:
-        subcommand = _cmd_mapped
-        argv = [subcommand] + argv[1:]
-
     SUBCOMMANDS = ('scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config', 'alias', 'doctor', 'version', 'update', 'shell')
 
     if subcommand not in SUBCOMMANDS:
@@ -558,47 +549,24 @@ def _repl_alias(parts, cfg):
         print(f"  {clr.G}[OK]{clr.RST}  Alias '{name}' removed.\n")
     elif action == "set":
         if not name or not path_val:
-            print(f"  {clr.R}[ERROR]{clr.RST} Usage: alias set <n> <path|command>\\n"); return
-        _repl_known = ('scan', 'compare', 'dupes', 'export', 'watch', 'cache',
-                       'config', 'alias', 'doctor', 'version', 'update', 'shell')
-        value = path_val.strip().strip("'\"")
-        if value not in _repl_known:
-            resolved = Path(value)
-            if not resolved.exists():
-                print(f"  {clr.Y}[WARN]{clr.RST}  Path does not exist: {resolved}")
-            value = str(resolved)
-        aliases[name] = value
+            print(f"  {clr.R}[ERROR]{clr.RST} Usage: alias set <name> <path>\n"); return
+        resolved = Path(path_val.strip().strip("'\""))
+        if not resolved.exists():
+            print(f"  {clr.Y}[WARN]{clr.RST}  Path does not exist: {resolved}")
+        aliases[name] = str(resolved)
         save_config(cfg)
-        print(f"  {clr.G}[OK]{clr.RST}  {clr.W}{name}{clr.RST}  {clr.DIM}\u2192{clr.RST}  {clr.W}{value}{clr.RST}\\n")
-
+        print(f"  {clr.G}[OK]{clr.RST}  {clr.W}{name}{clr.RST}  {clr.DIM}→{clr.RST}  {clr.W}{resolved}{clr.RST}\n")
     else:
         print(f"  {clr.DIM}Usage: alias list | alias set <name> <path> | alias remove <name>{clr.RST}\n")
 
 
-_KNOWN_COMMANDS_SET = frozenset(('scan', 'compare', 'dupes', 'export', 'watch',
-                                  'cache', 'config', 'alias', 'doctor', 'version',
-                                  'update', 'shell'))
-
 def _resolve_alias(raw, cfg):
     """
-    If ``raw`` matches a known alias (case-insensitive), return the mapped value.
-    If the mapped value is a command name, return it as-is so the caller can
-    prepend it to argv.  Otherwise return ``raw`` unchanged.
+    If ``raw`` matches a known alias (case-insensitive), return the real path.
+    Otherwise return ``raw`` unchanged.
     """
     aliases = cfg.get("aliases") or {}
     return aliases.get(raw) or aliases.get(raw.upper()) or aliases.get(raw.lower()) or raw
-
-
-def _resolve_cmd_alias(token, cfg):
-    """
-    If ``token`` is an alias whose value is a known command name, return that
-    command name.  Otherwise return None.
-    """
-    aliases = cfg.get("aliases") or {}
-    mapped = aliases.get(token) or aliases.get(token.upper()) or aliases.get(token.lower())
-    if mapped and mapped in _KNOWN_COMMANDS_SET:
-        return mapped
-    return None
 
 
 def main():
@@ -624,19 +592,25 @@ def main():
     # ── update ───────────────────────────────────────────────────────────
     if cmd == 'update':
         import subprocess as _sp
-        pip_cmd = [sys.executable, "-m", "pip", "install", "aevum", "--upgrade"]
+        _src_dir = None
+        for _parent in Path(__file__).resolve().parents:
+            if (_parent / "pyproject.toml").exists():
+                _src_dir = _parent
+                break
+        if _src_dir is None:
+            print(f"  {clr.R}[ERROR]{clr.RST} Could not find pyproject.toml. "
+                  f"Run {clr.W}pip install . --upgrade{clr.RST} manually from your Aevum folder.",
+                  file=sys.stderr)
+            sys.exit(EX.ERR_ARGS)
+        pip_cmd = [sys.executable, "-m", "pip", "install", str(_src_dir), "--upgrade"]
         if getattr(args, 'dry_run', False):
             print(f"  {clr.DIM}Would run:{clr.RST}  {clr.W}{' '.join(pip_cmd)}{clr.RST}")
             sys.exit(EX.OK)
         if not quiet:
-            print(f"  {clr.C}Upgrading Aevum...{clr.RST}")
+            print(f"  {clr.C}Upgrading Aevum from {clr.W}{_src_dir}{clr.C}...{clr.RST}")
         result = _sp.run(pip_cmd)
         sys.exit(result.returncode)
-
-    # ── alias ────────────────────────────────────────────
-    _KNOWN_COMMANDS = ('scan', 'compare', 'dupes', 'export', 'watch', 'cache',
-                       'config', 'alias', 'doctor', 'version', 'update', 'shell')
-
+    # ── alias ────────────────────────────────────────────────────────────
     if cmd == 'alias':
         aliases  = cfg.setdefault("aliases", {})
         action   = getattr(args, 'action', 'list') or 'list'
@@ -646,7 +620,7 @@ def main():
         if action == 'list':
             if not aliases:
                 print(f"  {clr.DIM}No aliases defined.{clr.RST}  "
-                      f"Add one with: {clr.W}aevum alias set <n> <path|command>{clr.RST}\n")
+                      f"Add one with: {clr.W}aevum alias set <name> <path>{clr.RST}\n")
                 sys.exit(EX.OK)
             from ._color import LINE
             print()
@@ -654,11 +628,8 @@ def main():
             print(f"  {clr.W}  Aliases{clr.RST}")
             print(f"  {clr.C}{LINE}{clr.RST}")
             for k, v in sorted(aliases.items()):
-                if v in _KNOWN_COMMANDS:
-                    status = f"{clr.C}command{clr.RST}"
-                else:
-                    exists = Path(v).is_dir()
-                    status = f"{clr.G}✓{clr.RST}" if exists else f"{clr.R}✗ (not found){clr.RST}"
+                exists = Path(v).is_dir()
+                status = f"{clr.G}✓{clr.RST}" if exists else f"{clr.R}✗ (not found){clr.RST}"
                 print(f"  {clr.G}{k:<15}{clr.RST}  {clr.W}{v}{clr.RST}  {status}")
             print()
             sys.exit(EX.OK)
@@ -677,17 +648,14 @@ def main():
 
         if action == 'set':
             if not name or not path_val:
-                print(f"  {clr.R}[ERROR]{clr.RST} Usage: aevum alias set <n> <path|command>", file=sys.stderr)
+                print(f"  {clr.R}[ERROR]{clr.RST} Usage: aevum alias set <name> <path>", file=sys.stderr)
                 sys.exit(EX.ERR_ARGS)
-            value = path_val.strip().strip("'\"")
-            if value not in _KNOWN_COMMANDS:
-                resolved = Path(value)
-                if not resolved.exists():
-                    print(f"  {clr.Y}[WARN]{clr.RST}  Path does not exist: {resolved}")
-                value = str(resolved)
-            aliases[name] = value
+            resolved = Path(path_val.strip().strip("'\""))
+            if not resolved.exists():
+                print(f"  {clr.Y}[WARN]{clr.RST}  Path does not exist: {resolved}")
+            aliases[name] = str(resolved)
             save_config(cfg)
-            print(f"  {clr.G}[OK]{clr.RST}  {clr.W}{name}{clr.RST}  {clr.DIM}→{clr.RST}  {clr.W}{value}{clr.RST}")
+            print(f"  {clr.G}[OK]{clr.RST}  {clr.W}{name}{clr.RST}  {clr.DIM}→{clr.RST}  {clr.W}{resolved}{clr.RST}")
             sys.exit(EX.OK)
 
         sys.exit(EX.OK)
@@ -1299,12 +1267,6 @@ def main():
         if raw in _init_map:
             raw = _init_map[raw]
 
-        # Resolve user-defined command aliases in REPL
-        _raw_parts = raw.split(None, 1)
-        _mapped_cmd = _resolve_cmd_alias(_raw_parts[0], cfg) if _raw_parts else None
-        if _mapped_cmd:
-            raw = _mapped_cmd + (' ' + _raw_parts[1] if len(_raw_parts) > 1 else '')
-
         if raw.lower() in ('exit', 'quit', 'q'):
             print(f"\n  {clr.G}Goodbye!{clr.RST}\n"); sys.exit(EX.OK)
 
@@ -1325,7 +1287,15 @@ def main():
         if raw.lower() in ('update', 'upgrade'):
             import subprocess as _sp
             print(f"  {clr.C}Upgrading Aevum...{clr.RST}")
-            _sp.run([sys.executable, '-m', 'pip', 'install', 'aevum', '--upgrade'])
+            _src_dir = None
+            for _parent in Path(__file__).resolve().parents:
+                if (_parent / "pyproject.toml").exists():
+                    _src_dir = _parent
+                    break
+            if _src_dir is None:
+                print(f"  {clr.R}[ERROR]{clr.RST} Could not find pyproject.toml.\n")
+            else:
+                _sp.run([sys.executable, '-m', 'pip', 'install', str(_src_dir), '--upgrade'])
             continue
 
         if raw.lower() == 'scan':
