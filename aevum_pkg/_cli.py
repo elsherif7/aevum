@@ -43,59 +43,50 @@ def _json_error(msg: str, code: int, extra: dict = None):
 
 
 def _run_pip_upgrade(src_dir, quiet=False):
-    """
-    Run pip install --upgrade with a clean animated bar instead of pip's
-    verbose output. Returns the process returncode.
-    """
     import subprocess as _sp
     import threading
-
     pip_cmd = [sys.executable, "-m", "pip", "install", str(src_dir), "--upgrade", "-q"]
-
     if quiet:
-        result = _sp.run(pip_cmd, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
-        return result.returncode
-
-    _frames = [
-        "████░░░░░░░░░░░░░░░░░░░░",
-        "████████░░░░░░░░░░░░░░░░",
-        "████████████░░░░░░░░░░░░",
-        "████████████████░░░░░░░░",
-        "████████████████████░░░░",
-        "████████████████████████",
-    ]
+        return _sp.run(pip_cmd, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL).returncode
+    _frames = ["████░░░░░░░░░░░░░░░░░░░░","████████░░░░░░░░░░░░░░░░",
+               "████████████░░░░░░░░░░░░","████████████████░░░░░░░░",
+               "████████████████████░░░░","████████████████████████"]
     _done = threading.Event()
     _rc   = [0]
-
     def _worker():
         r = _sp.run(pip_cmd, stdout=_sp.DEVNULL, stderr=_sp.PIPE)
         _rc[0] = r.returncode
         _worker.err = r.stderr.decode(errors="replace").strip() if r.returncode != 0 else ""
         _done.set()
-
     _worker.err = ""
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
-
-    frame_i = 0
+    fi = 0
     while not _done.wait(timeout=0.2):
-        bar = _frames[frame_i % len(_frames)]
-        print(f"\r  {clr.C}Installing...{clr.RST}  {clr.Y}{bar}{clr.RST}  ", end="", flush=True)
-        frame_i += 1
-
+        print(f"\r  {clr.C}Installing...{clr.RST}  {clr.Y}{_frames[fi % len(_frames)]}{clr.RST}  ", end="", flush=True)
+        fi += 1
     t.join()
-
     if _rc[0] == 0:
-        print(f"\r  {clr.G}Done!{clr.RST}          {clr.G}{'█' * 24}{clr.RST}  ")
+        print(f"\r  {clr.G}Done!{clr.RST}          {clr.G}{'█'*24}{clr.RST}  ")
         print(f"\n  {clr.G}[OK]{clr.RST}  Aevum updated successfully.\n")
     else:
         print(f"\r  {clr.R}[FAIL]{clr.RST} pip install failed (exit {_rc[0]}).  ")
-        if _worker.err:
-            for line in _worker.err.splitlines()[-6:]:
-                print(f"  {clr.DIM}{line}{clr.RST}")
+        for line in _worker.err.splitlines()[-6:]:
+            print(f"  {clr.DIM}{line}{clr.RST}")
         print()
-
     return _rc[0]
+
+
+def _open_appdata():
+    import subprocess as _sp
+    from ._config import CONFIG_FILE
+    folder = CONFIG_FILE.parent
+    folder.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        _sp.Popen(["explorer", str(folder)])
+    else:
+        _sp.Popen(["xdg-open", str(folder)])
+    return folder
 
 
 def _scan_to_json(folder, total_sec, total_count, tree, durations, sizes, hits):
@@ -277,6 +268,7 @@ def _print_global_help():
     {clr.G}quota{clr.RST}                           Check YouTube API quota usage
     {clr.G}update{clr.RST}                          Upgrade Aevum to the latest version
     {clr.G}clearpath{clr.RST}                       Clear saved project path for updates
+    {clr.G}appdata{clr.RST}                         Open the Aevum AppData folder in Explorer
     {clr.G}config{clr.RST}                          Read/write configuration
     {clr.G}doctor{clr.RST}                          Check environment (ffprobe, API key, cache)
     {clr.G}version{clr.RST}                         Print version and exit
@@ -347,7 +339,7 @@ def _parse_args():
         argv = ['update'] + argv[1:]
 
     subcommand = argv[0]
-    SUBCOMMANDS = ('scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config', 'alias', 'doctor', 'quota', 'version', 'update', 'clearpath', 'shell')
+    SUBCOMMANDS = ('scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config', 'alias', 'doctor', 'quota', 'version', 'update', 'clearpath', 'appdata', 'shell')
 
     if subcommand not in SUBCOMMANDS:
         from ._display import _fuzzy_suggest
@@ -545,6 +537,11 @@ def _dispatch_subcommand(sub, argv):
     if sub == 'version':
         print(f"aevum {__version__}"); sys.exit(EX.OK)
 
+    if sub == 'appdata':
+        import types as _t
+        ns = _t.SimpleNamespace(command='appdata', no_color=False, json=False, quiet=False)
+        return ns
+
     if sub == 'shell':
         ns = types.SimpleNamespace(command='shell', no_color=False, json=False,
                                    quiet=False, sort=None, top=None)
@@ -703,8 +700,8 @@ def main():
             save_config(cfg)
             print(f"  {clr.G}[OK]{clr.RST}  Path saved. You can run {clr.W}aevum update{clr.RST} from anywhere now.\n")
 
+        pip_cmd = [sys.executable, "-m", "pip", "install", str(_src_dir), "--upgrade", "-q"]
         if getattr(args, 'dry_run', False):
-            pip_cmd = [sys.executable, "-m", "pip", "install", str(_src_dir), "--upgrade", "-q"]
             print(f"  {clr.DIM}Would run:{clr.RST}  {clr.W}{' '.join(pip_cmd)}{clr.RST}")
             sys.exit(EX.OK)
         if not quiet:
@@ -729,6 +726,15 @@ def main():
                 print(f"  {clr.DIM}No saved path to clear.{clr.RST}")
         sys.exit(EX.OK)
     
+    # ── appdata ───────────────────────────────────────────────────────────
+    if cmd == 'appdata':
+        folder = _open_appdata()
+        if not use_json:
+            print(f"  {clr.G}[OK]{clr.RST}  Opened  {clr.W}{folder}{clr.RST}")
+        else:
+            _json_out({"status": "ok", "path": str(folder)})
+        sys.exit(EX.OK)
+
     # ── alias ────────────────────────────────────────────────────────────
     if cmd == 'alias':
         aliases  = cfg.setdefault("aliases", {})
@@ -1518,6 +1524,11 @@ def main():
                 print(f"  {clr.G}[OK]{clr.RST}  Saved path cleared: {clr.DIM}{_cleared}{clr.RST}\n")
             else:
                 print(f"  {clr.DIM}No saved path to clear.{clr.RST}\n")
+            continue
+
+        if raw.lower() in ('appdata', 'app-data', 'open-appdata'):
+            folder = _open_appdata()
+            print(f"  {clr.G}[OK]{clr.RST}  Opened  {clr.W}{folder}{clr.RST}\n")
             continue
 
         if raw.lower() == 'scan':
