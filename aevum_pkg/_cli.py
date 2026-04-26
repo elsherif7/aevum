@@ -939,9 +939,9 @@ def main():
         out_path  = args.out or None
         fmt       = args.format
         if _is_url(raw):
-            url_prog = None if (quiet or use_json) else _make_url_progress()
+            url_prog = None if (quiet or use_json) else _make_progress_bar(quiet, use_json)
             try:
-                total_sec, total_count, entries, label = scan_url(raw, url_prog, use_cache=not getattr(args, 'no_cache', False))
+                total_sec, total_count, entries, label, cache_hits = scan_url(raw, url_prog, use_cache=not getattr(args, 'no_cache', False))
             except KeyboardInterrupt:
                 if use_json:
                     _json_error("Fetch interrupted", EX.ERR_SCAN)
@@ -951,7 +951,9 @@ def main():
                     _json_error(str(e), EX.ERR_API)
                 print(f"\n  {clr.R}[ERROR]{clr.RST} {e}\n", file=sys.stderr); sys.exit(EX.ERR_API)
             if not quiet:
-                print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} videos found.".ljust(60))
+                api_fetched = total_count - cache_hits
+                yt_info = f"  {clr.W}({cache_hits} cached, {api_fetched} fetched via API){clr.RST}" if api_fetched > 0 else f"  {clr.W}({cache_hits} cached, 0 API calls){clr.RST}"
+                print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}".ljust(70))
             import io
             buf = io.StringIO()
             buf.write(f"AEVUM  |  {label}\n{'=' * 64}\n")
@@ -1037,9 +1039,9 @@ def main():
             raw     = _resolve_alias(targets[0], cfg)
             filters = _build_filters(args, use_json)
             if _is_url(raw):
-                url_prog = None if (quiet or use_json) else _make_url_progress()
+                url_prog = None if (quiet or use_json) else _make_progress_bar(quiet, use_json)
                 try:
-                    total_sec, total_count, entries, label = scan_url(raw, url_prog, use_cache=not getattr(args, 'no_cache', False))
+                    total_sec, total_count, entries, label, cache_hits = scan_url(raw, url_prog, use_cache=not getattr(args, 'no_cache', False))
                 except KeyboardInterrupt:
                     if use_json:
                         _json_error("Fetch interrupted", EX.ERR_SCAN)
@@ -1052,7 +1054,9 @@ def main():
                     _json_out(_url_to_json(raw, label, total_sec, total_count, entries))
                 else:
                     if not quiet:
-                        print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} videos found.".ljust(60))
+                        api_fetched = total_count - cache_hits
+                        yt_info = f"  {clr.W}({cache_hits} cached, {api_fetched} fetched via API){clr.RST}" if api_fetched > 0 else f"  {clr.W}({cache_hits} cached, 0 API calls){clr.RST}"
+                        print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}".ljust(70))
                     print_url_results(raw, label, total_sec, total_count, entries, top_n=top)
                 sys.exit(EX.OK)
 
@@ -1400,12 +1404,14 @@ def main():
             print(f"\n  {clr.DIM}Enter a folder path or YouTube URL to scan.{clr.RST}\n"); continue
 
         if _is_url(raw):
-            url_prog = _make_url_progress()
+            url_prog = _make_progress_bar()
             try:
-                total_sec, total_count, entries, label = scan_url(raw, url_prog, use_cache=use_cache)
+                total_sec, total_count, entries, label, cache_hits = scan_url(raw, url_prog, use_cache=use_cache)
             except KeyboardInterrupt:
                 print(f"\n\n  {clr.Y}Fetch cancelled.{clr.RST}\n"); continue
-            print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} videos found.".ljust(60))
+            api_fetched = total_count - cache_hits
+            yt_info = f"  {clr.W}({cache_hits} cached, {api_fetched} fetched via API){clr.RST}" if api_fetched > 0 else f"  {clr.W}({cache_hits} cached, 0 API calls){clr.RST}"
+            print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}".ljust(70))
             print_url_results(raw, label, total_sec, total_count, entries, top_n=default_top)
             last_scan = {"folder": raw, "total_sec": total_sec, "total_count": total_count,
                          "tree": None, "durations": {e['title']: e['duration'] for e in entries},

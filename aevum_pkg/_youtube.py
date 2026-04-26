@@ -180,9 +180,10 @@ def _yt_fetch_playlist_video_ids(playlist_id, api_key, on_progress=None):
     return ids
 
 
-def _yt_fetch_video_details(video_ids, api_key):
+def _yt_fetch_video_details(video_ids, api_key, on_progress=None, progress_offset=0, total=0):
     """Fetch video details from the API. Returns list of entry dicts."""
     entries = []
+    done    = progress_offset
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i:i+50]
         try:
@@ -201,6 +202,9 @@ def _yt_fetch_video_details(video_ids, api_key):
                 'url':      vid_url,
                 'channel':  channel,
             })
+            done += 1
+            if on_progress and total > 0:
+                on_progress(done, total)
     return entries
 
 
@@ -210,32 +214,22 @@ def _fetch_with_cache(video_ids, api_key, cache, on_progress=None):
       - Return cached entries immediately for IDs already in cache
       - Only call the API for IDs not in cache
       - Merge new results into cache and persist
-    Returns a list of entry dicts (skipping deleted/private videos
-    that the API couldn't return).
+    Returns (entries, cache_hits).
     """
     cached_ids = [vid for vid in video_ids if vid in cache]
     new_ids    = [vid for vid in video_ids if vid not in cache]
+    cache_hits = len(cached_ids)
+    total      = len(video_ids)
 
     if new_ids:
-        if on_progress:
-            print(
-                f"\r  {clr.C}Fetching details...{clr.RST}  "
-                f"{clr.G}{len(cached_ids)} cached{clr.RST}  "
-                f"{clr.Y}{len(new_ids)} new{clr.RST}  "
-                f"{clr.DIM}(fetching new only){clr.RST}".ljust(70),
-                flush=True
-            )
-        new_entries = _yt_fetch_video_details(new_ids, api_key)
+        new_entries = _yt_fetch_video_details(new_ids, api_key, on_progress, cache_hits, total)
         _merge_into_cache(cache, {e['id']: e for e in new_entries})
-        # Reload so we have freshly written entries
         cache = _load_yt_video_cache()
-    else:
-        if on_progress:
-            print(
-                f"\r  {clr.G}All {len(cached_ids)} videos loaded from cache.{clr.RST}  "
-                f"{clr.DIM}No API call needed.{clr.RST}".ljust(70),
-                flush=True
-            )
+
+    # For all-cached case, fire progress bar per cached video
+    if not new_ids and on_progress and total > 0:
+        for i in range(1, total + 1):
+            on_progress(i, total)
 
     # Build final ordered entry list from cache
     entries = []
@@ -248,7 +242,7 @@ def _fetch_with_cache(video_ids, api_key, cache, on_progress=None):
                 'url':      e.get('url', f"https://youtu.be/{vid}"),
                 'channel':  e.get('channel', ''),
             })
-    return entries
+    return entries, cache_hits
 
 
 # ---------------------------------------------------------------------------
@@ -293,19 +287,17 @@ def scan_url(url, on_progress=None, use_cache=True):
                 'url':      e.get('url', f"https://youtu.be/{vid_id}"),
                 'channel':  e.get('channel', ''),
             }]
-            label = entries[0]['title']
+            label      = entries[0]['title']
+            cache_hits = 1
             if on_progress:
-                print(
-                    f"\r  {clr.G}Video found in cache.{clr.RST}  "
-                    f"{clr.DIM}No API call needed.{clr.RST}".ljust(70),
-                    flush=True
-                )
+                on_progress(1, 1)
         else:
-            fetched = _yt_fetch_video_details([vid_id], api_key)
+            fetched    = _yt_fetch_video_details([vid_id], api_key, on_progress, 0, 1)
             if fetched:
                 _merge_into_cache(cache, {vid_id: fetched[0]})
-            entries = fetched
-            label   = entries[0]['title'] if entries else vid_id
+            entries    = fetched
+            label      = entries[0]['title'] if entries else vid_id
+            cache_hits = 0
 
     # ── Playlist ──────────────────────────────────────────────────────
     elif kind == 'playlist':
@@ -316,12 +308,8 @@ def scan_url(url, on_progress=None, use_cache=True):
         except Exception:
             label = vid_id
 
-        if on_progress:
-            print(f"\r  {clr.C}Collecting video IDs...{clr.RST}", end='', flush=True)
-        ids = _yt_fetch_playlist_video_ids(vid_id, api_key, on_progress)
-        if on_progress:
-            print(f"\r  {clr.C}Collected {len(ids)} video IDs.{clr.RST}".ljust(70), flush=True)
-        entries = _fetch_with_cache(ids, api_key, cache, on_progress)
+        ids = _yt_fetch_playlist_video_ids(vid_id, api_key, None)
+        entries, cache_hits = _fetch_with_cache(ids, api_key, cache, on_progress)
 
     # ── Channel ───────────────────────────────────────────────────────
     elif kind in ('channel_id', 'channel_handle'):
@@ -330,16 +318,12 @@ def scan_url(url, on_progress=None, use_cache=True):
             raise ValueError(f"Could not find channel: {vid_id}")
         label = channel_title or vid_id
 
-        if on_progress:
-            print(f"\r  {clr.C}Collecting video IDs...{clr.RST}", end='', flush=True)
-        ids = _yt_fetch_playlist_video_ids(uploads_pl, api_key, on_progress)
-        if on_progress:
-            print(f"\r  {clr.C}Collected {len(ids)} video IDs.{clr.RST}".ljust(70), flush=True)
-        entries = _fetch_with_cache(ids, api_key, cache, on_progress)
+        ids = _yt_fetch_playlist_video_ids(uploads_pl, api_key, None)
+        entries, cache_hits = _fetch_with_cache(ids, api_key, cache, on_progress)
 
     total_sec   = sum(e['duration'] for e in entries)
     total_count = len(entries)
-    return total_sec, total_count, entries, label
+    return total_sec, total_count, entries, label, cache_hits
 
 
 def _make_url_progress():
