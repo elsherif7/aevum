@@ -904,7 +904,7 @@ def main():
         if not quiet:
             probed = len(durations) - hits
             cache_info = f"  {clr.DIM}({hits} cached, {probed} probed){clr.RST}" if hits > 0 else ""
-            print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{len(durations)}{clr.RST} files found.{cache_info}".ljust(60))
+            print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{len(durations)}{clr.RST} files found.{cache_info}".ljust(100))
         groups = find_duplicates(durations, sizes)
         if use_json:
             _json_out(_dupes_to_json(groups, durations, sizes))
@@ -953,7 +953,7 @@ def main():
             if not quiet:
                 api_fetched = total_count - cache_hits
                 yt_info = f"  {clr.W}({cache_hits} cached, {api_fetched} fetched via API){clr.RST}" if api_fetched > 0 else f"  {clr.W}({cache_hits} cached, 0 API calls){clr.RST}"
-                print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}".ljust(70))
+                print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}".ljust(100))
             import io
             buf = io.StringIO()
             buf.write(f"AEVUM  |  {label}\n{'=' * 64}\n")
@@ -991,7 +991,7 @@ def main():
                 _json_error("Scan interrupted", EX.ERR_SCAN)
             print(f"\n\n  {clr.Y}Scan cancelled.{clr.RST}\n"); sys.exit(EX.ERR_SCAN)
         if not quiet:
-            print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} files found.".ljust(60))
+            print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} files found.".ljust(100))
         try:
             dest = export_results(folder, total_sec, total_count, tree, durations, fmt, out_path)
             if not quiet:
@@ -1056,7 +1056,7 @@ def main():
                     if not quiet:
                         api_fetched = total_count - cache_hits
                         yt_info = f"  {clr.W}({cache_hits} cached, {api_fetched} fetched via API){clr.RST}" if api_fetched > 0 else f"  {clr.W}({cache_hits} cached, 0 API calls){clr.RST}"
-                        print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}".ljust(70))
+                        print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}".ljust(100))
                     print_url_results(raw, label, total_sec, total_count, entries, top_n=top)
                 sys.exit(EX.OK)
 
@@ -1107,7 +1107,7 @@ def main():
             if not quiet:
                 probed     = total_count - hits
                 cache_info = f"  {clr.DIM}({hits} cached, {probed} probed){clr.RST}" if hits > 0 else ""
-                print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} files found.{cache_info}".ljust(60))
+                print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} files found.{cache_info}".ljust(100))
             print_results(folder, total_sec, total_count, tree, durations, sizes, top,
                           show_files=getattr(args, 'files', False))
             groups = find_duplicates(durations, sizes)
@@ -1169,7 +1169,7 @@ def main():
                 if not quiet:
                     fmt_dur = format_duration(total_sec)["hours_fmt"]
                     print(f"\r  {clr.G}[{i}/{len(folders)}]{clr.RST}  {clr.W}{folder.name:<{label_w}}{clr.RST}  "
-                          f"{clr.Y}{fmt_dur}{clr.RST}  {clr.DIM}{total_count} files{clr.RST}".ljust(80))
+                          f"{clr.Y}{fmt_dur}{clr.RST}  {clr.DIM}{total_count} files{clr.RST}".ljust(100))
 
             if do_merge:
                 # ── merged grand total ────────────────────────────────
@@ -1411,7 +1411,7 @@ def main():
                 print(f"\n\n  {clr.Y}Fetch cancelled.{clr.RST}\n"); continue
             api_fetched = total_count - cache_hits
             yt_info = f"  {clr.W}({cache_hits} cached, {api_fetched} fetched via API){clr.RST}" if api_fetched > 0 else f"  {clr.W}({cache_hits} cached, 0 API calls){clr.RST}"
-            print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}".ljust(70))
+            print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}".ljust(100))
             print_url_results(raw, label, total_sec, total_count, entries, top_n=default_top)
             last_scan = {"folder": raw, "total_sec": total_sec, "total_count": total_count,
                          "tree": None, "durations": {e['title']: e['duration'] for e in entries},
@@ -1436,8 +1436,8 @@ def main():
             print(f"\n\n  {clr.Y}Scan cancelled.{clr.RST}\n"); continue
 
         probed     = total_count - hits
-        cache_info = f"  {clr.W}({hits} cached, {probed} probed) (100%){clr.RST}" if hits > 0 else ""
-        print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} files found.{clr.RST}{cache_info}".ljust(60))
+        cache_info = f"  {clr.W}({hits} cached, {probed} probed){clr.RST}" if hits > 0 else ""
+        print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} files found.{clr.RST}{cache_info}".ljust(100))
         print_results(folder, total_sec, total_count, tree, durations, sizes, default_top, show_files=False)
         groups = find_duplicates(durations, sizes)
         print_dupe_warning(groups, folder)
