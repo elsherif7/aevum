@@ -273,7 +273,14 @@ def _parse_args():
             i += 1
     argv = rejoined
 
-    if not argv or argv[0] in ('-h', '--help'):
+    # No arguments — enter interactive shell mode
+    if not argv:
+        import types
+        return types.SimpleNamespace(command='shell', no_color=False, json=False,
+                                     quiet=False, sort=None, top=None)
+    
+    # Help flag explicitly requested
+    if argv[0] in ('-h', '--help'):
         _print_global_help()
         sys.exit(EX.OK)
     if argv[0] in ('-V', '--version'):
