@@ -7,7 +7,7 @@ from pathlib import Path
 from ._color  import clr, LINE
 from ._cache  import CACHE_DIR, _cache_key
 from ._scan   import format_size, check_ffprobe
-from ._youtube import load_api_key, save_api_key, prompt_api_key
+from ._youtube import load_api_key, save_api_key, prompt_api_key, yt_cache_stats, yt_cache_clear
 
 CONFIG_FILE = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Aevum" / "config.json"
 
@@ -110,8 +110,12 @@ def cmd_cache(args):
                 folder_path = "?"
                 count       = 0
             print(f"  {clr.DIM}{f.name[:16]}{clr.RST}  {clr.W}{folder_path}{clr.RST}  {clr.DIM}({count} files, {format_size(sz)}){clr.RST}")
+        yt_count, yt_size = yt_cache_stats()
+        if yt_count:
+            print(f"  {clr.DIM}yt_video_cache  {clr.RST}  {clr.W}YouTube videos{clr.RST}  {clr.DIM}({yt_count} videos, {format_size(yt_size)}){clr.RST}")
+            total += yt_size
         print()
-        print(f"  {clr.DIM}Total: {len(files)} cache files, {format_size(total)}{clr.RST}")
+        print(f"  {clr.DIM}Total: {len(files)} local cache files{' + YouTube cache' if yt_count else ''}, {format_size(total)}{clr.RST}")
         print()
         return
 
@@ -131,7 +135,9 @@ def cmd_cache(args):
             files = list(CACHE_DIR.glob("*.json"))
             for f in files:
                 f.unlink()
-            print(f"  {clr.G}[OK]{clr.RST}  Cleared {len(files)} cache files from {CACHE_DIR}")
+            yt_cleared = yt_cache_clear()
+            yt_note = "  +  YouTube video cache" if yt_cleared else ""
+            print(f"  {clr.G}[OK]{clr.RST}  Cleared {len(files)} local cache files from {CACHE_DIR}{yt_note}")
 
 
 def cmd_config(args, cfg):

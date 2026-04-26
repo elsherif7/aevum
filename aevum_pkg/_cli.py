@@ -941,7 +941,7 @@ def main():
         if _is_url(raw):
             url_prog = None if (quiet or use_json) else _make_url_progress()
             try:
-                total_sec, total_count, entries, label = scan_url(raw, url_prog)
+                total_sec, total_count, entries, label = scan_url(raw, url_prog, use_cache=not getattr(args, 'no_cache', False))
             except KeyboardInterrupt:
                 if use_json:
                     _json_error("Fetch interrupted", EX.ERR_SCAN)
@@ -1039,7 +1039,7 @@ def main():
             if _is_url(raw):
                 url_prog = None if (quiet or use_json) else _make_url_progress()
                 try:
-                    total_sec, total_count, entries, label = scan_url(raw, url_prog)
+                    total_sec, total_count, entries, label = scan_url(raw, url_prog, use_cache=not getattr(args, 'no_cache', False))
                 except KeyboardInterrupt:
                     if use_json:
                         _json_error("Fetch interrupted", EX.ERR_SCAN)
@@ -1402,7 +1402,7 @@ def main():
         if _is_url(raw):
             url_prog = _make_url_progress()
             try:
-                total_sec, total_count, entries, label = scan_url(raw, url_prog)
+                total_sec, total_count, entries, label = scan_url(raw, url_prog, use_cache=use_cache)
             except KeyboardInterrupt:
                 print(f"\n\n  {clr.Y}Fetch cancelled.{clr.RST}\n"); continue
             print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} videos found.".ljust(60))

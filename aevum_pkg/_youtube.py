@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from pathlib import Path
 
 from ._color import clr
@@ -7,6 +8,55 @@ from ._color import clr
 YT_API_KEY_FILE = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Aevum" / "yt_api_key.txt"
 YT_API_BASE     = "https://www.googleapis.com/youtube/v3"
 
+# ---------------------------------------------------------------------------
+# YouTube video cache
+# ---------------------------------------------------------------------------
+# Stores individual video details keyed by video ID — cached forever since
+# a video's duration never changes once uploaded.
+# Playlist/channel rescans only fetch IDs from the API, diff against this
+# cache, and only call the videos endpoint for IDs not already stored.
+#
+# File: %LOCALAPPDATA%\Aevum\yt_video_cache.json
+# Format: { "video_id": { "title", "duration", "channel", "url", "cached_at" }, ... }
+# ---------------------------------------------------------------------------
+
+YT_VIDEO_CACHE_FILE = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Aevum" / "yt_video_cache.json"
+
+
+def _load_yt_video_cache():
+    """Load the per-video cache. Returns {} on any error."""
+    try:
+        return json.loads(YT_VIDEO_CACHE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_yt_video_cache(cache):
+    """Persist the per-video cache. Failures are silently ignored."""
+    try:
+        YT_VIDEO_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        YT_VIDEO_CACHE_FILE.write_text(
+            json.dumps(cache, indent=None, separators=(',', ':')),
+            encoding="utf-8"
+        )
+    except Exception:
+        pass
+
+
+def _merge_into_cache(cache, new_entries_by_id):
+    """
+    Write new_entries_by_id into cache and persist.
+    new_entries_by_id: dict of video_id -> entry dict (title, duration, channel, url).
+    """
+    now = int(time.time())
+    for vid_id, entry in new_entries_by_id.items():
+        cache[vid_id] = {**entry, "cached_at": now}
+    _save_yt_video_cache(cache)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _is_url(s):
     return s.startswith(('http://', 'https://')) or s.startswith('www.')
@@ -131,6 +181,7 @@ def _yt_fetch_playlist_video_ids(playlist_id, api_key, on_progress=None):
 
 
 def _yt_fetch_video_details(video_ids, api_key):
+    """Fetch video details from the API. Returns list of entry dicts."""
     entries = []
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i:i+50]
@@ -143,13 +194,79 @@ def _yt_fetch_video_details(video_ids, api_key):
             channel  = item['snippet'].get('channelTitle', '')
             duration = _parse_iso8601_duration(item['contentDetails']['duration'])
             vid_url  = f"https://youtu.be/{item['id']}"
-            entries.append({'title': title, 'duration': duration, 'url': vid_url, 'channel': channel})
+            entries.append({
+                'id':       item['id'],
+                'title':    title,
+                'duration': duration,
+                'url':      vid_url,
+                'channel':  channel,
+            })
     return entries
 
 
-def scan_url(url, on_progress=None):
+def _fetch_with_cache(video_ids, api_key, cache, on_progress=None):
+    """
+    For a list of video IDs:
+      - Return cached entries immediately for IDs already in cache
+      - Only call the API for IDs not in cache
+      - Merge new results into cache and persist
+    Returns a list of entry dicts (skipping deleted/private videos
+    that the API couldn't return).
+    """
+    cached_ids = [vid for vid in video_ids if vid in cache]
+    new_ids    = [vid for vid in video_ids if vid not in cache]
+
+    if new_ids:
+        if on_progress:
+            print(
+                f"\r  {clr.C}Fetching details...{clr.RST}  "
+                f"{clr.G}{len(cached_ids)} cached{clr.RST}  "
+                f"{clr.Y}{len(new_ids)} new{clr.RST}  "
+                f"{clr.DIM}(fetching new only){clr.RST}".ljust(70),
+                flush=True
+            )
+        new_entries = _yt_fetch_video_details(new_ids, api_key)
+        _merge_into_cache(cache, {e['id']: e for e in new_entries})
+        # Reload so we have freshly written entries
+        cache = _load_yt_video_cache()
+    else:
+        if on_progress:
+            print(
+                f"\r  {clr.G}All {len(cached_ids)} videos loaded from cache.{clr.RST}  "
+                f"{clr.DIM}No API call needed.{clr.RST}".ljust(70),
+                flush=True
+            )
+
+    # Build final ordered entry list from cache
+    entries = []
+    for vid in video_ids:
+        if vid in cache:
+            e = cache[vid]
+            entries.append({
+                'title':    e.get('title', vid),
+                'duration': e.get('duration', 0.0),
+                'url':      e.get('url', f"https://youtu.be/{vid}"),
+                'channel':  e.get('channel', ''),
+            })
+    return entries
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def scan_url(url, on_progress=None, use_cache=True):
     """
     Fetch durations for a YouTube URL via the Data API v3.
+
+    Caching strategy:
+      - Single video  : cached forever by video ID — duration never changes
+      - Playlist      : fetches ID list fresh every time, diffs against
+                        per-video cache, only calls API for new IDs
+      - Channel       : same as playlist via uploads playlist
+
+    Pass use_cache=False (or --no-cache flag) to bypass and re-fetch everything.
+
     Returns (total_sec, total_count, entries, label).
     """
     api_key = load_api_key()
@@ -162,13 +279,35 @@ def scan_url(url, on_progress=None):
     if kind is None:
         raise ValueError(f"Could not parse YouTube URL: {url}")
 
+    cache   = _load_yt_video_cache() if use_cache else {}
     label   = url
     entries = []
 
+    # ── Single video ──────────────────────────────────────────────────
     if kind == 'video':
-        entries = _yt_fetch_video_details([vid_id], api_key)
-        label   = entries[0]['title'] if entries else vid_id
+        if use_cache and vid_id in cache:
+            e = cache[vid_id]
+            entries = [{
+                'title':    e.get('title', vid_id),
+                'duration': e.get('duration', 0.0),
+                'url':      e.get('url', f"https://youtu.be/{vid_id}"),
+                'channel':  e.get('channel', ''),
+            }]
+            label = entries[0]['title']
+            if on_progress:
+                print(
+                    f"\r  {clr.G}Video found in cache.{clr.RST}  "
+                    f"{clr.DIM}No API call needed.{clr.RST}".ljust(70),
+                    flush=True
+                )
+        else:
+            fetched = _yt_fetch_video_details([vid_id], api_key)
+            if fetched:
+                _merge_into_cache(cache, {vid_id: fetched[0]})
+            entries = fetched
+            label   = entries[0]['title'] if entries else vid_id
 
+    # ── Playlist ──────────────────────────────────────────────────────
     elif kind == 'playlist':
         try:
             pl_data  = _yt_api_request('playlists', {'part': 'snippet', 'id': vid_id}, api_key)
@@ -176,20 +315,27 @@ def scan_url(url, on_progress=None):
             label    = pl_items[0]['snippet']['title'] if pl_items else vid_id
         except Exception:
             label = vid_id
+
+        if on_progress:
+            print(f"\r  {clr.C}Collecting video IDs...{clr.RST}", end='', flush=True)
         ids = _yt_fetch_playlist_video_ids(vid_id, api_key, on_progress)
         if on_progress:
-            print(f"\r  {clr.C}Fetching video details...{clr.RST}  {clr.C}{len(ids)} videos{clr.RST}  {clr.DIM}(this may take a moment){clr.RST}".ljust(70), flush=True)
-        entries = _yt_fetch_video_details(ids, api_key)
+            print(f"\r  {clr.C}Collected {len(ids)} video IDs.{clr.RST}".ljust(70), flush=True)
+        entries = _fetch_with_cache(ids, api_key, cache, on_progress)
 
+    # ── Channel ───────────────────────────────────────────────────────
     elif kind in ('channel_id', 'channel_handle'):
         uploads_pl, channel_title = _yt_get_channel_uploads_playlist(vid_id, api_key)
         if not uploads_pl:
             raise ValueError(f"Could not find channel: {vid_id}")
         label = channel_title or vid_id
-        ids   = _yt_fetch_playlist_video_ids(uploads_pl, api_key, on_progress)
+
         if on_progress:
-            print(f"\r  {clr.C}Fetching video details...{clr.RST}  {clr.C}{len(ids)} videos{clr.RST}  {clr.DIM}(this may take a moment){clr.RST}".ljust(70), flush=True)
-        entries = _yt_fetch_video_details(ids, api_key)
+            print(f"\r  {clr.C}Collecting video IDs...{clr.RST}", end='', flush=True)
+        ids = _yt_fetch_playlist_video_ids(uploads_pl, api_key, on_progress)
+        if on_progress:
+            print(f"\r  {clr.C}Collected {len(ids)} video IDs.{clr.RST}".ljust(70), flush=True)
+        entries = _fetch_with_cache(ids, api_key, cache, on_progress)
 
     total_sec   = sum(e['duration'] for e in entries)
     total_count = len(entries)
@@ -200,3 +346,29 @@ def _make_url_progress():
     def on_progress(done, _total):
         print(f"\r  {clr.C}Collecting video IDs...{clr.RST}  {clr.C}{done} found{clr.RST}", end='', flush=True)
     return on_progress
+
+
+# ---------------------------------------------------------------------------
+# Cache management helpers (called by cmd_cache in _config.py)
+# ---------------------------------------------------------------------------
+
+def yt_cache_stats():
+    """Return (count, total_bytes) for the YouTube video cache."""
+    try:
+        data  = _load_yt_video_cache()
+        count = len(data)
+        size  = YT_VIDEO_CACHE_FILE.stat().st_size if YT_VIDEO_CACHE_FILE.exists() else 0
+        return count, size
+    except Exception:
+        return 0, 0
+
+
+def yt_cache_clear():
+    """Delete the YouTube video cache file."""
+    try:
+        if YT_VIDEO_CACHE_FILE.exists():
+            YT_VIDEO_CACHE_FILE.unlink()
+            return True
+    except Exception:
+        pass
+    return False
