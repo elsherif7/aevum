@@ -42,6 +42,62 @@ def _json_error(msg: str, code: int, extra: dict = None):
     sys.exit(code)
 
 
+def _run_pip_upgrade(src_dir, quiet=False):
+    """
+    Run pip install --upgrade with a clean animated bar instead of pip's
+    verbose output. Returns the process returncode.
+    """
+    import subprocess as _sp
+    import threading
+
+    pip_cmd = [sys.executable, "-m", "pip", "install", str(src_dir), "--upgrade", "-q"]
+
+    if quiet:
+        result = _sp.run(pip_cmd, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+        return result.returncode
+
+    _frames = [
+        "████░░░░░░░░░░░░░░░░░░░░",
+        "████████░░░░░░░░░░░░░░░░",
+        "████████████░░░░░░░░░░░░",
+        "████████████████░░░░░░░░",
+        "████████████████████░░░░",
+        "████████████████████████",
+    ]
+    _done = threading.Event()
+    _rc   = [0]
+
+    def _worker():
+        r = _sp.run(pip_cmd, stdout=_sp.DEVNULL, stderr=_sp.PIPE)
+        _rc[0] = r.returncode
+        _worker.err = r.stderr.decode(errors="replace").strip() if r.returncode != 0 else ""
+        _done.set()
+
+    _worker.err = ""
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
+    frame_i = 0
+    while not _done.wait(timeout=0.2):
+        bar = _frames[frame_i % len(_frames)]
+        print(f"\r  {clr.C}Installing...{clr.RST}  {clr.Y}{bar}{clr.RST}  ", end="", flush=True)
+        frame_i += 1
+
+    t.join()
+
+    if _rc[0] == 0:
+        print(f"\r  {clr.G}Done!{clr.RST}          {clr.G}{'█' * 24}{clr.RST}  ")
+        print(f"\n  {clr.G}[OK]{clr.RST}  Aevum updated successfully.\n")
+    else:
+        print(f"\r  {clr.R}[FAIL]{clr.RST} pip install failed (exit {_rc[0]}).  ")
+        if _worker.err:
+            for line in _worker.err.splitlines()[-6:]:
+                print(f"  {clr.DIM}{line}{clr.RST}")
+        print()
+
+    return _rc[0]
+
+
 def _scan_to_json(folder, total_sec, total_count, tree, durations, sizes, hits):
     """Convert a completed local scan to a JSON-serialisable dict."""
     from ._export import _tree_to_dict
@@ -647,14 +703,14 @@ def main():
             save_config(cfg)
             print(f"  {clr.G}[OK]{clr.RST}  Path saved. You can run {clr.W}aevum update{clr.RST} from anywhere now.\n")
 
-        pip_cmd = [sys.executable, "-m", "pip", "install", str(_src_dir), "--upgrade"]
         if getattr(args, 'dry_run', False):
+            pip_cmd = [sys.executable, "-m", "pip", "install", str(_src_dir), "--upgrade", "-q"]
             print(f"  {clr.DIM}Would run:{clr.RST}  {clr.W}{' '.join(pip_cmd)}{clr.RST}")
             sys.exit(EX.OK)
         if not quiet:
-            print(f"  {clr.C}Upgrading Aevum from {clr.W}{_src_dir}{clr.C}...{clr.RST}")
-        result = _sp.run(pip_cmd)
-        sys.exit(result.returncode)
+            print(f"  {clr.W}Upgrading Aevum from{clr.RST}  {clr.C}{_src_dir}{clr.RST}\n")
+        rc = _run_pip_upgrade(_src_dir, quiet=quiet)
+        sys.exit(rc)
     
     # ── clearpath ────────────────────────────────────────────────────────
     if cmd == 'clearpath':
@@ -1417,8 +1473,8 @@ def main():
             
             # If we have a valid saved path, just run the update
             if _src_dir is not None:
-                print(f"  {clr.C}Upgrading Aevum from {clr.W}{_src_dir}{clr.C}...{clr.RST}")
-                _sp.run([sys.executable, '-m', 'pip', 'install', str(_src_dir), '--upgrade'])
+                print(f"  {clr.W}Upgrading Aevum from{clr.RST}  {clr.C}{_src_dir}{clr.RST}\n")
+                _run_pip_upgrade(_src_dir)
                 continue
             
             # No saved path - check if we're in the project folder
@@ -1450,8 +1506,8 @@ def main():
             cfg['project_dir'] = str(_src_dir)
             save_config(cfg)
             print(f"  {clr.G}[OK]{clr.RST}  Path saved. You can run {clr.W}aevum update{clr.RST} from anywhere now.\n")
-            print(f"  {clr.C}Upgrading Aevum from {clr.W}{_src_dir}{clr.C}...{clr.RST}")
-            _sp.run([sys.executable, '-m', 'pip', 'install', str(_src_dir), '--upgrade'])
+            print(f"  {clr.W}Upgrading Aevum from{clr.RST}  {clr.C}{_src_dir}{clr.RST}\n")
+            _run_pip_upgrade(_src_dir)
             continue
         
         if raw.lower() in ('clearpath', 'clear-path'):
