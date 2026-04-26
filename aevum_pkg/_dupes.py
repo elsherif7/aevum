@@ -97,13 +97,14 @@ def print_duplicates(groups, durations):
     print()
 
 
-def print_dupe_warning(groups):
+def print_dupe_warning(groups, folder=None):
     if not groups:
         return
     total     = sum(len(g) - 1 for g in groups)
     grp_word  = "group"  if len(groups) == 1 else "groups"
     file_word = "file"   if total == 1        else "files"
+    cmd = f"aevum dupes {folder}" if folder else "aevum dupes <path>"
     print(
-        f"  {clr.Y}\u26a0  {len(groups)} duplicate {grp_word} found ({total} redundant {file_word}){clr.RST}"
-        f"  {clr.DIM}\u2014 press 6 or type 'duplicates' for details{clr.RST}\n"
+        f"  {clr.Y}\u26a0  {len(groups)} duplicate {grp_word} found ({total} redundant {file_word}){clr.RST}\n"
+        f"  {clr.DIM}To see details, run:{clr.RST}  {clr.W}{cmd}{clr.RST}\n"
     )

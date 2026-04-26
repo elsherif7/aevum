@@ -1108,7 +1108,7 @@ def main():
                           show_files=getattr(args, 'files', False))
             groups = find_duplicates(durations, sizes)
             if not quiet:
-                print_dupe_warning(groups)
+                print_dupe_warning(groups, folder)
             if fmt and out_path:
                 try:
                     dest = export_results(folder, total_sec, total_count, tree, durations, fmt, out_path)
@@ -1265,7 +1265,7 @@ def main():
                                   show_files=getattr(args, 'files', False))
                     groups = find_duplicates(durations, sizes)
                     if not quiet:
-                        print_dupe_warning(groups)
+                        print_dupe_warning(groups, folder)
 
                 # batch summary footer
                 batch_total_sec   = sum(r[1] for r in results)
@@ -1430,11 +1430,11 @@ def main():
             print(f"\n\n  {clr.Y}Scan cancelled.{clr.RST}\n"); continue
 
         probed     = total_count - hits
-        cache_info = f"  {clr.DIM}({hits} cached, {probed} probed){clr.RST}" if hits > 0 else ""
-        print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} files found.{cache_info}".ljust(60))
+        cache_info = f"  {clr.W}({hits} cached, {probed} probed) (100%){clr.RST}" if hits > 0 else ""
+        print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} files found.{clr.RST}{cache_info}".ljust(60))
         print_results(folder, total_sec, total_count, tree, durations, sizes, default_top, show_files=False)
         groups = find_duplicates(durations, sizes)
-        print_dupe_warning(groups)
+        print_dupe_warning(groups, folder)
         last_scan = {"folder": folder, "total_sec": total_sec, "total_count": total_count,
                      "tree": tree, "durations": durations, "sizes": sizes,
                      "dupe_groups": groups, "is_url": False}
