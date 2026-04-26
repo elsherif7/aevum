@@ -13,7 +13,7 @@ from pathlib import Path
 from ._color   import clr, LINE, clear, _disable_color
 from ._scan    import (check_ffprobe, format_duration, format_size, _run_scan,
                        parse_duration_arg, apply_filters, rebuild_after_filter)
-from ._youtube import _is_url, scan_url, _make_url_progress
+from ._youtube import _is_url, scan_url, _make_url_progress, get_quota_status
 from ._display import (print_results, print_url_results, print_banner,
                        print_post_scan_menu, _fuzzy_suggest)
 from ._dupes   import find_duplicates, print_duplicates, print_dupe_warning
@@ -218,6 +218,7 @@ def _print_global_help():
     {clr.G}watch{clr.RST}     <path>                Re-scan automatically when folder changes
     {clr.G}alias{clr.RST}                           Manage short aliases for folder paths
     {clr.G}cache{clr.RST}                           Manage the duration cache
+    {clr.G}quota{clr.RST}                           Check YouTube API quota usage
     {clr.G}update{clr.RST}                          Upgrade Aevum to the latest version
     {clr.G}clearpath{clr.RST}                       Clear saved project path for updates
     {clr.G}config{clr.RST}                          Read/write configuration
@@ -290,7 +291,7 @@ def _parse_args():
         argv = ['update'] + argv[1:]
 
     subcommand = argv[0]
-    SUBCOMMANDS = ('scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config', 'alias', 'doctor', 'version', 'update', 'clearpath', 'shell')
+    SUBCOMMANDS = ('scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config', 'alias', 'doctor', 'quota', 'version', 'update', 'clearpath', 'shell')
 
     if subcommand not in SUBCOMMANDS:
         from ._display import _fuzzy_suggest
@@ -476,6 +477,12 @@ def _dispatch_subcommand(sub, argv):
     if sub == 'doctor':
         p = argparse.ArgumentParser(prog="aevum doctor",
             description="Check environment: ffprobe, API key, cache, Python version.")
+        _add_common_flags(p)
+        args = p.parse_args(argv); args.command = sub; return args
+
+    if sub == 'quota':
+        p = argparse.ArgumentParser(prog="aevum quota",
+            description="Check YouTube API quota usage for today.")
         _add_common_flags(p)
         args = p.parse_args(argv); args.command = sub; return args
 
@@ -750,6 +757,56 @@ def main():
     # ── config ────────────────────────────────────────────────────────
     if cmd == 'config':
         cmd_config(args, cfg); sys.exit(EX.OK)
+
+    # ── quota ─────────────────────────────────────────────────────────
+    if cmd == 'quota':
+        api_key = load_api_key()
+        if not api_key:
+            if use_json:
+                _json_out({"status": "error", "error": "No YouTube API key set"})
+            else:
+                print(f"\n  {clr.R}[ERROR]{clr.RST} No YouTube API key set.\n")
+                print(f"  Set it with: {clr.W}aevum config set yt_api_key <key>{clr.RST}\n")
+            sys.exit(EX.ERR_ARGS)
+        
+        used, remaining, pct = get_quota_status()
+        
+        if use_json:
+            _json_out({
+                "status": "ok",
+                "command": "quota",
+                "quota_used": used,
+                "quota_remaining": remaining,
+                "quota_limit": 10000,
+                "percent_used": round(pct, 2),
+            })
+        else:
+            from ._color import LINE
+            print()
+            print(f"  {clr.C}{LINE}{clr.RST}")
+            print(f"  {clr.C}  YouTube API Quota{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}Today's Usage{clr.RST}")
+            print(f"  {clr.C}{LINE}{clr.RST}")
+            print()
+            
+            if pct < 50:
+                status_col = clr.G
+                status = "Good"
+            elif pct < 80:
+                status_col = clr.Y
+                status = "Moderate"
+            else:
+                status_col = clr.R
+                status = "High"
+            
+            print(f"  {clr.W}  Used       {clr.DIM}:{clr.RST}  {status_col}{used:,} units{clr.RST}  {clr.DIM}({pct:.1f}%){clr.RST}")
+            print(f"  {clr.W}  Remaining  {clr.DIM}:{clr.RST}  {clr.G}{remaining:,} units{clr.RST}")
+            print(f"  {clr.W}  Daily Limit{clr.DIM}:{clr.RST}  {clr.W}10,000 units{clr.RST}")
+            print(f"  {clr.W}  Status     {clr.DIM}:{clr.RST}  {status_col}{status}{clr.RST}")
+            print()
+            print(f"  {clr.DIM}Note: This tracks Aevum's usage only. Other apps using your")
+            print(f"  API key won't be counted. Quota resets daily at midnight PT.{clr.RST}")
+            print()
+        sys.exit(EX.OK)
 
     # ── cache ─────────────────────────────────────────────────────────
     if cmd == 'cache':

@@ -63,6 +63,18 @@ def cmd_doctor(cfg):
     if api_key:
         masked = api_key[:6] + "..." + api_key[-4:] if len(api_key) > 10 else "***"
         print(f"  {clr.G}[OK]{clr.RST}   YouTube API key set  {clr.DIM}({masked}){clr.RST}")
+        
+        # Show quota status
+        from ._youtube import get_quota_status
+        used, remaining, pct = get_quota_status()
+        if pct < 50:
+            quota_col = clr.G
+        elif pct < 80:
+            quota_col = clr.Y
+        else:
+            quota_col = clr.R
+        print(f"  {clr.G}[OK]{clr.RST}   YouTube quota: {quota_col}{used:,}/10,000 units used{clr.RST}  "
+              f"{clr.DIM}({remaining:,} remaining, {pct:.1f}%){clr.RST}")
     else:
         print(f"  {clr.Y}[WARN]{clr.RST}  YouTube API key not set")
         print(f"         Set it with: {clr.W}aevum config set yt_api_key <key>{clr.RST}")

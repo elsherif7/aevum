@@ -4,7 +4,7 @@ from ._cache   import CACHE_DIR, _cache_key, load_cache, save_cache
 from ._scan    import (check_ffprobe, get_duration, format_duration, format_size,
                        scan_parallel, _run_scan, video_extensions)
 from ._youtube import (_is_url, scan_url, load_api_key, save_api_key,
-                       prompt_api_key, _make_url_progress)
+                       prompt_api_key, _make_url_progress, get_quota_status)
 from ._display import (print_tree, print_top_files, print_results, print_url_results,
                        print_banner, print_post_scan_menu, _fuzzy_suggest)
 from ._dupes   import find_duplicates, print_duplicates, print_dupe_warning

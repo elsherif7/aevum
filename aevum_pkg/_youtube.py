@@ -9,6 +9,25 @@ YT_API_KEY_FILE = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Aevum" / 
 YT_API_BASE     = "https://www.googleapis.com/youtube/v3"
 
 # ---------------------------------------------------------------------------
+# YouTube API quota tracker
+# ---------------------------------------------------------------------------
+# Tracks daily API usage to estimate remaining quota (10,000 units/day).
+# Resets automatically at midnight Pacific Time (Google's quota reset time).
+#
+# File: %LOCALAPPDATA%\Aevum\yt_quota_tracker.json
+# Format: { "date": "YYYY-MM-DD", "units_used": 123 }
+# ---------------------------------------------------------------------------
+
+YT_QUOTA_TRACKER_FILE = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Aevum" / "yt_quota_tracker.json"
+YT_QUOTA_DAILY_LIMIT  = 10000
+
+# API costs (in quota units):
+# - videos endpoint: 1 unit
+# - playlistItems endpoint: 1 unit
+# - playlists endpoint: 1 unit
+# - channels endpoint: 1 unit
+
+# ---------------------------------------------------------------------------
 # YouTube video cache
 # ---------------------------------------------------------------------------
 # Stores individual video details keyed by video ID — cached forever since
@@ -41,6 +60,72 @@ def _save_yt_video_cache(cache):
         )
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Quota tracking
+# ---------------------------------------------------------------------------
+
+def _get_current_date_pt():
+    """Return current date in Pacific Time (where YouTube quota resets)."""
+    import datetime
+    # Approximate PT offset (PST -8, PDT -7). This is rough but good enough.
+    utc_now = datetime.datetime.utcnow()
+    pt_now  = utc_now - datetime.timedelta(hours=8)
+    return pt_now.strftime("%Y-%m-%d")
+
+
+def _load_quota_tracker():
+    """Load quota tracker. Returns (date, units_used)."""
+    try:
+        data = json.loads(YT_QUOTA_TRACKER_FILE.read_text(encoding="utf-8"))
+        return data.get("date", ""), data.get("units_used", 0)
+    except Exception:
+        return "", 0
+
+
+def _save_quota_tracker(date, units_used):
+    """Persist quota tracker. Failures are silently ignored."""
+    try:
+        YT_QUOTA_TRACKER_FILE.parent.mkdir(parents=True, exist_ok=True)
+        YT_QUOTA_TRACKER_FILE.write_text(
+            json.dumps({"date": date, "units_used": units_used}, indent=2),
+            encoding="utf-8"
+        )
+    except Exception:
+        pass
+
+
+def _add_quota_usage(units):
+    """Add units to today's quota usage. Auto-resets if it's a new day."""
+    current_date = _get_current_date_pt()
+    tracked_date, units_used = _load_quota_tracker()
+    
+    # Reset if it's a new day
+    if tracked_date != current_date:
+        units_used = 0
+    
+    units_used += units
+    _save_quota_tracker(current_date, units_used)
+    return units_used
+
+
+def get_quota_status():
+    """
+    Return (units_used, units_remaining, percent_used).
+    This is an estimate based on Aevum's tracked usage only.
+    """
+    current_date = _get_current_date_pt()
+    tracked_date, units_used = _load_quota_tracker()
+    
+    # Reset if it's a new day
+    if tracked_date != current_date:
+        units_used = 0
+    
+    units_remaining = max(0, YT_QUOTA_DAILY_LIMIT - units_used)
+    percent_used = min(100, (units_used / YT_QUOTA_DAILY_LIMIT) * 100)
+    
+    return units_used, units_remaining, percent_used
 
 
 def _merge_into_cache(cache, new_entries_by_id):
@@ -76,7 +161,12 @@ def _yt_api_request(endpoint, params, api_key):
     params['key'] = api_key
     url = f"{YT_API_BASE}/{endpoint}?{urllib.parse.urlencode(params)}"
     with urllib.request.urlopen(url, timeout=15) as r:
-        return json.loads(r.read().decode('utf-8'))
+        result = json.loads(r.read().decode('utf-8'))
+    
+    # Track quota usage (all endpoints cost 1 unit)
+    _add_quota_usage(1)
+    
+    return result
 
 
 def load_api_key():
