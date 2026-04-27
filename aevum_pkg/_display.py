@@ -111,7 +111,7 @@ def print_results(folder, total_sec, total_count, tree, durations=None, sizes=No
         print_top_files(durations, top_n)
 
 
-def print_url_results(url, label, total_sec, total_count, entries, top_n=10):
+def print_url_results(url, label, total_sec, total_count, entries, top_n=10, unavailable_count=0):
     fmt = format_duration(total_sec)
     print()
     print(f"  {clr.C}{LINE}{clr.RST}")
@@ -119,6 +119,8 @@ def print_url_results(url, label, total_sec, total_count, entries, top_n=10):
     print(f"  {clr.C}{LINE}{clr.RST}")
     print()
     print(f"  {clr.W}  Total videos  {clr.DIM}:{clr.RST}  {clr.W}{total_count}{clr.RST}")
+    if unavailable_count > 0:
+        print(f"  {clr.Y}  Unavailable   {clr.DIM}:{clr.RST}  {clr.Y}{unavailable_count}{clr.RST}  {clr.DIM}(private, deleted, or region-blocked){clr.RST}")
     print(f"  {clr.W}  Days          {clr.DIM}:{clr.RST}  {clr.W}{fmt['days_fmt']}{clr.RST}")
     print(f"  {clr.W}  Hours         {clr.DIM}:{clr.RST}  {clr.W}{fmt['hours_fmt']}{clr.RST}")
     print(f"  {clr.W}  Minutes       {clr.DIM}:{clr.RST}  {clr.W}{fmt['minutes_fmt']}{clr.RST}")

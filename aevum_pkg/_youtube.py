@@ -271,15 +271,26 @@ def _yt_fetch_playlist_video_ids(playlist_id, api_key, on_progress=None):
 
 
 def _yt_fetch_video_details(video_ids, api_key, on_progress=None, progress_offset=0, total=0):
-    """Fetch video details from the API. Returns list of entry dicts."""
+    """
+    Fetch video details from the API.
+    Returns (entries, unavailable_ids).
+    
+    unavailable_ids: video IDs that were requested but not returned by the API
+                     (private, deleted, or region-blocked videos)
+    """
     entries = []
+    unavailable_ids = []
     done    = progress_offset
+    
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i:i+50]
         try:
             data = _yt_api_request('videos', {'part': 'snippet,contentDetails', 'id': ','.join(batch)}, api_key)
         except Exception as e:
             raise RuntimeError(f"videos API error: {e}")
+        
+        # Track which IDs were actually returned
+        returned_ids = set()
         for item in data.get('items', []):
             title    = item['snippet']['title']
             channel  = item['snippet'].get('channelTitle', '')
@@ -292,10 +303,21 @@ def _yt_fetch_video_details(video_ids, api_key, on_progress=None, progress_offse
                 'url':      vid_url,
                 'channel':  channel,
             })
+            returned_ids.add(item['id'])
             done += 1
             if on_progress and total > 0:
                 on_progress(done, total)
-    return entries
+        
+        # Find IDs that were requested but not returned
+        missing = set(batch) - returned_ids
+        unavailable_ids.extend(missing)
+        
+        # Count missing videos for progress tracking
+        done += len(missing)
+        if on_progress and total > 0 and missing:
+            on_progress(done, total)
+    
+    return entries, unavailable_ids
 
 
 def _fetch_with_cache(video_ids, api_key, cache, on_progress=None):
@@ -304,15 +326,16 @@ def _fetch_with_cache(video_ids, api_key, cache, on_progress=None):
       - Return cached entries immediately for IDs already in cache
       - Only call the API for IDs not in cache
       - Merge new results into cache and persist
-    Returns (entries, cache_hits).
+    Returns (entries, cache_hits, unavailable_ids).
     """
     cached_ids = [vid for vid in video_ids if vid in cache]
     new_ids    = [vid for vid in video_ids if vid not in cache]
     cache_hits = len(cached_ids)
     total      = len(video_ids)
+    unavailable_ids = []
 
     if new_ids:
-        new_entries = _yt_fetch_video_details(new_ids, api_key, on_progress, cache_hits, total)
+        new_entries, unavailable_ids = _yt_fetch_video_details(new_ids, api_key, on_progress, cache_hits, total)
         _merge_into_cache(cache, {e['id']: e for e in new_entries})
         cache = _load_yt_video_cache()
 
@@ -332,7 +355,7 @@ def _fetch_with_cache(video_ids, api_key, cache, on_progress=None):
                 'url':      e.get('url', f"https://youtu.be/{vid}"),
                 'channel':  e.get('channel', ''),
             })
-    return entries, cache_hits
+    return entries, cache_hits, unavailable_ids
 
 
 # ---------------------------------------------------------------------------
@@ -351,13 +374,13 @@ def scan_url(url, on_progress=None, use_cache=True):
 
     Pass use_cache=False (or --no-cache flag) to bypass and re-fetch everything.
 
-    Returns (total_sec, total_count, entries, label).
+    Returns (total_sec, total_count, entries, label, cache_hits, unavailable_count).
     """
     api_key = load_api_key()
     if not api_key:
         api_key = prompt_api_key()
         if not api_key:
-            return 0, 0, [], 'cancelled'
+            return 0, 0, [], 'cancelled', 0, 0
 
     kind, vid_id = _parse_yt_url(url)
     if kind is None:
@@ -366,6 +389,7 @@ def scan_url(url, on_progress=None, use_cache=True):
     cache   = _load_yt_video_cache() if use_cache else {}
     label   = url
     entries = []
+    unavailable_count = 0
 
     # ── Single video ──────────────────────────────────────────────────
     if kind == 'video':
@@ -382,12 +406,13 @@ def scan_url(url, on_progress=None, use_cache=True):
             if on_progress:
                 on_progress(1, 1)
         else:
-            fetched    = _yt_fetch_video_details([vid_id], api_key, on_progress, 0, 1)
+            fetched, unavailable_ids = _yt_fetch_video_details([vid_id], api_key, on_progress, 0, 1)
             if fetched:
                 _merge_into_cache(cache, {vid_id: fetched[0]})
             entries    = fetched
             label      = entries[0]['title'] if entries else vid_id
             cache_hits = 0
+            unavailable_count = len(unavailable_ids)
 
     # ── Playlist ──────────────────────────────────────────────────────
     elif kind == 'playlist':
@@ -399,7 +424,8 @@ def scan_url(url, on_progress=None, use_cache=True):
             label = vid_id
 
         ids = _yt_fetch_playlist_video_ids(vid_id, api_key, None)
-        entries, cache_hits = _fetch_with_cache(ids, api_key, cache, on_progress)
+        entries, cache_hits, unavailable_ids = _fetch_with_cache(ids, api_key, cache, on_progress)
+        unavailable_count = len(unavailable_ids)
 
     # ── Channel ───────────────────────────────────────────────────────
     elif kind in ('channel_id', 'channel_handle'):
@@ -409,11 +435,12 @@ def scan_url(url, on_progress=None, use_cache=True):
         label = channel_title or vid_id
 
         ids = _yt_fetch_playlist_video_ids(uploads_pl, api_key, None)
-        entries, cache_hits = _fetch_with_cache(ids, api_key, cache, on_progress)
+        entries, cache_hits, unavailable_ids = _fetch_with_cache(ids, api_key, cache, on_progress)
+        unavailable_count = len(unavailable_ids)
 
     total_sec   = sum(e['duration'] for e in entries)
     total_count = len(entries)
-    return total_sec, total_count, entries, label, cache_hits
+    return total_sec, total_count, entries, label, cache_hits, unavailable_count
 
 
 def _make_url_progress():

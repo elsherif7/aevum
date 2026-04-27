@@ -1067,7 +1067,7 @@ def main():
         if _is_url(raw):
             url_prog = None if (quiet or use_json) else _make_progress_bar(quiet, use_json)
             try:
-                total_sec, total_count, entries, label, cache_hits = scan_url(raw, url_prog, use_cache=not getattr(args, 'no_cache', False))
+                total_sec, total_count, entries, label, cache_hits, unavailable_count = scan_url(raw, url_prog, use_cache=not getattr(args, 'no_cache', False))
             except KeyboardInterrupt:
                 if use_json:
                     _json_error("Fetch interrupted", EX.ERR_SCAN)
@@ -1079,7 +1079,8 @@ def main():
             if not quiet:
                 api_fetched = total_count - cache_hits
                 yt_info = f"  {clr.W}({cache_hits} cached, {api_fetched} fetched via API){clr.RST}" if api_fetched > 0 else f"  {clr.W}({cache_hits} cached, 0 API calls){clr.RST}"
-                print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}".ljust(100))
+                unavail_note = f"  {clr.Y}({unavailable_count} unavailable){clr.RST}" if unavailable_count > 0 else ""
+                print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}{unavail_note}".ljust(100))
             import io
             buf = io.StringIO()
             buf.write(f"AEVUM  |  {label}\n{'=' * 64}\n")
@@ -1167,7 +1168,7 @@ def main():
             if _is_url(raw):
                 url_prog = None if (quiet or use_json) else _make_progress_bar(quiet, use_json)
                 try:
-                    total_sec, total_count, entries, label, cache_hits = scan_url(raw, url_prog, use_cache=not getattr(args, 'no_cache', False))
+                    total_sec, total_count, entries, label, cache_hits, unavailable_count = scan_url(raw, url_prog, use_cache=not getattr(args, 'no_cache', False))
                 except KeyboardInterrupt:
                     if use_json:
                         _json_error("Fetch interrupted", EX.ERR_SCAN)
@@ -1182,8 +1183,9 @@ def main():
                     if not quiet:
                         api_fetched = total_count - cache_hits
                         yt_info = f"  {clr.W}({cache_hits} cached, {api_fetched} fetched via API){clr.RST}" if api_fetched > 0 else f"  {clr.W}({cache_hits} cached, 0 API calls){clr.RST}"
-                        print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}".ljust(100))
-                    print_url_results(raw, label, total_sec, total_count, entries, top_n=top)
+                        unavail_note = f"  {clr.Y}({unavailable_count} unavailable){clr.RST}" if unavailable_count > 0 else ""
+                        print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}{unavail_note}".ljust(100))
+                    print_url_results(raw, label, total_sec, total_count, entries, top_n=top, unavailable_count=unavailable_count)
                 sys.exit(EX.OK)
 
             folder = Path(raw)
@@ -1537,13 +1539,14 @@ def main():
         if _is_url(raw):
             url_prog = _make_progress_bar()
             try:
-                total_sec, total_count, entries, label, cache_hits = scan_url(raw, url_prog, use_cache=use_cache)
+                total_sec, total_count, entries, label, cache_hits, unavailable_count = scan_url(raw, url_prog, use_cache=use_cache)
             except KeyboardInterrupt:
                 print(f"\n\n  {clr.Y}Fetch cancelled.{clr.RST}\n"); continue
             api_fetched = total_count - cache_hits
             yt_info = f"  {clr.W}({cache_hits} cached, {api_fetched} fetched via API){clr.RST}" if api_fetched > 0 else f"  {clr.W}({cache_hits} cached, 0 API calls){clr.RST}"
-            print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}".ljust(100))
-            print_url_results(raw, label, total_sec, total_count, entries, top_n=default_top)
+            unavail_note = f"  {clr.Y}({unavailable_count} unavailable){clr.RST}" if unavailable_count > 0 else ""
+            print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}{unavail_note}".ljust(100))
+            print_url_results(raw, label, total_sec, total_count, entries, top_n=default_top, unavailable_count=unavailable_count)
             last_scan = {"folder": raw, "total_sec": total_sec, "total_count": total_count,
                          "tree": None, "durations": {e['title']: e['duration'] for e in entries},
                          "sizes": {}, "dupe_groups": [], "is_url": True,
