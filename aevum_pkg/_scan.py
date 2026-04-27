@@ -385,7 +385,7 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None):
                 continue
             child_subs, child_direct = build(child)
             subfolders.append((child.name, secs, count, fbytes, direct_count, child_subs, child_direct))
-        direct = sorted(folder_direct.get(node, []), key=lambda x: x[1], reverse=True)
+        direct = sorted(folder_direct.get(node, []), key=lambda x: x[0].name.lower())
         return subfolders, direct
 
     subfolders, direct = build(root)

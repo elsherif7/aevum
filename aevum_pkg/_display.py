@@ -53,6 +53,12 @@ def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number=""
                 fd = format_duration(sec)
                 print(f"{indent}        {clr.DIM}|  {fd['hours_fmt']}  {path.name}{clr.RST}")
         print()
+    elif direct and show_files:
+        # leaf folder — no subfolders, list files directly
+        for path, sec in direct:
+            fd = format_duration(sec)
+            print(f"{indent}    {clr.DIM}|  {fd['hours_fmt']}  {path.name}{clr.RST}")
+        print()
 
     for i, (sub_name, sub_sec, sub_count, sub_fbytes, sub_direct_count, sub_sub, sub_direct) in enumerate(subfolders, start=1):
         sub_number = f"{number}.{i}" if number else str(i)
@@ -158,7 +164,7 @@ def print_banner():
 
 def print_post_scan_menu(current_sort="name:asc"):
     print(f"  {clr.W}What do you want to do?{clr.RST}")
-    print(f"  {clr.G}1. scan{clr.RST}   {clr.B}2. sort{clr.RST}   {clr.M}3. export{clr.RST}   {clr.Y}4. clear{clr.RST}   {clr.R}5. quit{clr.RST}   {clr.C}6. duplicates{clr.RST}")
+    print(f"  {clr.G}1. scan{clr.RST}   {clr.B}2. sort{clr.RST}   {clr.M}3. export{clr.RST}   {clr.Y}4. clear{clr.RST}   {clr.R}5. quit{clr.RST}   {clr.C}6. duplicates{clr.RST}   {clr.W}7. files{clr.RST}")
     print()
 
 

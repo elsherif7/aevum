@@ -339,7 +339,7 @@ def _parse_args():
         argv = ['update'] + argv[1:]
 
     subcommand = argv[0]
-    SUBCOMMANDS = ('scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config', 'alias', 'doctor', 'quota', 'version', 'update', 'clearpath', 'appdata', 'shell')
+    SUBCOMMANDS = ('scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config', 'alias', 'doctor', 'quota', 'version', 'update', 'clearpath', 'appdata', 'shell', 'files')
 
     if subcommand not in SUBCOMMANDS:
         from ._display import _fuzzy_suggest
@@ -366,6 +366,23 @@ def _parse_args():
 
 
 def _dispatch_subcommand(sub, argv):
+    if sub == 'files':
+        p = argparse.ArgumentParser(prog="aevum files",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            description="Scan a folder and show every video file listed under its folder.",
+            epilog=("Examples:\n"
+                    "  aevum files D:\\Movies\n"
+                    "  aevum files D:\\Movies --sort name\n"))
+        p.add_argument("folder_parts", nargs="*", metavar="PATH")
+        p.add_argument("-s", "--sort",  default=None, metavar="FIELD[:DIR]")
+        p.add_argument("-t", "--top",   type=int, default=None, metavar="N")
+        p.add_argument("--no-cache", action="store_true")
+        _add_common_flags(p)
+        args = p.parse_args(argv)
+        args.folder = ' '.join(args.folder_parts)
+        args.command = sub
+        return args
+
     if sub == 'scan':
         p = argparse.ArgumentParser(prog="aevum scan",
             formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1131,6 +1148,32 @@ def main():
         sys.exit(EX.OK)
 
 
+    # ── files (headless) ─────────────────────────────────────────────
+    if cmd == 'files':
+        folder_raw = _resolve_alias(args.folder.strip().strip("'\""), cfg)
+        folder     = Path(folder_raw)
+        if not folder.exists() or not folder.is_dir():
+            print(f"\n  {clr.R}[ERROR]{clr.RST} Not a valid folder: {folder}\n", file=sys.stderr)
+            sys.exit(EX.ERR_ARGS)
+        _require_ffprobe("files", use_json)
+        sort      = _resolve_sort(args, cfg)
+        top       = _resolve_top(args, cfg)
+        use_cache = not args.no_cache and cfg.get('cache_enabled', True)
+        on_prog   = _make_progress_bar(quiet, use_json)
+        if not quiet:
+            print(f"  {clr.DIM}Collecting files...{clr.RST}", end='', flush=True)
+        try:
+            total_sec, total_count, tree, durations, sizes, hits = _run_scan(
+                folder, on_prog, sort, use_cache)
+        except KeyboardInterrupt:
+            print(f"\n\n  {clr.Y}Scan cancelled.{clr.RST}\n"); sys.exit(EX.ERR_SCAN)
+        if not quiet:
+            probed     = total_count - hits
+            cache_info = f"  {clr.DIM}({hits} cached, {probed} probed){clr.RST}" if hits > 0 else ""
+            print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} files found.{cache_info}".ljust(100))
+        print_results(folder, total_sec, total_count, tree, durations, sizes, top, show_files=True)
+        sys.exit(EX.OK)
+
     # ── scan (headless) ───────────────────────────────────────────────
     if cmd == 'scan' and getattr(args, 'targets', None) is not None:
         targets = [t.strip().strip("'\"") for t in args.targets]
@@ -1586,11 +1629,11 @@ def main():
             except (KeyboardInterrupt, EOFError):
                 print(f"\n\n  {clr.G}Goodbye!{clr.RST}\n"); sys.exit(EX.OK)
 
-            _menu_map = {'1': 'scan', '2': 'sort', '3': 'export', '4': 'clear', '5': 'quit', '6': 'duplicates'}
+            _menu_map = {'1': 'scan', '2': 'sort', '3': 'export', '4': 'clear', '5': 'quit', '6': 'duplicates', '7': 'files'}
             if choice in _menu_map:
                 choice = _menu_map[choice]
 
-            _all_cmds  = ['scan', 'clear', 'export', 'sort', 'quit', 'exit', 'q', 'duplicates', 'dupes']
+            _all_cmds  = ['scan', 'clear', 'export', 'sort', 'quit', 'exit', 'q', 'duplicates', 'dupes', 'files']
             first_word = choice.split()[0] if choice else ''
 
             if choice in ('quit', 'exit', 'q'):
@@ -1687,10 +1730,19 @@ def main():
                     print_post_scan_menu(current_sort); continue
                 print_duplicates(last_scan["dupe_groups"], last_scan["durations"])
                 print_post_scan_menu(current_sort)
+            elif choice == 'files':
+                if last_scan.get("is_url"):
+                    print(f"  {clr.Y}File listing is not available for URL scans.{clr.RST}\n")
+                    print_post_scan_menu(current_sort); continue
+                print_results(last_scan["folder"], last_scan["total_sec"],
+                              last_scan["total_count"], last_scan["tree"],
+                              last_scan["durations"], last_scan["sizes"],
+                              default_top, show_files=True)
+                print_post_scan_menu(current_sort)
             else:
                 sug = _fuzzy_suggest(first_word, _all_cmds) if first_word else None
                 if sug:
                     print(f"  {clr.R}Unknown command.{clr.RST}  {clr.DIM}Did you mean{clr.RST}  {clr.W}{sug}{clr.RST}{clr.DIM}?{clr.RST}")
                 else:
-                    print(f"  {clr.R}Invalid command.{clr.RST} Type  {clr.G}1. scan{clr.RST}   {clr.B}2. sort{clr.RST}   {clr.M}3. export{clr.RST}   {clr.Y}4. clear{clr.RST}   {clr.R}5. quit{clr.RST}   {clr.C}6. duplicates{clr.RST}")
+                    print(f"  {clr.R}Invalid command.{clr.RST} Type  {clr.G}1. scan{clr.RST}   {clr.B}2. sort{clr.RST}   {clr.M}3. export{clr.RST}   {clr.Y}4. clear{clr.RST}   {clr.R}5. quit{clr.RST}   {clr.C}6. duplicates{clr.RST}   {clr.W}7. files{clr.RST}")
                 print_post_scan_menu(current_sort)
