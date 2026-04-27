@@ -1,7 +1,7 @@
 # Aevum
 
-**Media Library Scanner for Windows.**  
-Point it at any folder or YouTube URL and instantly see the total duration — broken down by subfolder, with a grand total, size, playback speeds, and top longest files.
+**Media Library Scanner.**  
+Point it at any folder or YouTube URL and instantly see the total duration — broken down by subfolder, with a grand total, size, playback speeds, and top longest files. Works on Windows, Linux, and macOS.
 
 ---
 
@@ -58,7 +58,9 @@ That's it. `aevum` will work from any terminal window after install.
 aevum update
 ```
 
-Or from the project folder:
+Shows a clean animated progress bar instead of pip's verbose output. Aevum remembers your project folder path after the first update so you can run `aevum update` from anywhere.
+
+Or manually from the project folder:
 
 ```
 cd Aevum
@@ -163,6 +165,18 @@ aevum cache clear D:\Movies
 aevum cache path
 ```
 
+### Check YouTube API quota
+
+```
+aevum quota
+```
+
+### Open AppData folder
+
+```
+aevum appdata
+```
+
 ### Environment check
 
 ```
@@ -193,8 +207,10 @@ aevum alias                     Manage short aliases for folder paths
 aevum cache                     Manage the duration cache
 aevum config                    Read/write configuration
 aevum doctor                    Check environment (ffprobe, API key, cache)
+aevum quota                     Check YouTube API quota usage for today
 aevum update                    Upgrade Aevum to the latest version
 aevum clearpath                 Clear saved project path used by 'update'
+aevum appdata                   Open the Aevum AppData folder in Explorer
 aevum version                   Print version and exit
 ```
 
@@ -313,13 +329,20 @@ Aevum/
 
 ## Cache
 
-Aevum caches video durations in `%LOCALAPPDATA%\Aevum\cache\` so repeat scans of large libraries are near-instant. Each file is cached by its absolute path, mtime, and size — stale entries are automatically ignored. Use `--no-cache` to force a full re-probe, or `aevum cache clear <folder>` to remove the cache for a specific folder only.
+Aevum caches video durations so repeat scans of large libraries are near-instant. Each file is cached by its absolute path, mtime, and size — stale entries are automatically ignored. Use `--no-cache` to force a full re-probe, or `aevum cache clear <folder>` to remove the cache for a specific folder only.
+
+| Platform | Cache location |
+|---|---|
+| Windows | `%LOCALAPPDATA%\Aevum\cache\` |
+| Linux / macOS | `~/.local/share/Aevum/cache\` (falls back to `~`) |
+
+Run `aevum appdata` to open the Aevum data folder directly.
 
 ---
 
 ## Config
 
-Config is stored at `%LOCALAPPDATA%\Aevum\config.json`.
+Config is stored at `%LOCALAPPDATA%\Aevum\config.json` on Windows, or `~/.local/share/Aevum/config.json` on Linux/macOS.
 
 | Key | Default | Description |
 |---|---|---|
