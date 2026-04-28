@@ -203,6 +203,7 @@ aevum compare   <path> <path>   Compare two libraries side-by-side
 aevum dupes     <path>          Find duplicate files
 aevum export    <path> <fmt>    Scan and write results to a file
 aevum watch     <path>          Re-scan automatically when folder changes
+aevum files     <path>          Scan and show all files under each folder
 aevum alias                     Manage short aliases for folder paths
 aevum cache                     Manage the duration cache
 aevum config                    Read/write configuration
@@ -210,7 +211,7 @@ aevum doctor                    Check environment (ffprobe, API key, cache)
 aevum quota                     Check YouTube API quota usage for today
 aevum update                    Upgrade Aevum to the latest version
 aevum clearpath                 Clear saved project path used by 'update'
-aevum appdata                   Open the Aevum AppData folder in Explorer
+aevum appdata                   Open the Aevum data folder
 aevum version                   Print version and exit
 ```
 

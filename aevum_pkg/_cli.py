@@ -370,20 +370,21 @@ def _print_global_help():
     aevum <path|url>                Quick scan (shorthand for 'aevum scan')
 
   {clr.W}COMMANDS{clr.RST}
-    {clr.G}scan{clr.RST}      <path|url>            Scan a folder or YouTube URL
-    {clr.G}compare{clr.RST}   <path> <path>         Compare two libraries side-by-side
-    {clr.G}dupes{clr.RST}     <path>                Find duplicate-duration files
-    {clr.G}export{clr.RST}    <path|url> <format>   Scan and write results to a file
-    {clr.G}watch{clr.RST}     <path>                Re-scan automatically when folder changes
-    {clr.G}alias{clr.RST}                           Manage short aliases for folder paths
-    {clr.G}cache{clr.RST}                           Manage the duration cache
-    {clr.G}quota{clr.RST}                           Check YouTube API quota usage
-    {clr.G}update{clr.RST}                          Upgrade Aevum to the latest version
-    {clr.G}clearpath{clr.RST}                       Clear saved project path for updates
-    {clr.G}appdata{clr.RST}                         Open the Aevum AppData folder in Explorer
-    {clr.G}config{clr.RST}                          Read/write configuration
-    {clr.G}doctor{clr.RST}                          Check environment (ffprobe, API key, cache)
-    {clr.G}version{clr.RST}                         Print version and exit
+    scan      <path|url>            Scan a folder or YouTube URL
+    compare   <path> <path>         Compare two libraries side-by-side
+    dupes     <path>                Find duplicate files (by size + hash)
+    export    <path|url> <format>   Scan and write results to a file
+    watch     <path>                Re-scan automatically when folder changes
+    files     <path>                Scan and show all files under each folder
+    alias                           Manage short aliases for folder paths
+    cache                           Manage the duration cache
+    config                          Read/write configuration
+    quota                           Check YouTube API quota usage
+    doctor                          Check environment (ffprobe, API key, cache)
+    update                          Upgrade Aevum to the latest version
+    clearpath                       Clear saved project path for updates
+    appdata                         Open the Aevum data folder
+    version                         Print version and exit
 
   {clr.W}GLOBAL OPTIONS{clr.RST}
     --no-color                      Disable ANSI color output
@@ -391,6 +392,7 @@ def _print_global_help():
     -q, --quiet                     Suppress decorative output (errors → stderr only)
     -h, --help                      Show this help
     -V, --version                   Show version
+    -U, --upgrade                   Alias for 'aevum update'
 
   {clr.W}EXIT CODES{clr.RST}
     0  success
