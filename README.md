@@ -45,8 +45,8 @@ Point it at any folder or YouTube URL and instantly see the total duration — b
 ## Installation
 
 ```
-git clone <repo-url>
-cd Aevum
+git clone https://github.com/elsherif7/aevum
+cd aevum
 pip install .
 ```
 
