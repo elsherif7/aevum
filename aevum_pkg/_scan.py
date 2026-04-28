@@ -19,7 +19,7 @@ video_extensions = (
     '.mts', '.m2v', '.f4v', '.f4p', '.nsv', '.roq',
     '.yuv', '.mxf', '.drc', '.gifv', '.mng', '.qt',
     '.rm', '.amv', '.svi', '.3g2', '.mpe', '.mpv',
-    '.m1v', '.m2p', '.m4p', '.mp2', '.mpeg1', '.mpeg2',
+    '.m1v', '.m2p', '.m4p', '.mpeg1', '.mpeg2',     # Issue 1: removed duplicate .mp2
     '.mpeg4', '.h264', '.h265', '.hevc', '.avchd',
     '.ogm', '.ogx', '.dv', '.dvr', '.dvr-ms', '.rec',
     '.wtv', '.bdmv', '.iso', '.evo', '.ifo', '.mod',
@@ -109,10 +109,15 @@ def _read_mp4_duration(path):
 
 
 def _read_mkv_duration(path):
-    """Read duration from MKV/WEBM by scanning EBML for the Segment/Info block."""
+    """Read duration from MKV/WEBM by scanning EBML for the Segment/Info block.
+
+    Issue 3 fix: increased read size from 2 MB to 8 MB so that Info blocks
+    placed after large Tracks/SeekHead structures are still found without
+    falling back to ffprobe.
+    """
     try:
         with open(path, 'rb') as f:
-            data = f.read(min(2 * 1024 * 1024, os.path.getsize(path)))
+            data = f.read(min(8 * 1024 * 1024, os.path.getsize(path)))
 
         def read_vint(buf, pos):
             if pos >= len(buf):
@@ -210,6 +215,8 @@ def format_size(b):
 
 
 def format_duration(seconds):
+    # Issue 6: clamp negatives so delta formatting never produces garbage output
+    seconds = max(0.0, float(seconds))
     days    = int(seconds // 86400)
     hours   = int((seconds % 86400) // 3600)
     minutes = int((seconds % 3600) // 60)
@@ -223,8 +230,18 @@ def format_duration(seconds):
 
 def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache=None):
     """
-    Parallel scan: collector thread discovers files and submits them to the thread pool.
-    Returns (total_sec, total_count, tree_tuple, durations, sizes, hits).
+    Parallel scan: collector thread discovers files and submits them to the
+    thread pool.  Returns (total_sec, total_count, tree_tuple, durations,
+    sizes, hits).
+
+    Issue 2 fix: `total` is read inside the lock inside probe() so the
+    progress callback never sees a torn value.
+
+    Issue 7 fix: collector thread is fully joined before as_completed() is
+    called, so no futures submitted near the end are silently dropped.
+
+    Issue 4 fix: files returning 0.0 duration are excluded so the reported
+    file count matches real, readable media files.
     """
     root      = Path(root)
     durations = {}
@@ -240,6 +257,8 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
         if stop_event and stop_event.is_set():
             return path, 0.0, 0
         key = str(path.resolve())
+        if os.name == "nt":
+            key = key.lower()  # Issue 22: normalise on Windows
         if key in cache:
             try:
                 st    = path.stat()
@@ -248,8 +267,9 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
                     with lock:
                         done += 1
                         hits += 1
-                        if on_progress and total > 0:
-                            on_progress(done, total)
+                        _snap = total      # Issue 2: read total under lock
+                    if on_progress and _snap > 0:
+                        on_progress(done, _snap)
                     return path, entry["duration"], int(entry.get("size", 0))
             except OSError:
                 pass
@@ -260,8 +280,9 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
             file_size = 0
         with lock:
             done += 1
-            if on_progress and total > 0:
-                on_progress(done, total)
+            _snap = total                  # Issue 2: read total under lock
+        if on_progress and _snap > 0:
+            on_progress(done, _snap)
         return path, sec, file_size
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
@@ -293,18 +314,24 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
 
         collector = threading.Thread(target=collect_and_submit, daemon=True)
         collector.start()
-        while collector.is_alive():
-            collector.join(timeout=1.0)
-            if stop_event and stop_event.is_set():
-                break
+
+        # Issue 7: join collector BEFORE consuming futures so every future
+        # that was submitted is visible to as_completed().
+        collector.join()
+
+        if stop_event and stop_event.is_set():
+            subfolders, direct, root_bytes = _build_tree(root, {}, sort_by)
+            return 0.0, 0, (subfolders, direct, root_bytes), {}, {}, 0
 
         try:
             for future in as_completed(futures):
                 if stop_event and stop_event.is_set():
                     break
                 path, sec, file_size = future.result()
-                durations[path] = sec
-                sizes[path]     = file_size
+                # Issue 4: skip files whose duration could not be determined
+                if sec > 0.0:
+                    durations[path] = sec
+                    sizes[path]     = file_size
         except KeyboardInterrupt:
             if stop_event:
                 stop_event.set()
@@ -321,7 +348,12 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
 
 
 def _build_tree(root, durations, sort_by="name:asc", sizes=None):
-    """O(n) tree builder."""
+    """O(n) tree builder.
+
+    Issue 5 fix: ancestor walk is capped at MAX_DEPTH to prevent an
+    infinite loop on symlink cycles.
+    """
+    MAX_DEPTH = 200
     if ':' not in sort_by:
         defaults = {'name': 'asc', 'duration': 'desc', 'count': 'desc'}
         sort_by  = sort_by + ':' + defaults.get(sort_by, 'asc')
@@ -337,10 +369,10 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None):
 
     for path, sec in durations.items():
         file_bytes = sizes.get(path, 0)
-        parent     = path.parent
-        folder_direct.setdefault(parent, []).append((path, sec))
+        folder_direct.setdefault(path.parent, []).append((path, sec))
         ancestor = path.parent
-        while True:
+        depth    = 0
+        while depth < MAX_DEPTH:
             folder_secs[ancestor]  = folder_secs.get(ancestor, 0.0) + sec
             folder_bytes[ancestor] = folder_bytes.get(ancestor, 0) + file_bytes
             folder_count[ancestor] = folder_count.get(ancestor, 0) + 1
@@ -350,10 +382,8 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None):
             if next_ancestor == ancestor:
                 break
             ancestor = next_ancestor
+            depth   += 1
 
-    # Pre-compute the parent→children mapping from the folders we already
-    # know about.  This avoids a second os.scandir() pass through the tree
-    # and correctly omits directories that contain no matching media files.
     known_folders: set = set(folder_secs.keys()) | set(folder_direct.keys())
     children_of: dict = {}
     for folder in known_folders:
@@ -364,8 +394,8 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None):
             children_of.setdefault(parent, set()).add(folder)
 
     def build(node):
-        subfolders   = []
-        child_paths  = sorted(
+        subfolders  = []
+        child_paths = sorted(
             children_of.get(node, set()),
             key=lambda p: (
                 folder_secs.get(p, 0.0)   if sort_field == "duration" else
@@ -420,17 +450,14 @@ def parse_duration_arg(s):
     """
     import re
     s = s.strip().lower()
-    # plain number -> seconds
     try:
         return float(s)
     except ValueError:
         pass
-    # HH:MM:SS or MM:SS
     m = re.fullmatch(r'(\d+):(\d{1,2})(?::(\d{1,2}))?', s)
     if m:
         h, mn, sc = m.groups()
         return int(h) * 3600 + int(mn) * 60 + int(sc or 0)
-    # compound like 1h30m45s, 1.5h, 90m
     total = 0.0
     found = False
     for value, unit in re.findall(r'(\d+(?:\.\d+)?)([hms])', s):

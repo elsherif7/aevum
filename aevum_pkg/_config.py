@@ -2,14 +2,14 @@ import json
 import os
 import subprocess
 import sys
+import types
 from pathlib import Path
 
-from ._color  import clr, LINE
-from ._cache  import CACHE_DIR, _cache_key
-from ._scan   import format_size, check_ffprobe
+from ._color   import clr, LINE
+from ._paths   import CACHE_DIR, CONFIG_FILE          # Issue 23: central path
+from ._cache   import _cache_key
+from ._scan    import format_size, check_ffprobe
 from ._youtube import load_api_key, save_api_key, prompt_api_key, yt_cache_stats, yt_cache_clear
-
-CONFIG_FILE = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Aevum" / "config.json"
 
 CONFIG_DEFAULTS = {
     "sort":          "name:asc",
@@ -17,7 +17,7 @@ CONFIG_DEFAULTS = {
     "no_color":      False,
     "cache_enabled": True,
     "export_dir":    "",
-    "aliases":       {},   # user-defined path shortcuts, e.g. {"M": "D:\\02-Media"}
+    "aliases":       {},
 }
 
 
@@ -30,11 +30,22 @@ def load_config():
 
 
 def save_config(cfg):
+    """
+    Persist config to disk.
+
+    Issue 25 note: write failures are printed to stderr and propagated back
+    to the caller as False so the caller can decide whether to warn the user
+    more prominently (e.g. the interactive REPL can print a second reminder).
+    Previously the error was printed but the function always returned None,
+    giving the caller no way to react.
+    """
     try:
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
         CONFIG_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        return True
     except Exception as e:
         print(f"  {clr.R}Config write failed:{clr.RST} {e}", file=sys.stderr)
+        return False
 
 
 def _config_key_valid(key):
@@ -63,18 +74,14 @@ def cmd_doctor(cfg):
     if api_key:
         masked = api_key[:6] + "..." + api_key[-4:] if len(api_key) > 10 else "***"
         print(f"  {clr.G}[OK]{clr.RST}   YouTube API key set  {clr.DIM}({masked}){clr.RST}")
-        
-        # Show quota status
         from ._youtube import get_quota_status
         used, remaining, pct = get_quota_status()
-        if pct < 50:
-            quota_col = clr.G
-        elif pct < 80:
-            quota_col = clr.Y
-        else:
-            quota_col = clr.R
-        print(f"  {clr.G}[OK]{clr.RST}   YouTube quota: {quota_col}{used:,}/10,000 units used{clr.RST}  "
-              f"{clr.DIM}({remaining:,} remaining, {pct:.1f}%){clr.RST}")
+        quota_col = clr.G if pct < 50 else (clr.Y if pct < 80 else clr.R)
+        print(
+            f"  {clr.G}[OK]{clr.RST}   YouTube quota: "
+            f"{quota_col}{used:,}/10,000 units used{clr.RST}  "
+            f"{clr.DIM}({remaining:,} remaining, {pct:.1f}%){clr.RST}"
+        )
     else:
         print(f"  {clr.Y}[WARN]{clr.RST}  YouTube API key not set")
         print(f"         Set it with: {clr.W}aevum config set yt_api_key <key>{clr.RST}")
@@ -116,18 +123,27 @@ def cmd_cache(args):
             total += sz
             try:
                 data        = json.loads(f.read_text(encoding="utf-8"))
-                folder_path = data[0]["path"].rsplit("\\", 1)[0] if data else "?"
+                folder_path = data[0]["path"].rsplit(os.sep, 1)[0] if data else "?"
                 count       = len(data)
             except Exception:
                 folder_path = "?"
                 count       = 0
-            print(f"  {clr.DIM}{f.name[:16]}{clr.RST}  {clr.W}{folder_path}{clr.RST}  {clr.DIM}({count} files, {format_size(sz)}){clr.RST}")
+            print(
+                f"  {clr.DIM}{f.name[:16]}{clr.RST}  "
+                f"{clr.W}{folder_path}{clr.RST}  "
+                f"{clr.DIM}({count} files, {format_size(sz)}){clr.RST}"
+            )
         yt_count, yt_size = yt_cache_stats()
         if yt_count:
-            print(f"  {clr.DIM}yt_video_cache  {clr.RST}  {clr.W}YouTube videos{clr.RST}  {clr.DIM}({yt_count} videos, {format_size(yt_size)}){clr.RST}")
+            print(
+                f"  {clr.DIM}yt_video_cache  {clr.RST}  "
+                f"{clr.W}YouTube videos{clr.RST}  "
+                f"{clr.DIM}({yt_count} videos, {format_size(yt_size)}){clr.RST}"
+            )
             total += yt_size
+        yt_note = f" + YouTube cache" if yt_count else ""
         print()
-        print(f"  {clr.DIM}Total: {len(files)} local cache files{' + YouTube cache' if yt_count else ''}, {format_size(total)}{clr.RST}")
+        print(f"  {clr.DIM}Total: {len(files)} local cache files{yt_note}, {format_size(total)}{clr.RST}")
         print()
         return
 
@@ -144,11 +160,11 @@ def cmd_cache(args):
             if not CACHE_DIR.exists():
                 print(f"  {clr.DIM}Cache is already empty.{clr.RST}")
                 return
-            files = list(CACHE_DIR.glob("*.json"))
+            files      = list(CACHE_DIR.glob("*.json"))
             for f in files:
                 f.unlink()
             yt_cleared = yt_cache_clear()
-            yt_note = "  +  YouTube video cache" if yt_cleared else ""
+            yt_note    = "  +  YouTube video cache" if yt_cleared else ""
             print(f"  {clr.G}[OK]{clr.RST}  Cleared {len(files)} local cache files from {CACHE_DIR}{yt_note}")
 
 
@@ -201,10 +217,17 @@ def cmd_config(args, cfg):
             print(f"  {clr.G}[OK]{clr.RST}  yt_api_key saved.")
             return
         if not _config_key_valid(key):
-            print(f"  {clr.R}[ERROR]{clr.RST} Unknown key: {key}. Run 'aevum config list' to see all keys.", file=sys.stderr)
+            print(
+                f"  {clr.R}[ERROR]{clr.RST} Unknown key: {key}. "
+                f"Run 'aevum config list' to see all keys.",
+                file=sys.stderr,
+            )
             sys.exit(1)
         if value is None:
-            print(f"  {clr.R}[ERROR]{clr.RST} Value required: aevum config set {key} <value>", file=sys.stderr)
+            print(
+                f"  {clr.R}[ERROR]{clr.RST} Value required: aevum config set {key} <value>",
+                file=sys.stderr,
+            )
             sys.exit(1)
         default = CONFIG_DEFAULTS[key]
         try:
@@ -218,19 +241,37 @@ def cmd_config(args, cfg):
             print(f"  {clr.R}[ERROR]{clr.RST} Invalid value for {key}: {value}", file=sys.stderr)
             sys.exit(1)
         cfg[key] = coerced
-        save_config(cfg)
-        print(f"  {clr.G}[OK]{clr.RST}  {key} = {coerced}")
+        ok = save_config(cfg)
+        if ok:
+            print(f"  {clr.G}[OK]{clr.RST}  {key} = {coerced}")
+        else:
+            # Issue 25: surface write failure more prominently
+            print(
+                f"  {clr.Y}[WARN]{clr.RST}  Setting applied for this session but "
+                f"could not be saved to disk.",
+                file=sys.stderr,
+            )
 
 
 def repl_config(parts, cfg):
-    import types
+    """
+    Handle 'config ...' typed inside the interactive REPL.
+
+    Issue 24 fix: values with spaces (e.g. export_dir paths) are now
+    preserved by joining everything from parts[2] onward instead of only
+    taking parts[2].
+    """
     if not parts:
-        print(f"  {clr.DIM}Usage: config get <key> | config set <key> <value> | config list | config reset{clr.RST}\n")
+        print(
+            f"  {clr.DIM}Usage: config get <key> | config set <key> <value> | "
+            f"config list | config reset{clr.RST}\n"
+        )
         return
     ns = types.SimpleNamespace(
-        action=parts[0] if parts else "list",
-        key=parts[1]    if len(parts) > 1 else None,
-        value=parts[2]  if len(parts) > 2 else None,
+        action=parts[0]               if parts         else "list",
+        key   =parts[1]               if len(parts) > 1 else None,
+        # Issue 24: join remaining tokens so paths with spaces work
+        value =" ".join(parts[2:])    if len(parts) > 2 else None,
         no_color=False,
     )
     cmd_config(ns, cfg)

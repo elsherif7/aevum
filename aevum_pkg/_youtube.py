@@ -4,48 +4,37 @@ import time
 from pathlib import Path
 
 from ._color import clr
+from ._paths import YT_KEY_FILE, YT_QUOTA_FILE, YT_VCACHE_FILE
 
-YT_API_KEY_FILE = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Aevum" / "yt_api_key.txt"
-YT_API_BASE     = "https://www.googleapis.com/youtube/v3"
+# Issue 13: file now uses LF line endings (normalised from original CRLF).
 
-# ---------------------------------------------------------------------------
-# YouTube API quota tracker
-# ---------------------------------------------------------------------------
-# Tracks daily API usage to estimate remaining quota (10,000 units/day).
-# Resets automatically at midnight Pacific Time (Google's quota reset time).
-#
-# File: %LOCALAPPDATA%\Aevum\yt_quota_tracker.json
-# Format: { "date": "YYYY-MM-DD", "units_used": 123 }
-# ---------------------------------------------------------------------------
+YT_API_BASE          = "https://www.googleapis.com/youtube/v3"
+YT_QUOTA_DAILY_LIMIT = 10000
 
-YT_QUOTA_TRACKER_FILE = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Aevum" / "yt_quota_tracker.json"
-YT_QUOTA_DAILY_LIMIT  = 10000
-
-# API costs (in quota units):
-# - videos endpoint: 1 unit
-# - playlistItems endpoint: 1 unit
-# - playlists endpoint: 1 unit
-# - channels endpoint: 1 unit
+# API costs in quota units.  Not all endpoints cost 1 unit — search.list
+# costs 100.  Pass the correct cost to _yt_api_request() (Issue 9).
+YT_QUOTA_COST = {
+    "videos":         1,
+    "playlistItems":  1,
+    "playlists":      1,
+    "channels":       1,
+    "search":       100,   # expensive — listed here for future use
+}
 
 # ---------------------------------------------------------------------------
 # YouTube video cache
 # ---------------------------------------------------------------------------
 # Stores individual video details keyed by video ID — cached forever since
 # a video's duration never changes once uploaded.
-# Playlist/channel rescans only fetch IDs from the API, diff against this
-# cache, and only call the videos endpoint for IDs not already stored.
 #
-# File: %LOCALAPPDATA%\Aevum\yt_video_cache.json
-# Format: { "video_id": { "title", "duration", "channel", "url", "cached_at" }, ... }
+# File path comes from _paths.py (Issue 23/32).
 # ---------------------------------------------------------------------------
-
-YT_VIDEO_CACHE_FILE = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Aevum" / "yt_video_cache.json"
 
 
 def _load_yt_video_cache():
     """Load the per-video cache. Returns {} on any error."""
     try:
-        return json.loads(YT_VIDEO_CACHE_FILE.read_text(encoding="utf-8"))
+        return json.loads(YT_VCACHE_FILE.read_text(encoding="utf-8"))
     except Exception:
         return {}
 
@@ -53,10 +42,10 @@ def _load_yt_video_cache():
 def _save_yt_video_cache(cache):
     """Persist the per-video cache. Failures are silently ignored."""
     try:
-        YT_VIDEO_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        YT_VIDEO_CACHE_FILE.write_text(
+        YT_VCACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        YT_VCACHE_FILE.write_text(
             json.dumps(cache, indent=None, separators=(',', ':')),
-            encoding="utf-8"
+            encoding="utf-8",
         )
     except Exception:
         pass
@@ -67,18 +56,28 @@ def _save_yt_video_cache(cache):
 # ---------------------------------------------------------------------------
 
 def _get_current_date_pt():
-    """Return current date in Pacific Time (where YouTube quota resets)."""
+    """Return current date string in Pacific Time (where YouTube quota resets).
+
+    Issue 8 fix: use zoneinfo (stdlib >=3.9) for correct DST handling instead
+    of a fixed -8 offset that was wrong half the year.  Falls back gracefully
+    on Python 3.8 where zoneinfo is not yet in the stdlib.
+    """
     import datetime
-    # Approximate PT offset (PST -8, PDT -7). This is rough but good enough.
-    utc_now = datetime.datetime.utcnow()
-    pt_now  = utc_now - datetime.timedelta(hours=8)
+    try:
+        import zoneinfo
+        pt_now = datetime.datetime.now(zoneinfo.ZoneInfo("America/Los_Angeles"))
+    except (ImportError, Exception):
+        # Python 3.8 fallback: approximate PDT/PST with -7 (slightly better
+        # than always -8, since most of the year the US is on DST).
+        utc_now = datetime.datetime.utcnow()
+        pt_now  = utc_now - datetime.timedelta(hours=7)
     return pt_now.strftime("%Y-%m-%d")
 
 
 def _load_quota_tracker():
-    """Load quota tracker. Returns (date, units_used)."""
+    """Load quota tracker. Returns (date_str, units_used)."""
     try:
-        data = json.loads(YT_QUOTA_TRACKER_FILE.read_text(encoding="utf-8"))
+        data = json.loads(YT_QUOTA_FILE.read_text(encoding="utf-8"))
         return data.get("date", ""), data.get("units_used", 0)
     except Exception:
         return "", 0
@@ -87,24 +86,21 @@ def _load_quota_tracker():
 def _save_quota_tracker(date, units_used):
     """Persist quota tracker. Failures are silently ignored."""
     try:
-        YT_QUOTA_TRACKER_FILE.parent.mkdir(parents=True, exist_ok=True)
-        YT_QUOTA_TRACKER_FILE.write_text(
+        YT_QUOTA_FILE.parent.mkdir(parents=True, exist_ok=True)
+        YT_QUOTA_FILE.write_text(
             json.dumps({"date": date, "units_used": units_used}, indent=2),
-            encoding="utf-8"
+            encoding="utf-8",
         )
     except Exception:
         pass
 
 
 def _add_quota_usage(units):
-    """Add units to today's quota usage. Auto-resets if it's a new day."""
+    """Add units to today's usage total. Auto-resets on a new day."""
     current_date = _get_current_date_pt()
     tracked_date, units_used = _load_quota_tracker()
-    
-    # Reset if it's a new day
     if tracked_date != current_date:
         units_used = 0
-    
     units_used += units
     _save_quota_tracker(current_date, units_used)
     return units_used
@@ -113,25 +109,24 @@ def _add_quota_usage(units):
 def get_quota_status():
     """
     Return (units_used, units_remaining, percent_used).
-    This is an estimate based on Aevum's tracked usage only.
+    Estimate based on Aevum's tracked usage only.
     """
     current_date = _get_current_date_pt()
     tracked_date, units_used = _load_quota_tracker()
-    
-    # Reset if it's a new day
     if tracked_date != current_date:
         units_used = 0
-    
     units_remaining = max(0, YT_QUOTA_DAILY_LIMIT - units_used)
-    percent_used = min(100, (units_used / YT_QUOTA_DAILY_LIMIT) * 100)
-    
+    percent_used    = min(100.0, (units_used / YT_QUOTA_DAILY_LIMIT) * 100)
     return units_used, units_remaining, percent_used
 
 
 def _merge_into_cache(cache, new_entries_by_id):
     """
     Write new_entries_by_id into cache and persist.
-    new_entries_by_id: dict of video_id -> entry dict (title, duration, channel, url).
+    new_entries_by_id: dict of video_id -> entry dict.
+
+    Issue 11 fix: no longer reloads cache from disk after writing — the
+    in-memory dict already contains the new entries after this call.
     """
     now = int(time.time())
     for vid_id, entry in new_entries_by_id.items():
@@ -156,22 +151,48 @@ def _parse_iso8601_duration(d):
     return float(h or 0) * 3600 + float(mi or 0) * 60 + float(s or 0)
 
 
-def _yt_api_request(endpoint, params, api_key):
-    import urllib.request, urllib.parse
+def _yt_api_request(endpoint, params, api_key, quota_cost=None):
+    """
+    Make one YouTube Data API v3 request and track quota usage.
+
+    Issue 9 fix: quota_cost defaults to the known cost for the endpoint
+    (from YT_QUOTA_COST) rather than always blindly charging 1 unit.
+
+    Issue 10 fix: HTTPError is caught and re-raised with a human-readable
+    message that includes the API error description (e.g. "quota exceeded").
+    """
+    import urllib.request
+    import urllib.parse
+    import urllib.error
+
+    if quota_cost is None:
+        quota_cost = YT_QUOTA_COST.get(endpoint, 1)
+
     params['key'] = api_key
     url = f"{YT_API_BASE}/{endpoint}?{urllib.parse.urlencode(params)}"
-    with urllib.request.urlopen(url, timeout=15) as r:
-        result = json.loads(r.read().decode('utf-8'))
-    
-    # Track quota usage (all endpoints cost 1 unit)
-    _add_quota_usage(1)
-    
+
+    try:
+        with urllib.request.urlopen(url, timeout=15) as r:
+            result = json.loads(r.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        # Issue 10: extract the API error message from the JSON body
+        try:
+            body     = e.read().decode('utf-8', errors='replace')
+            err_data = json.loads(body)
+            msg      = err_data.get('error', {}).get('message', str(e))
+        except Exception:
+            msg = str(e)
+        raise RuntimeError(f"YouTube API error {e.code}: {msg}")
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"YouTube API network error: {e.reason}")
+
+    _add_quota_usage(quota_cost)
     return result
 
 
 def load_api_key():
     try:
-        key = YT_API_KEY_FILE.read_text(encoding='utf-8').strip()
+        key = YT_KEY_FILE.read_text(encoding='utf-8').strip()
         return key if key else None
     except Exception:
         return None
@@ -179,8 +200,8 @@ def load_api_key():
 
 def save_api_key(key):
     try:
-        YT_API_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
-        YT_API_KEY_FILE.write_text(key.strip(), encoding='utf-8')
+        YT_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        YT_KEY_FILE.write_text(key.strip(), encoding='utf-8')
     except Exception:
         pass
 
@@ -201,19 +222,25 @@ def prompt_api_key():
     if not key:
         return None
     save_api_key(key)
-    print(f"  {clr.G}Key saved to {YT_API_KEY_FILE}{clr.RST}")
+    print(f"  {clr.G}Key saved to {YT_KEY_FILE}{clr.RST}")
     print()
     return key
 
 
 def _parse_yt_url(url):
+    """
+    Parse a YouTube URL into (kind, id).
+
+    Issue 12 fix: music.youtube.com URLs are now accepted.
+    """
     from urllib.parse import urlparse, parse_qs
     p          = urlparse(url)
     qs         = parse_qs(p.query)
     path_parts = [x for x in p.path.split('/') if x]
     netloc     = p.netloc.replace('www.', '')
 
-    if netloc not in ('youtube.com', 'youtu.be', 'm.youtube.com'):
+    # Issue 12: added music.youtube.com
+    if netloc not in ('youtube.com', 'youtu.be', 'm.youtube.com', 'music.youtube.com'):
         return None, None
     if 'list' in qs:
         return 'playlist', qs['list'][0]
@@ -272,24 +299,23 @@ def _yt_fetch_playlist_video_ids(playlist_id, api_key, on_progress=None):
 
 def _yt_fetch_video_details(video_ids, api_key, on_progress=None, progress_offset=0, total=0):
     """
-    Fetch video details from the API.
+    Fetch video details from the API in batches of 50.
     Returns (entries, unavailable_ids).
-    
-    unavailable_ids: video IDs that were requested but not returned by the API
-                     (private, deleted, or region-blocked videos)
+
+    unavailable_ids: IDs requested but not returned by the API
+                     (private, deleted, or region-blocked).
     """
-    entries = []
+    entries         = []
     unavailable_ids = []
-    done    = progress_offset
-    
+    done            = progress_offset
+
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i:i+50]
         try:
             data = _yt_api_request('videos', {'part': 'snippet,contentDetails', 'id': ','.join(batch)}, api_key)
         except Exception as e:
             raise RuntimeError(f"videos API error: {e}")
-        
-        # Track which IDs were actually returned
+
         returned_ids = set()
         for item in data.get('items', []):
             title    = item['snippet']['title']
@@ -307,16 +333,13 @@ def _yt_fetch_video_details(video_ids, api_key, on_progress=None, progress_offse
             done += 1
             if on_progress and total > 0:
                 on_progress(done, total)
-        
-        # Find IDs that were requested but not returned
+
         missing = set(batch) - returned_ids
         unavailable_ids.extend(missing)
-        
-        # Count missing videos for progress tracking
         done += len(missing)
         if on_progress and total > 0 and missing:
             on_progress(done, total)
-    
+
     return entries, unavailable_ids
 
 
@@ -326,25 +349,29 @@ def _fetch_with_cache(video_ids, api_key, cache, on_progress=None):
       - Return cached entries immediately for IDs already in cache
       - Only call the API for IDs not in cache
       - Merge new results into cache and persist
+
+    Issue 11 fix: removed redundant _load_yt_video_cache() after
+    _merge_into_cache() — the dict is already up-to-date in memory.
+
     Returns (entries, cache_hits, unavailable_ids).
     """
-    cached_ids = [vid for vid in video_ids if vid in cache]
-    new_ids    = [vid for vid in video_ids if vid not in cache]
-    cache_hits = len(cached_ids)
-    total      = len(video_ids)
+    cached_ids      = [vid for vid in video_ids if vid in cache]
+    new_ids         = [vid for vid in video_ids if vid not in cache]
+    cache_hits      = len(cached_ids)
+    total           = len(video_ids)
     unavailable_ids = []
 
     if new_ids:
-        new_entries, unavailable_ids = _yt_fetch_video_details(new_ids, api_key, on_progress, cache_hits, total)
+        new_entries, unavailable_ids = _yt_fetch_video_details(
+            new_ids, api_key, on_progress, cache_hits, total)
         _merge_into_cache(cache, {e['id']: e for e in new_entries})
-        cache = _load_yt_video_cache()
+        # Issue 11: cache dict is already updated in-place by _merge_into_cache
+        # — no need to reload from disk here.
 
-    # For all-cached case, fire progress bar per cached video
     if not new_ids and on_progress and total > 0:
         for i in range(1, total + 1):
             on_progress(i, total)
 
-    # Build final ordered entry list from cache
     entries = []
     for vid in video_ids:
         if vid in cache:
@@ -366,14 +393,6 @@ def scan_url(url, on_progress=None, use_cache=True):
     """
     Fetch durations for a YouTube URL via the Data API v3.
 
-    Caching strategy:
-      - Single video  : cached forever by video ID — duration never changes
-      - Playlist      : fetches ID list fresh every time, diffs against
-                        per-video cache, only calls API for new IDs
-      - Channel       : same as playlist via uploads playlist
-
-    Pass use_cache=False (or --no-cache flag) to bypass and re-fetch everything.
-
     Returns (total_sec, total_count, entries, label, cache_hits, unavailable_count).
     """
     api_key = load_api_key()
@@ -386,9 +405,9 @@ def scan_url(url, on_progress=None, use_cache=True):
     if kind is None:
         raise ValueError(f"Could not parse YouTube URL: {url}")
 
-    cache   = _load_yt_video_cache() if use_cache else {}
-    label   = url
-    entries = []
+    cache             = _load_yt_video_cache() if use_cache else {}
+    label             = url
+    entries           = []
     unavailable_count = 0
 
     # ── Single video ──────────────────────────────────────────────────
@@ -409,9 +428,9 @@ def scan_url(url, on_progress=None, use_cache=True):
             fetched, unavailable_ids = _yt_fetch_video_details([vid_id], api_key, on_progress, 0, 1)
             if fetched:
                 _merge_into_cache(cache, {vid_id: fetched[0]})
-            entries    = fetched
-            label      = entries[0]['title'] if entries else vid_id
-            cache_hits = 0
+            entries           = fetched
+            label             = entries[0]['title'] if entries else vid_id
+            cache_hits        = 0
             unavailable_count = len(unavailable_ids)
 
     # ── Playlist ──────────────────────────────────────────────────────
@@ -423,9 +442,9 @@ def scan_url(url, on_progress=None, use_cache=True):
         except Exception:
             label = vid_id
 
-        ids = _yt_fetch_playlist_video_ids(vid_id, api_key, None)
-        entries, cache_hits, unavailable_ids = _fetch_with_cache(ids, api_key, cache, on_progress)
-        unavailable_count = len(unavailable_ids)
+        ids                         = _yt_fetch_playlist_video_ids(vid_id, api_key, None)
+        entries, cache_hits, unavail = _fetch_with_cache(ids, api_key, cache, on_progress)
+        unavailable_count           = len(unavail)
 
     # ── Channel ───────────────────────────────────────────────────────
     elif kind in ('channel_id', 'channel_handle'):
@@ -434,9 +453,9 @@ def scan_url(url, on_progress=None, use_cache=True):
             raise ValueError(f"Could not find channel: {vid_id}")
         label = channel_title or vid_id
 
-        ids = _yt_fetch_playlist_video_ids(uploads_pl, api_key, None)
-        entries, cache_hits, unavailable_ids = _fetch_with_cache(ids, api_key, cache, on_progress)
-        unavailable_count = len(unavailable_ids)
+        ids                         = _yt_fetch_playlist_video_ids(uploads_pl, api_key, None)
+        entries, cache_hits, unavail = _fetch_with_cache(ids, api_key, cache, on_progress)
+        unavailable_count           = len(unavail)
 
     total_sec   = sum(e['duration'] for e in entries)
     total_count = len(entries)
@@ -458,7 +477,7 @@ def yt_cache_stats():
     try:
         data  = _load_yt_video_cache()
         count = len(data)
-        size  = YT_VIDEO_CACHE_FILE.stat().st_size if YT_VIDEO_CACHE_FILE.exists() else 0
+        size  = YT_VCACHE_FILE.stat().st_size if YT_VCACHE_FILE.exists() else 0
         return count, size
     except Exception:
         return 0, 0
@@ -467,8 +486,8 @@ def yt_cache_stats():
 def yt_cache_clear():
     """Delete the YouTube video cache file."""
     try:
-        if YT_VIDEO_CACHE_FILE.exists():
-            YT_VIDEO_CACHE_FILE.unlink()
+        if YT_VCACHE_FILE.exists():
+            YT_VCACHE_FILE.unlink()
             return True
     except Exception:
         pass

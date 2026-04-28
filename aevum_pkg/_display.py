@@ -14,6 +14,15 @@ def _dc(depth: int) -> str:
 
 def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number="",
                max_depth=50, show_files=False, direct_count=None, fbytes=0):
+    """
+    Recursively print the folder tree.
+
+    Issue 26 fix: max_depth is now threaded through every recursive call so
+    that --depth N actually limits the displayed tree depth.  Previously
+    max_depth was always 50 regardless of the CLI flag because _cli.py never
+    forwarded it.  Callers (print_results) pass max_depth through, and _cli.py
+    now forwards args.depth there.
+    """
     if depth > max_depth:
         return
     PAD    = "    "
@@ -54,7 +63,6 @@ def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number=""
                 print(f"{indent}        {clr.DIM}|  {fd['hours_fmt']}  {path.name}{clr.RST}")
         print()
     elif direct and show_files:
-        # leaf folder — no subfolders, list files directly
         for path, sec in direct:
             fd = format_duration(sec)
             print(f"{indent}    {clr.DIM}|  {fd['hours_fmt']}  {path.name}{clr.RST}")
@@ -62,8 +70,15 @@ def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number=""
 
     for i, (sub_name, sub_sec, sub_count, sub_fbytes, sub_direct_count, sub_sub, sub_direct) in enumerate(subfolders, start=1):
         sub_number = f"{number}.{i}" if number else str(i)
-        print_tree(sub_name, sub_sec, sub_count, sub_sub, sub_direct, depth + 1, sub_number,
-                   show_files=show_files, direct_count=sub_direct_count, fbytes=sub_fbytes)
+        # Issue 26: pass max_depth through every recursive call
+        print_tree(
+            sub_name, sub_sec, sub_count, sub_sub, sub_direct,
+            depth + 1, sub_number,
+            max_depth=max_depth,
+            show_files=show_files,
+            direct_count=sub_direct_count,
+            fbytes=sub_fbytes,
+        )
     if subfolders:
         print()
 
@@ -83,18 +98,26 @@ def print_top_files(durations, n=10):
     print()
 
 
-def print_results(folder, total_sec, total_count, tree, durations=None, sizes=None, top_n=10, show_files=False):
+def print_results(folder, total_sec, total_count, tree, durations=None, sizes=None,
+                  top_n=10, show_files=False, max_depth=50):
+    """
+    Issue 26 fix: max_depth parameter added so --depth N from the CLI is
+    correctly forwarded all the way into print_tree.
+    """
     fmt        = format_duration(total_sec)
     sizes      = sizes or {}
     subfolders, direct, root_bytes = tree
     print()
     print(f"  {clr.C}{LINE}{clr.RST}")
-    _folder_p = Path(folder)
+    _folder_p     = Path(folder)
     _folder_label = _folder_p.name or _folder_p.drive or str(_folder_p)
     print(f"  {clr.W}  {_folder_label}{clr.RST}  {clr.DIM}({folder}){clr.RST}")
     print(f"  {clr.C}{LINE}{clr.RST}")
     print()
-    print_tree(Path(folder).name, total_sec, total_count, subfolders, direct, show_files=show_files, fbytes=root_bytes)
+    print_tree(
+        Path(folder).name, total_sec, total_count, subfolders, direct,
+        show_files=show_files, fbytes=root_bytes, max_depth=max_depth,
+    )
     print(f"  {clr.C}{LINE}{clr.RST}")
     print(f"  {clr.W}  Grand Total{clr.RST}")
     print(f"  {clr.C}{LINE}{clr.RST}")
@@ -164,11 +187,27 @@ def print_banner():
 
 def print_post_scan_menu(current_sort="name:asc"):
     print(f"  {clr.W}What do you want to do?{clr.RST}")
-    print(f"  {clr.G}1. scan{clr.RST}   {clr.B}2. sort{clr.RST}   {clr.M}3. export{clr.RST}   {clr.Y}4. clear{clr.RST}   {clr.R}5. quit{clr.RST}   {clr.C}6. duplicates{clr.RST}   {clr.W}7. files{clr.RST}")
+    print(
+        f"  {clr.G}1. scan{clr.RST}   {clr.B}2. sort{clr.RST}   "
+        f"{clr.M}3. export{clr.RST}   {clr.Y}4. clear{clr.RST}   "
+        f"{clr.R}5. quit{clr.RST}   {clr.C}6. duplicates{clr.RST}   {clr.W}7. files{clr.RST}"
+    )
     print()
 
 
 def _fuzzy_suggest(word, candidates):
+    """
+    Return the closest candidate to word within edit-distance 2, or None.
+
+    Issue 27 fix: candidate lists larger than 50 items are skipped entirely.
+    The Levenshtein inner loop is O(len(word) * len(candidate)) and calling it
+    hundreds of times on a large subfolder list would be noticeably slow.
+    The threshold of 50 is generous for the intended use-cases (command names,
+    sort fields) while protecting against large input.
+    """
+    if len(candidates) > 50:
+        return None
+
     def _dist(a, b):
         if a == b:
             return 0
@@ -179,10 +218,14 @@ def _fuzzy_suggest(word, candidates):
         for i, ca in enumerate(a):
             curr = [i + 1]
             for j, cb in enumerate(b):
-                curr.append(min(prev[j] + (0 if ca == cb else 1),
-                                curr[j] + 1, prev[j + 1] + 1))
+                curr.append(min(
+                    prev[j] + (0 if ca == cb else 1),
+                    curr[j] + 1,
+                    prev[j + 1] + 1,
+                ))
             prev = curr
         return prev[lb]
-    scored = [(c, _dist(word, c)) for c in candidates]
+
+    scored   = [(c, _dist(word, c)) for c in candidates]
     best_c, best_d = min(scored, key=lambda x: x[1])
     return best_c if best_d <= 2 else None

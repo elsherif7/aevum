@@ -1,4 +1,5 @@
 import hashlib
+from pathlib import Path
 
 from ._color import clr, LINE
 from ._scan  import format_duration, format_size
@@ -26,11 +27,21 @@ def find_duplicates(durations, sizes=None):
     64 KiB of their content.
 
     Returns a list of groups; each group is a list of Paths with 2+ copies.
-    """
-    sizes = sizes or {}
 
-    # Group paths by file size first — only paths that share a size are
-    # candidates for a more expensive hash comparison.
+    Issue 28 fix: keys in `sizes` are normalised to Path objects so that
+    callers passing a {str: int} dict (e.g. after deserialisation) still
+    work correctly instead of silently degrading to the slow stat() fallback
+    for every file.
+    """
+    # Normalise sizes keys to Path so lookups always hit regardless of whether
+    # the caller used strings or Path objects.
+    if sizes:
+        sizes = {Path(k) if isinstance(k, str) else k: v for k, v in sizes.items()}
+    else:
+        sizes = {}
+
+    # Group paths by file size — only paths sharing a size are candidates for
+    # the more expensive hash comparison.
     by_size: dict[int, list] = {}
     for path in durations:
         sz = sizes.get(path)
@@ -39,7 +50,7 @@ def find_duplicates(durations, sizes=None):
                 sz = path.stat().st_size
             except OSError:
                 continue
-        if sz > 0:                     # zero-byte files are never "duplicates"
+        if sz > 0:
             by_size.setdefault(sz, []).append(path)
 
     groups = []
@@ -57,6 +68,18 @@ def find_duplicates(durations, sizes=None):
     return groups
 
 
+def _group_wasted(group, durations):
+    """
+    Compute wasted duration for a duplicate group using the median duration
+    as the canonical "keeper" so transcoded copies don't skew the figure.
+    Returns (median_sec, wasted_sec).
+    """
+    group_secs = sorted(durations.get(p, 0.0) for p in group)
+    median_sec = group_secs[len(group_secs) // 2]
+    wasted     = sum(group_secs) - median_sec
+    return median_sec, wasted
+
+
 def print_duplicates(groups, durations):
     if not groups:
         print(f"  {clr.G}No duplicates found.{clr.RST}\n")
@@ -69,15 +92,8 @@ def print_duplicates(groups, durations):
 
     total_wasted_sec = 0.0
     for i, group in enumerate(groups, start=1):
-        # Use the median duration of the group rather than blindly taking
-        # group[0], so the "wasted time" estimate is more accurate when
-        # copies have slightly different durations (e.g. transcoded files
-        # that happen to share the same partial hash).
-        group_secs = [durations.get(p, 0.0) for p in group]
-        group_secs.sort()
-        median_sec = group_secs[len(group_secs) // 2]
-        wasted     = sum(group_secs) - median_sec   # every copy except the "keeper"
-        total_wasted_sec += wasted
+        median_sec, wasted = _group_wasted(group, durations)
+        total_wasted_sec  += wasted
 
         fmt = format_duration(median_sec)
         print(
@@ -108,3 +124,23 @@ def print_dupe_warning(groups, folder=None):
         f"  {clr.Y}\u26a0  {len(groups)} duplicate {grp_word} found ({total} redundant {file_word}){clr.RST}\n"
         f"  {clr.DIM}To see details, run:{clr.RST}  {clr.W}{cmd}{clr.RST}\n"
     )
+
+
+def dupes_to_json(groups, durations):
+    """
+    Serialise duplicate groups to a JSON-friendly structure.
+
+    Issue 16 fix (from _cli.py): wasted time now uses the same median-based
+    calculation as print_duplicates instead of the simpler group[0] * (n-1)
+    estimate, so --json output matches human output exactly.
+    """
+    result = []
+    for group in groups:
+        median_sec, wasted = _group_wasted(group, durations)
+        result.append({
+            "copies":       len(group),
+            "duration_sec": round(median_sec, 2),
+            "wasted_sec":   round(wasted, 2),
+            "files":        [str(p) for p in group],
+        })
+    return result
