@@ -76,9 +76,13 @@ from ._scan import (
 # ── YouTube ─────────────────────────────────────────────────────────────────
 from ._youtube import (
     scan_url,
+    get_quota_status,
+)
+
+# ── API Key (Secure Storage) ─────────────────────────────────────────────────
+from ._apikey import (
     load_api_key,
     save_api_key,
-    get_quota_status,
 )
 
 # ── Display ─────────────────────────────────────────────────────────────────

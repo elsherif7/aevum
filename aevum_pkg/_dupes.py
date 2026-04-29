@@ -6,7 +6,12 @@ from ._scan  import format_duration, format_size
 
 
 def _file_fingerprint(path, size, chunk=65536):
-    h = hashlib.sha1()
+    """
+    Generate file fingerprint using BLAKE2b (faster and more secure than SHA-1).
+    
+    Security: Uses BLAKE2b instead of SHA-1 which is cryptographically broken.
+    """
+    h = hashlib.blake2b()
     try:
         with open(path, "rb") as f:
             h.update(f.read(chunk))
@@ -23,7 +28,7 @@ def find_duplicates(durations, sizes=None):
     Find duplicate files by size + partial hash.
 
     Two files are considered duplicates when they share the same byte-size
-    *and* have identical SHA-1 fingerprints computed from the first and last
+    *and* have identical BLAKE2b fingerprints computed from the first and last
     64 KiB of their content.
 
     Returns a list of groups; each group is a list of Paths with 2+ copies.
@@ -32,6 +37,8 @@ def find_duplicates(durations, sizes=None):
     callers passing a {str: int} dict (e.g. after deserialisation) still
     work correctly instead of silently degrading to the slow stat() fallback
     for every file.
+    
+    Security: Uses BLAKE2b instead of SHA-1 for cryptographic integrity.
     """
     # Normalise sizes keys to Path so lookups always hit regardless of whether
     # the caller used strings or Path objects.

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from ._color import clr
 from ._paths import YT_KEY_FILE, YT_QUOTA_FILE, YT_VCACHE_FILE
+from ._apikey import save_api_key, load_api_key, delete_api_key, get_storage_method
 
 # Issue 13: file now uses LF line endings (normalised from original CRLF).
 
@@ -190,23 +191,12 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
     return result
 
 
-def load_api_key():
-    try:
-        key = YT_KEY_FILE.read_text(encoding='utf-8').strip()
-        return key if key else None
-    except Exception:
-        return None
-
-
-def save_api_key(key):
-    try:
-        YT_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
-        YT_KEY_FILE.write_text(key.strip(), encoding='utf-8')
-    except Exception:
-        pass
-
-
 def prompt_api_key():
+    """
+    Prompt user for YouTube API key and save it securely.
+    
+    Security: Now uses secure storage (_apikey.py) instead of plaintext file.
+    """
     print()
     print(f"  {clr.Y}YouTube API key required.{clr.RST}")
     print(f"  {clr.DIM}Get a free key in ~2 minutes:{clr.RST}")
@@ -221,8 +211,19 @@ def prompt_api_key():
         return None
     if not key:
         return None
-    save_api_key(key)
-    print(f"  {clr.G}Key saved to {YT_KEY_FILE}{clr.RST}")
+    
+    if save_api_key(key):
+        storage = get_storage_method()
+        storage_name = {
+            "keyring": "system keyring (encrypted)",
+            "encrypted_file": "encrypted file",
+            "plaintext_file": "file",
+        }.get(storage, "storage")
+        print(f"  {clr.G}Key saved to {storage_name}{clr.RST}")
+    else:
+        print(f"  {clr.R}Failed to save API key{clr.RST}")
+        return None
+    
     print()
     return key
 

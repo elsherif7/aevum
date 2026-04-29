@@ -9,7 +9,8 @@ from ._color   import clr, LINE
 from ._paths   import CACHE_DIR, CONFIG_FILE          # Issue 23: central path
 from ._cache   import _cache_key
 from ._scan    import format_size, check_ffprobe
-from ._youtube import load_api_key, save_api_key, prompt_api_key, yt_cache_stats, yt_cache_clear
+from ._apikey  import load_api_key, save_api_key, get_storage_method
+from ._youtube import prompt_api_key, yt_cache_stats, yt_cache_clear
 
 CONFIG_DEFAULTS = {
     "sort":          "name:asc",
@@ -22,10 +23,58 @@ CONFIG_DEFAULTS = {
 
 
 def load_config():
+    """
+    Load configuration from disk with validation.
+    
+    Security: Validates JSON structure and types to prevent deserialization
+    attacks. Only accepts expected configuration keys and types.
+    """
     try:
-        data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        return {**CONFIG_DEFAULTS, **data}
-    except Exception:
+        with CONFIG_FILE.open('r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Security: validate root is a dict
+        if not isinstance(data, dict):
+            return dict(CONFIG_DEFAULTS)
+        
+        # Security: validate each field type matches defaults
+        validated = {}
+        for key, default_value in CONFIG_DEFAULTS.items():
+            if key in data:
+                value = data[key]
+                expected_type = type(default_value)
+                
+                # Validate type matches
+                if isinstance(value, expected_type):
+                    # Additional validation for specific keys
+                    if key == "top":
+                        # Limit to reasonable range
+                        if 0 <= value <= 100:
+                            validated[key] = value
+                    elif key == "sort":
+                        # Validate sort field
+                        valid_sorts = [
+                            "name:asc", "name:desc",
+                            "duration:asc", "duration:desc",
+                            "count:asc", "count:desc"
+                        ]
+                        if value in valid_sorts:
+                            validated[key] = value
+                    elif key == "aliases":
+                        # Validate aliases is a dict of str -> str
+                        if isinstance(value, dict):
+                            clean_aliases = {}
+                            for k, v in value.items():
+                                if isinstance(k, str) and isinstance(v, str):
+                                    # Limit alias name length
+                                    if len(k) <= 50 and len(v) <= 4096:
+                                        clean_aliases[k] = v
+                            validated[key] = clean_aliases
+                    else:
+                        validated[key] = value
+        
+        return {**CONFIG_DEFAULTS, **validated}
+    except (json.JSONDecodeError, OSError):
         return dict(CONFIG_DEFAULTS)
 
 
@@ -72,8 +121,13 @@ def cmd_doctor(cfg):
 
     api_key = load_api_key()
     if api_key:
-        masked = api_key[:6] + "..." + api_key[-4:] if len(api_key) > 10 else "***"
-        print(f"  {clr.G}[OK]{clr.RST}   YouTube API key set  {clr.DIM}({masked}){clr.RST}")
+        storage = get_storage_method()
+        storage_name = {
+            "keyring": "system keyring (encrypted)",
+            "encrypted_file": "encrypted file", 
+            "plaintext_file": "plaintext file",
+        }.get(storage, "secure storage")
+        print(f"  {clr.G}[OK]{clr.RST}   YouTube API key set  {clr.DIM}(stored in {storage_name}){clr.RST}")
         from ._youtube import get_quota_status
         used, remaining, pct = get_quota_status()
         quota_col = clr.G if pct < 50 else (clr.Y if pct < 80 else clr.R)
@@ -181,8 +235,12 @@ def cmd_config(args, cfg):
         for k, v in cfg.items():
             print(f"  {clr.G}{k:<18}{clr.RST}  {clr.W}{v}{clr.RST}")
         api_key = load_api_key()
-        masked  = (api_key[:6] + "..." + api_key[-4:]) if api_key and len(api_key) > 10 else (api_key or "(not set)")
-        print(f"  {clr.G}{YT_KEY:<18}{clr.RST}  {clr.W}{masked}{clr.RST}")
+        if api_key:
+            storage = get_storage_method()
+            status = f"(set - stored in {storage})"
+        else:
+            status = "(not set)"
+        print(f"  {clr.G}{YT_KEY:<18}{clr.RST}  {clr.W}{status}{clr.RST}")
         print()
         return
 
@@ -199,7 +257,12 @@ def cmd_config(args, cfg):
     if action == "get":
         if key == YT_KEY:
             api_key = load_api_key()
-            print(api_key or "(not set)")
+            if api_key:
+                storage = get_storage_method()
+                print(f"API key is set (stored in {storage})")
+                print(f"Use 'aevum doctor' to verify it works")
+            else:
+                print("(not set)")
         elif _config_key_valid(key):
             print(cfg.get(key, CONFIG_DEFAULTS.get(key)))
         else:
@@ -213,8 +276,11 @@ def cmd_config(args, cfg):
             if not value:
                 prompt_api_key()
                 return
-            save_api_key(value)
-            print(f"  {clr.G}[OK]{clr.RST}  yt_api_key saved.")
+            if save_api_key(value):
+                storage = get_storage_method()
+                print(f"  {clr.G}[OK]{clr.RST}  yt_api_key saved to {storage}.")
+            else:
+                print(f"  {clr.R}[ERROR]{clr.RST}  Failed to save API key.", file=sys.stderr)
             return
         if not _config_key_valid(key):
             print(
