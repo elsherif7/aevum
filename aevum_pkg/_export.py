@@ -1,10 +1,14 @@
 import csv
 import io
 import json
+import os
+import secrets
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
 from ._scan import format_duration, format_size
+from ._security import validate_export_path
 
 
 def _tree_to_dict(name, seconds, count, subfolders, direct=None):
@@ -20,25 +24,34 @@ def _tree_to_dict(name, seconds, count, subfolders, direct=None):
 
 def _resolve_dest(folder, fmt, out_path):
     """
-    Resolve the destination path for an export.
-
-    Issue 29 fix: removed the touch()+unlink() write-permission test that
-    created a TOCTOU race.  Instead we just return the preferred path and let
-    the actual write() call raise if something is wrong; callers catch OSError
-    and fall back to the Desktop.
+    Resolve the destination path for an export with security validation.
+    
+    Security: Validates output path to prevent path traversal and arbitrary
+    file writes. Uses unpredictable names to prevent symlink attacks.
     """
-    folder   = Path(folder)
-    stamp    = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"aevum_{folder.name}_{stamp}.{fmt}"
-
+    folder = Path(folder).resolve()
+    
+    # Add random suffix for unpredictability (prevents symlink timing attacks)
+    random_suffix = secrets.token_hex(4)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"aevum_{folder.name}_{stamp}_{random_suffix}.{fmt}"
+    
     if out_path:
-        return Path(out_path)
-
-    preferred = folder.parent / filename
-    # Only use the sibling path if the parent directory actually exists.
-    if preferred.parent.is_dir():
-        return preferred
-
+        # Security: validate output path
+        try:
+            validated_path = validate_export_path(out_path, folder)
+            return validated_path
+        except (PermissionError, ValueError) as e:
+            print(f"  Warning: {e}", file=__import__('sys').stderr)
+            print(f"  Falling back to safe location...", file=__import__('sys').stderr)
+            # Fall through to auto-generate safe path
+    
+    # Auto-generate safe path
+    if folder.parent.is_dir():
+        preferred = folder.parent / filename
+        if preferred.parent.is_dir():
+            return preferred
+    
     desktop = Path.home() / "Desktop"
     desktop.mkdir(parents=True, exist_ok=True)
     return desktop / filename
@@ -46,41 +59,89 @@ def _resolve_dest(folder, fmt, out_path):
 
 def export_results(folder, total_sec, total_count, tree, durations, fmt, out_path=None):
     """
-    Export scan results to a file.
+    Export scan results to a file with race-condition-safe atomic writes.
+    
     fmt: 'txt' | 'csv' | 'json'
     out_path: explicit Path or None to auto-generate next to the scan folder.
     Returns the Path that was written.
-
-    Issue 29 fix: the old code did touch()+unlink() to probe writeability,
-    creating a TOCTOU race.  Now we attempt the real write directly, and fall
-    back to the Desktop only if that raises OSError.
+    
+    Security: Uses atomic writes via temp file + rename to prevent TOCTOU races.
     """
-    dest    = _resolve_dest(folder, fmt, out_path)
+    dest = _resolve_dest(folder, fmt, out_path)
     content = _build_content(folder, total_sec, total_count, tree, durations, fmt)
-
+    
     try:
-        _write_content(dest, content, fmt)
+        _write_content_atomic(dest, content, fmt)
     except OSError:
-        # Fall back to Desktop on permission or path errors.
+        # Fall back to Desktop on permission or path errors
         desktop = Path.home() / "Desktop"
         desktop.mkdir(parents=True, exist_ok=True)
-        stamp    = datetime.now().strftime("%Y%m%d_%H%M%S")
-        dest     = desktop / f"aevum_{Path(folder).name}_{stamp}.{fmt}"
-        _write_content(dest, content, fmt)
-
+        random_suffix = secrets.token_hex(4)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest = desktop / f"aevum_{Path(folder).name}_{stamp}_{random_suffix}.{fmt}"
+        _write_content_atomic(dest, content, fmt)
+    
     return dest
 
 
-def _write_content(dest, content, fmt):
-    """Write pre-built content to dest. Raises OSError on failure."""
+def _write_content_atomic(dest, content, fmt):
+    """
+    Write content atomically using temp file + rename.
+    
+    Security: Prevents TOCTOU races and sets restrictive permissions (user-only).
+    """
     if fmt == "csv":
-        # content is a list of rows for csv
-        with dest.open("w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            for row in content:
-                writer.writerow(row)
+        # For CSV, write atomically via temp file
+        temp_fd, temp_path = tempfile.mkstemp(
+            dir=dest.parent,
+            prefix=f".{dest.name}_",
+            suffix=".tmp"
+        )
+        
+        try:
+            with os.fdopen(temp_fd, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                for row in content:
+                    writer.writerow(row)
+            
+            # Set restrictive permissions before moving
+            os.chmod(temp_path, 0o600)
+            
+            # Atomic rename
+            if os.name == 'nt' and dest.exists():
+                dest.unlink()
+            os.replace(temp_path, dest)
+        except Exception:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+            raise
     else:
-        dest.write_text(content, encoding="utf-8")
+        # For text/JSON, write atomically via temp file
+        temp_fd, temp_path = tempfile.mkstemp(
+            dir=dest.parent,
+            prefix=f".{dest.name}_",
+            suffix=".tmp"
+        )
+        
+        try:
+            with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            # Set restrictive permissions
+            os.chmod(temp_path, 0o600)
+            
+            # Atomic rename
+            if os.name == 'nt' and dest.exists():
+                dest.unlink()
+            os.replace(temp_path, dest)
+        except Exception:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+            raise
 
 
 def _build_content(folder, total_sec, total_count, tree, durations, fmt):

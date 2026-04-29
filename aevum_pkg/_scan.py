@@ -182,7 +182,12 @@ def _read_mkv_duration(path):
 
 
 def get_duration(path):
-    """Try fast native parse first; fall back to ffprobe if needed."""
+    """
+    Try fast native parse first; fall back to ffprobe if needed.
+    
+    Security: Uses subprocess with list form (never shell=True) to prevent
+    command injection attacks. Path is converted to string safely.
+    """
     ext    = Path(path).suffix.lower()
     result = None
     if ext in ('.mp4', '.mov', '.m4v', '.3gp', '.3g2', '.m4a', '.m4p', '.m4b', '.mp4v', '.f4v', '.f4a'):
@@ -191,15 +196,21 @@ def get_duration(path):
         result = _read_mkv_duration(path)
     if result is not None and result > 0:
         return result
+    
+    # Security: ALWAYS use list form with shell=False to prevent command injection
+    # str(path) safely converts Path to string without shell interpretation
     try:
         proc = subprocess.run(
             ['ffprobe', '-v', 'error', '-show_entries',
              'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', str(path)],
-            capture_output=True, text=True, timeout=15
+            capture_output=True,
+            text=True,
+            timeout=15,
+            shell=False  # Explicitly set to False (default, but explicit is safer)
         )
         val = proc.stdout.strip()
         return float(val) if val and val != 'N/A' else 0.0
-    except Exception:
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, ValueError, OSError):
         return 0.0
 
 
