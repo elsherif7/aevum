@@ -183,3 +183,36 @@ def validate_input_length(value: str, max_length: int, name: str) -> str:
 MAX_PATH_LENGTH = 4096
 MAX_ALIAS_LENGTH = 50
 MAX_FILENAME_LENGTH = 255
+
+
+def validate_alias_name(name: str) -> str:
+    """
+    Validate alias name for security and usability.
+    
+    Security: Prevents excessively long names and special characters.
+    
+    Args:
+        name: Alias name to validate
+        
+    Returns:
+        Validated alias name
+        
+    Raises:
+        ValueError: If alias name is invalid
+    """
+    if not name:
+        raise ValueError("Alias name cannot be empty")
+    
+    if len(name) > MAX_ALIAS_LENGTH:
+        raise ValueError(
+            f"Alias name too long: {len(name)} chars (max: {MAX_ALIAS_LENGTH})"
+        )
+    
+    # Only allow alphanumeric and safe characters
+    import re
+    if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+        raise ValueError(
+            "Alias name can only contain letters, numbers, hyphens, and underscores"
+        )
+    
+    return name

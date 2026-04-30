@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import os
+import re
 import secrets
 import tempfile
 from datetime import datetime
@@ -9,6 +10,32 @@ from pathlib import Path
 
 from ._scan import format_duration, format_size
 from ._security import validate_export_path
+
+
+def sanitize_csv_field(value: str) -> str:
+    """
+    Sanitize CSV field to prevent formula injection attacks.
+    
+    Security: Escapes formula characters that could execute in Excel/Google Sheets.
+    Formulas starting with =, +, -, @, |, or tab could execute commands.
+    """
+    if not value:
+        return value
+    
+    # Characters that start formulas in spreadsheets
+    dangerous_chars = {'=', '+', '-', '@', '\t', '\r', '\n', '|'}
+    
+    # If starts with dangerous char, prefix with single quote
+    if value[0] in dangerous_chars:
+        value = "'" + value
+    
+    # Remove any embedded nulls
+    value = value.replace('\x00', '')
+    
+    # Remove control characters except common whitespace
+    value = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', value)
+    
+    return value
 
 
 def _tree_to_dict(name, seconds, count, subfolders, direct=None):
@@ -168,11 +195,11 @@ def _build_content(folder, total_sec, total_count, tree, durations, fmt):
         rows   = [["path", "filename", "folder", "seconds", "duration"]]
         for path, sec in ranked:
             rows.append([
-                str(path),
-                path.name,
-                path.parent.name,
-                round(sec, 2),
-                format_duration(sec)["hours_fmt"],
+                sanitize_csv_field(str(path)),
+                sanitize_csv_field(path.name),
+                sanitize_csv_field(path.parent.name),
+                round(sec, 2),  # Numbers are safe
+                sanitize_csv_field(format_duration(sec)["hours_fmt"]),
             ])
         return rows  # returned as list; _write_content handles csv.writer
 
@@ -283,11 +310,11 @@ def _build_url_content(url, label, total_sec, total_count, entries, fmt):
         rows   = [["title", "channel", "seconds", "duration", "url"]]
         for e in ranked:
             rows.append([
-                e.get("title", ""),
-                e.get("channel", ""),
-                round(e.get("duration", 0.0), 2),
-                format_duration(e.get("duration", 0.0))["hours_fmt"],
-                e.get("url", ""),
+                sanitize_csv_field(e.get("title", "")),
+                sanitize_csv_field(e.get("channel", "")),
+                round(e.get("duration", 0.0), 2),  # Numbers are safe
+                sanitize_csv_field(format_duration(e.get("duration", 0.0))["hours_fmt"]),
+                sanitize_csv_field(e.get("url", "")),
             ])
         return rows
 

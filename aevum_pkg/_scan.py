@@ -239,11 +239,13 @@ def format_duration(seconds):
     }
 
 
-def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache=None):
+def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache=None, _visited_inodes=None):
     """
     Parallel scan: collector thread discovers files and submits them to the
     thread pool.  Returns (total_sec, total_count, tree_tuple, durations,
     sizes, hits).
+
+    Security: Detects symlink loops and limits recursion depth to prevent DoS.
 
     Issue 2 fix: `total` is read inside the lock inside probe() so the
     progress callback never sees a torn value.
@@ -254,7 +256,28 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
     Issue 4 fix: files returning 0.0 duration are excluded so the reported
     file count matches real, readable media files.
     """
-    root      = Path(root)
+    # Security: Track visited inodes to detect symlink loops
+    if _visited_inodes is None:
+        _visited_inodes = set()
+    
+    root = Path(root).resolve()  # Resolve symlinks in root path
+    
+    # Security: Check for symlink loops using inode tracking
+    try:
+        root_stat = root.stat()
+        root_inode = (root_stat.st_dev, root_stat.st_ino)
+        
+        if root_inode in _visited_inodes:
+            import sys
+            print(f"  Warning: Symlink loop detected: {root}", file=sys.stderr)
+            return 0.0, 0, ([], [], 0), {}, {}, 0
+        
+        _visited_inodes.add(root_inode)
+    except OSError as e:
+        import sys
+        print(f"  Warning: Cannot access {root}: {e}", file=sys.stderr)
+        return 0.0, 0, ([], [], 0), {}, {}, 0
+    
     durations = {}
     sizes     = {}
     done      = 0
@@ -262,6 +285,10 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
     hits      = 0
     lock      = threading.Lock()
     cache     = cache or {}
+    
+    # Security: Maximum recursion depth to prevent DoS
+    MAX_DEPTH = 30
+    root_depth = len(root.parts)
 
     def probe(path):
         nonlocal done, hits
@@ -301,25 +328,70 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
 
         def collect_and_submit():
             nonlocal total
-            stack = [str(root)]
+            # Security: Track (path, depth) to prevent excessive recursion
+            stack = [(str(root), root_depth)]
+            visited_dirs = set()
+            
             while stack:
                 if stop_event and stop_event.is_set():
                     break
-                current = stack.pop()
+                
+                current, depth = stack.pop()
+                
+                # Security: Limit recursion depth
+                if depth - root_depth > MAX_DEPTH:
+                    continue
+                
+                # Security: Detect directory loops via inode
+                try:
+                    current_stat = Path(current).stat()
+                    current_inode = (current_stat.st_dev, current_stat.st_ino)
+                    
+                    if current_inode in visited_dirs:
+                        continue  # Skip already visited directory
+                    
+                    visited_dirs.add(current_inode)
+                except OSError:
+                    continue  # Skip inaccessible directories
+                
                 try:
                     with os.scandir(current) as it:
                         for entry in it:
                             if stop_event and stop_event.is_set():
                                 return
-                            if entry.is_dir(follow_symlinks=False):
-                                stack.append(entry.path)
-                            elif entry.is_file(follow_symlinks=False):
-                                if Path(entry.name).suffix.lower() in video_extensions:
-                                    p = Path(entry.path)
-                                    with lock:
-                                        total += 1
-                                    f = pool.submit(probe, p)
-                                    futures[f] = p
+                            
+                            # Security: Skip symlinks or resolve and check for loops
+                            try:
+                                if entry.is_symlink():
+                                    # Resolve symlink and check if it's already visited
+                                    resolved = Path(entry.path).resolve(strict=True)
+                                    resolved_stat = resolved.stat()
+                                    resolved_inode = (resolved_stat.st_dev, resolved_stat.st_ino)
+                                    
+                                    if resolved_inode in _visited_inodes or resolved_inode in visited_dirs:
+                                        continue  # Skip symlink loop
+                                    
+                                    if entry.is_dir(follow_symlinks=True):
+                                        stack.append((entry.path, depth + 1))
+                                    elif entry.is_file(follow_symlinks=True):
+                                        if Path(entry.name).suffix.lower() in video_extensions:
+                                            p = Path(entry.path)
+                                            with lock:
+                                                total += 1
+                                            futures[pool.submit(probe, p)] = p
+                                else:
+                                    # Not a symlink, process normally
+                                    if entry.is_dir(follow_symlinks=False):
+                                        stack.append((entry.path, depth + 1))
+                                    elif entry.is_file(follow_symlinks=False):
+                                        if Path(entry.name).suffix.lower() in video_extensions:
+                                            p = Path(entry.path)
+                                            with lock:
+                                                total += 1
+                                            futures[pool.submit(probe, p)] = p
+                            except (OSError, RuntimeError):
+                                # Skip broken symlinks or inaccessible entries
+                                continue
                 except PermissionError:
                     pass
 

@@ -204,11 +204,25 @@ def _fuzzy_suggest(word, candidates):
     hundreds of times on a large subfolder list would be noticeably slow.
     The threshold of 50 is generous for the intended use-cases (command names,
     sort fields) while protecting against large input.
+    
+    Security: Limits input lengths to prevent ReDoS attacks.
     """
-    if len(candidates) > 50:
+    # Security: limit input lengths to prevent DoS
+    MAX_WORD_LENGTH = 50
+    MAX_CANDIDATE_LENGTH = 50
+    MAX_CANDIDATES = 50
+    
+    if len(word) > MAX_WORD_LENGTH:
+        return None
+    
+    if len(candidates) > MAX_CANDIDATES:
         return None
 
     def _dist(a, b):
+        # Truncate excessively long strings
+        a = a[:MAX_WORD_LENGTH]
+        b = b[:MAX_CANDIDATE_LENGTH]
+        
         if a == b:
             return 0
         la, lb = len(a), len(b)
@@ -226,6 +240,16 @@ def _fuzzy_suggest(word, candidates):
             prev = curr
         return prev[lb]
 
-    scored   = [(c, _dist(word, c)) for c in candidates]
+    # Filter candidates by length first (optimization)
+    filtered = [
+        c for c in candidates 
+        if abs(len(c) - len(word)) <= 3 
+        and len(c) <= MAX_CANDIDATE_LENGTH
+    ]
+    
+    if not filtered:
+        return None
+    
+    scored = [(c, _dist(word, c)) for c in filtered]
     best_c, best_d = min(scored, key=lambda x: x[1])
     return best_c if best_d <= 2 else None
