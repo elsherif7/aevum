@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import json
 import os
 import tempfile
@@ -88,7 +89,8 @@ def load_cache(root):
     Returns {} if no cache exists or it is unreadable.
     
     Security: Validates JSON structure and types to prevent deserialization
-    attacks. Only accepts expected data types.
+    attacks. Only accepts expected data types. Uses constant-time comparison
+    for cache key lookups to prevent timing attacks.
     
     Issue 22 fix: keys are normalised via _normalise_path() so Windows
     case differences never cause spurious cache misses.
@@ -145,6 +147,33 @@ def load_cache(root):
         return validated
     except (json.JSONDecodeError, OSError, PermissionError):
         return {}
+
+
+def get_cached_duration(path: Path, cache: dict) -> tuple:
+    """
+    Get duration from cache with constant-time comparison.
+    
+    Security: Uses hmac.compare_digest for timing-attack resistance.
+    
+    Returns:
+        (duration, hit) tuple - (0.0, False) if not in cache
+    """
+    key = str(path.resolve())
+    if os.name == "nt":
+        key = key.lower()
+    
+    # Security: Use constant-time comparison to prevent timing attacks
+    for cache_key, entry in cache.items():
+        if hmac.compare_digest(key.encode(), cache_key.encode()):
+            try:
+                st = path.stat()
+                if st.st_mtime == entry["mtime"] and st.st_size == entry["size"]:
+                    return entry["duration"], True
+            except OSError:
+                pass
+            break
+    
+    return 0.0, False
 
 
 def save_cache(root, durations):
