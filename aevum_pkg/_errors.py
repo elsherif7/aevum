@@ -10,18 +10,26 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-# Configure secure logging
+from ._paths import APPDATA
+
+_log_path = APPDATA / "aevum.log"
+
+# Ensure the directory exists before the FileHandler tries to open the file.
+# Without this, importing _errors on a fresh install raises FileNotFoundError.
+try:
+    _log_path.parent.mkdir(parents=True, exist_ok=True)
+    _file_handler = logging.FileHandler(_log_path, encoding="utf-8")
+except OSError:
+    _file_handler = None
+
+_handlers = [logging.StreamHandler(sys.stderr)]
+if _file_handler:
+    _handlers.append(_file_handler)
+
 logging.basicConfig(
     level=logging.WARNING,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(
-            Path.home() / '.local' / 'share' / 'Aevum' / 'aevum.log'
-            if sys.platform != 'win32'
-            else Path.home() / 'AppData' / 'Local' / 'Aevum' / 'aevum.log'
-        ),
-        logging.StreamHandler(sys.stderr)
-    ]
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=_handlers,
 )
 
 logger = logging.getLogger('aevum')

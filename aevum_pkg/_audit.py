@@ -11,32 +11,25 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from ._paths import APPDATA
 
-# Audit log location
-if sys.platform == 'win32':
-    AUDIT_LOG = Path.home() / 'AppData' / 'Local' / 'Aevum' / 'audit.log'
-else:
-    AUDIT_LOG = Path.home() / '.local' / 'share' / 'Aevum' / 'audit.log'
+AUDIT_LOG = APPDATA / "audit.log"
 
-
-# Configure audit logger (separate from main logger)
-audit_logger = logging.getLogger('aevum.audit')
+# Configure audit logger (separate from main logger).
+# Guard against duplicate handlers if the module is reloaded (e.g. in tests).
+audit_logger = logging.getLogger("aevum.audit")
 audit_logger.setLevel(logging.INFO)
 
-
-# Ensure audit log directory exists
-try:
-    AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
-    
-    # Add file handler for audit log
-    handler = logging.FileHandler(AUDIT_LOG, encoding='utf-8')
-    handler.setFormatter(
-        logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    )
-    audit_logger.addHandler(handler)
-except OSError:
-    # If can't create audit log, continue without it
-    pass
+if not audit_logger.handlers:
+    try:
+        AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        _handler = logging.FileHandler(AUDIT_LOG, encoding="utf-8")
+        _handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        )
+        audit_logger.addHandler(_handler)
+    except OSError:
+        pass
 
 
 def audit_log(event: str, details: dict = None):

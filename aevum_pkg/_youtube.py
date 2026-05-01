@@ -292,9 +292,10 @@ def _yt_fetch_playlist_video_ids(playlist_id, api_key, on_progress=None):
             vid = item.get('contentDetails', {}).get('videoId')
             if vid:
                 ids.append(vid)
-        if on_progress:
-            on_progress(len(ids), 0)
         page_token = data.get('nextPageToken')
+        # Use a spinner-style callback (total unknown until pagination ends)
+        if on_progress:
+            on_progress(len(ids), max(len(ids), 1))
         if not page_token:
             break
     return ids
@@ -406,17 +407,17 @@ def scan_url(url, on_progress=None, use_cache=True):
         if not api_key:
             return 0, 0, [], 'cancelled', 0, 0
     
-    # Security: Check quota before making requests
+    # Check quota before making requests — only swallow non-PermissionError failures
     try:
         used, remaining, pct = get_quota_status()
-        if remaining < 100:  # Reserve some quota
+    except Exception:
+        pass
+    else:
+        if remaining < 100:
             raise PermissionError(
                 f"Daily quota nearly exhausted ({used:,}/10,000 units used). "
                 f"Remaining: {remaining:,} units. Try again tomorrow."
             )
-    except Exception:
-        # If quota check fails, continue but warn
-        pass
     
     # Security: Apply rate limiting
     if not youtube_limiter.allow_request():
