@@ -672,6 +672,14 @@ def _dispatch_subcommand(sub, argv):
     if sub == 'appdata':
         return types.SimpleNamespace(command='appdata', no_color=False, json=False, quiet=False)
 
+    if sub == 'clearpath':
+        p = argparse.ArgumentParser(prog="aevum clearpath",
+            description="Clear the saved Aevum project path used by 'aevum update'.")
+        _add_common_flags(p)
+        args = p.parse_args(argv)
+        args.command = sub
+        return args
+
     if sub == 'shell':
         ns = types.SimpleNamespace(command='shell', no_color=False, json=False,
                                    quiet=False, sort=None, top=None)
@@ -1608,6 +1616,9 @@ def main():
             except KeyboardInterrupt:
                 print(f"\n\n  {clr.Y}Fetch cancelled.{clr.RST}\n")
                 continue
+            except Exception as e:
+                print(f"\n  {clr.R}[ERROR]{clr.RST} {e}\n")
+                continue
             api_fetched  = total_count - cache_hits
             yt_info      = (f"  {clr.W}({cache_hits} cached, {api_fetched} fetched via API){clr.RST}"
                             if api_fetched > 0 else
@@ -1754,12 +1765,18 @@ def main():
                 if direc is None:
                     continue
                 current_sort = f"{field}:{direc}"
-                _, _, new_tree, new_durations, new_sizes, _ = _run_scan(
+                new_total_sec, new_total_count, new_tree, new_durations, new_sizes, _ = _run_scan(
                     last_scan["folder"], None, current_sort, repl_use_cache)
-                last_scan.update(tree=new_tree, durations=new_durations, sizes=new_sizes)
-                print_results(last_scan["folder"], last_scan["total_sec"],
-                              last_scan["total_count"], new_tree, new_durations,
-                              last_scan["sizes"], default_top, show_files=False)
+                last_scan.update(
+                    total_sec=new_total_sec,
+                    total_count=new_total_count,
+                    tree=new_tree,
+                    durations=new_durations,
+                    sizes=new_sizes,
+                )
+                print_results(last_scan["folder"], new_total_sec,
+                              new_total_count, new_tree, new_durations,
+                              new_sizes, default_top, show_files=False)
                 print_post_scan_menu(current_sort)
 
             elif first_word == 'export' or choice == 'export':
