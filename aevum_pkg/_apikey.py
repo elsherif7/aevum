@@ -28,18 +28,23 @@ def _get_cipher():
     """Get Fernet cipher for fallback encryption."""
     try:
         from cryptography.fernet import Fernet
-        
-        # Use machine-specific key derived from hostname + username
-        # This isn't perfect security, but better than plaintext
         import hashlib
         import socket
-        
-        machine_id = f"{socket.gethostname()}-{os.getlogin()}"
+
+        # Derive a machine-specific key from hostname + username.
+        # Note: anyone with access to the file also knows these values,
+        # so this is obfuscation rather than strong encryption. The
+        # keyring path (Method 1) is the only genuinely secure option.
+        try:
+            login = os.getlogin()
+        except OSError:
+            login = os.getenv('LOGNAME') or os.getenv('USER') or os.getenv('USERNAME') or 'unknown'
+
+        machine_id   = f"{socket.gethostname()}-{login}"
         key_material = hashlib.sha256(machine_id.encode()).digest()
-        key = base64.urlsafe_b64encode(key_material)
-        
+        key          = base64.urlsafe_b64encode(key_material)
         return Fernet(key)
-    except ImportError:
+    except (ImportError, OSError):
         return None
 
 
@@ -179,7 +184,11 @@ def delete_api_key() -> bool:
 def get_storage_method() -> str:
     """
     Return current storage method for informational purposes.
-    
+
+    Detects encrypted vs plaintext by file size: Fernet-encrypted 39-char
+    keys produce ~100+ byte ciphertext; plaintext keys are ≤100 bytes.
+    No decryption required.
+
     Returns:
         "keyring", "encrypted_file", "plaintext_file", or "none"
     """
@@ -189,16 +198,14 @@ def get_storage_method() -> str:
                 return "keyring"
         except Exception:
             pass
-    
+
     if YT_KEY_FILE.exists():
-        cipher = _get_cipher()
-        if cipher:
-            try:
-                # Try to decrypt - if it works, it's encrypted
-                encrypted = YT_KEY_FILE.read_bytes()
-                cipher.decrypt(encrypted)
-                return "encrypted_file"
-            except Exception:
-                return "plaintext_file"
-    
+        try:
+            # Fernet-encrypted 39-char key → ~116 bytes ciphertext.
+            # Plaintext key → 39 bytes. 80 bytes is a safe boundary.
+            size = YT_KEY_FILE.stat().st_size
+            return "encrypted_file" if size > 80 else "plaintext_file"
+        except OSError:
+            pass
+
     return "none"

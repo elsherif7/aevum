@@ -7,32 +7,30 @@ useful debugging information in logs.
 
 import logging
 import sys
-from pathlib import Path
 from typing import Optional
 
 from ._paths import APPDATA
 
 _log_path = APPDATA / "aevum.log"
 
-# Ensure the directory exists before the FileHandler tries to open the file.
-# Without this, importing _errors on a fresh install raises FileNotFoundError.
 try:
     _log_path.parent.mkdir(parents=True, exist_ok=True)
     _file_handler = logging.FileHandler(_log_path, encoding="utf-8")
 except OSError:
     _file_handler = None
 
-_handlers = [logging.StreamHandler(sys.stderr)]
-if _file_handler:
-    _handlers.append(_file_handler)
-
-logging.basicConfig(
-    level=logging.WARNING,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=_handlers,
-)
-
+# Use explicit handler attachment instead of basicConfig — basicConfig is a
+# no-op if any other module has already configured the root logger first.
 logger = logging.getLogger('aevum')
+if not logger.handlers:
+    logger.setLevel(logging.WARNING)
+    _fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    _stderr_handler = logging.StreamHandler(sys.stderr)
+    _stderr_handler.setFormatter(_fmt)
+    logger.addHandler(_stderr_handler)
+    if _file_handler:
+        _file_handler.setFormatter(_fmt)
+        logger.addHandler(_file_handler)
 
 
 def safe_error_message(error: Exception, user_friendly: str, 

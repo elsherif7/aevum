@@ -45,7 +45,12 @@ def audit_log(event: str, details: dict = None):
         try:
             username = os.getlogin()
         except (OSError, AttributeError):
-            username = os.getenv('USER') or os.getenv('USERNAME') or 'unknown'
+            username = (
+                os.getenv('LOGNAME') or
+                os.getenv('USER') or
+                os.getenv('USERNAME') or
+                'unknown'
+            )
         
         # Build log entry
         entry = {
@@ -70,12 +75,12 @@ def audit_scan(path: str, file_count: int):
     })
 
 
-def audit_export(source: str, destination: str, format: str):
+def audit_export(source: str, destination: str, fmt: str):
     """Log export operation."""
     audit_log('EXPORT', {
         'source': str(source),
         'destination': str(destination),
-        'format': format
+        'format': fmt
     })
 
 
@@ -119,30 +124,30 @@ def audit_permission_denied(operation: str, path: str, reason: str):
 def get_recent_audit_events(limit: int = 50) -> list:
     """
     Read recent audit events from log.
-    
-    Args:
-        limit: Maximum number of events to return
-        
+
+    Uses a deque(maxlen=limit) so only the last N lines are kept in memory
+    regardless of how large the audit log has grown.
+
     Returns:
         List of audit event dicts (newest first)
     """
+    from collections import deque
+
     if not AUDIT_LOG.exists():
         return []
-    
+
     try:
-        events = []
+        window = deque(maxlen=limit)
         with AUDIT_LOG.open('r', encoding='utf-8') as f:
             for line in f:
                 try:
-                    # Parse log line - format: "timestamp - level - json"
                     if ' - INFO - ' in line:
                         json_part = line.split(' - INFO - ', 1)[1]
                         event = json.loads(json_part)
-                        events.append(event)
+                        window.append(event)
                 except (json.JSONDecodeError, IndexError):
                     continue
-        
-        # Return newest first
-        return events[-limit:][::-1]
+        # deque already holds at most `limit` entries; reverse for newest-first
+        return list(reversed(window))
     except OSError:
         return []
