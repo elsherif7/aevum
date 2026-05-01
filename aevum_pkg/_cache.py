@@ -1,5 +1,4 @@
 import hashlib
-import hmac
 import json
 import os
 import tempfile
@@ -43,9 +42,9 @@ def _normalise_path(p):
                 continue
         
         if not is_allowed and os.name == "nt":
-            # On Windows, allow drives D-J
+            # On Windows, allow any valid drive letter
             drive = resolved.drive
-            if drive and drive[0].upper() in "DEFGHIJ":
+            if drive and len(drive) >= 2 and drive[1] == ':' and drive[0].upper().isalpha():
                 is_allowed = True
         
         if not is_allowed:
@@ -151,28 +150,24 @@ def load_cache(root):
 
 def get_cached_duration(path: Path, cache: dict) -> tuple:
     """
-    Get duration from cache with constant-time comparison.
-    
-    Security: Uses hmac.compare_digest for timing-attack resistance.
-    
+    Get duration from cache.
+
     Returns:
         (duration, hit) tuple - (0.0, False) if not in cache
     """
     key = str(path.resolve())
     if os.name == "nt":
         key = key.lower()
-    
-    # Security: Use constant-time comparison to prevent timing attacks
-    for cache_key, entry in cache.items():
-        if hmac.compare_digest(key.encode(), cache_key.encode()):
-            try:
-                st = path.stat()
-                if st.st_mtime == entry["mtime"] and st.st_size == entry["size"]:
-                    return entry["duration"], True
-            except OSError:
-                pass
-            break
-    
+
+    entry = cache.get(key)
+    if entry:
+        try:
+            st = path.stat()
+            if st.st_mtime == entry["mtime"] and st.st_size == entry["size"]:
+                return entry["duration"], True
+        except OSError:
+            pass
+
     return 0.0, False
 
 

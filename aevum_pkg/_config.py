@@ -19,6 +19,7 @@ CONFIG_DEFAULTS = {
     "cache_enabled": True,
     "export_dir":    "",
     "aliases":       {},
+    "project_dir":   "",
 }
 
 
@@ -298,7 +299,19 @@ def cmd_config(args, cfg):
         default = CONFIG_DEFAULTS[key]
         try:
             if isinstance(default, bool):
-                coerced = value.lower() in ("1", "true", "yes")
+                _true  = {"1", "true", "yes", "on"}
+                _false = {"0", "false", "no", "off"}
+                if value.lower() in _true:
+                    coerced = True
+                elif value.lower() in _false:
+                    coerced = False
+                else:
+                    print(
+                        f"  {clr.R}[ERROR]{clr.RST} Invalid value for {key}: '{value}'. "
+                        f"Use true/false, yes/no, on/off, or 1/0.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
             elif isinstance(default, int):
                 coerced = int(value)
             else:
