@@ -1,6 +1,5 @@
 """
 aevum_pkg — Media Library Scanner
-
 Public API surface.
 
 Issue 31 fix: only genuinely public symbols are re-exported here.
@@ -62,6 +61,8 @@ From _color:
     LINE                — separator line string
     clear               — clear-screen helper
 """
+
+__version__ = "1.0.0"
 
 # ── Scan ────────────────────────────────────────────────────────────────────
 from ._scan import (
@@ -160,4 +161,6 @@ __all__ = [
     "clr", "LINE", "clear",
     # exit codes
     "_exit",
+    # version
+    "__version__",
 ]
