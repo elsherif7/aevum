@@ -1,6 +1,9 @@
+import fnmatch
 import os
+import re
 import struct
 import subprocess
+import sys
 import threading
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,7 +24,7 @@ video_extensions = (
     '.mts', '.m2v', '.f4v', '.f4p', '.nsv', '.roq',
     '.yuv', '.mxf', '.drc', '.gifv', '.mng', '.qt',
     '.rm', '.amv', '.svi', '.3g2', '.mpe', '.mpv',
-    '.m1v', '.m2p', '.m4p', '.mpeg1', '.mpeg2',     # Issue 1: removed duplicate .mp2
+    '.m1v', '.m2p', '.m4p', '.mpeg1', '.mpeg2',
     '.mpeg4', '.h264', '.h265', '.hevc', '.avchd',
     '.ogm', '.ogx', '.dv', '.dvr', '.dvr-ms', '.rec',
     '.wtv', '.bdmv', '.iso', '.evo', '.ifo', '.mod',
@@ -41,12 +44,15 @@ video_extensions = (
     '.imy', '.mp1',
 )
 
+# Frozenset of the same extensions for O(1) membership testing in hot paths.
+_VIDEO_EXT_SET = frozenset(video_extensions)
+
 
 def check_ffprobe():
     try:
         subprocess.run(['ffprobe', '-version'], capture_output=True)
         return True
-    except FileNotFoundError:
+    except (FileNotFoundError, OSError):
         return False
 
 
@@ -153,7 +159,7 @@ def _read_mkv_duration(path):
 
         timescale_ns = 1_000_000
         i = 0
-        while i < len(data) - 4:
+        while i + 4 <= len(data):
             eid, i   = read_id(data, i)
             esize, i = read_vint(data, i)
             if eid == 0x1549A966:  # Info
@@ -173,7 +179,7 @@ def _read_mkv_duration(path):
                             duration = struct.unpack('>d', raw)[0]
                         # else: unknown size — skip, fall through to ffprobe
                     if fsize == 0:
-                        break
+                        continue  # zero-length field is valid; don't abort the block
                     j += fsize
                 if duration is not None:
                     return duration * timescale_ns / 1_000_000_000
@@ -262,35 +268,32 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
     Issue 4 fix: files returning 0.0 duration are excluded so the reported
     file count matches real, readable media files.
     """
-    # Security: Track visited inodes to detect symlink loops
     if _visited_inodes is None:
         _visited_inodes = set()
-    
-    root = Path(root).resolve()  # Resolve symlinks in root path
-    
-    # Security: Check for symlink loops using inode tracking
+
+    root = Path(root).resolve()
+
     try:
-        root_stat = root.stat()
+        root_stat  = root.stat()
         root_inode = (root_stat.st_dev, root_stat.st_ino)
-        
+
         if root_inode in _visited_inodes:
-            import sys
             print(f"  Warning: Symlink loop detected: {root}", file=sys.stderr)
             return 0.0, 0, ([], [], 0), {}, {}, 0
-        
+
         _visited_inodes.add(root_inode)
     except OSError as e:
-        import sys
         print(f"  Warning: Cannot access {root}: {e}", file=sys.stderr)
         return 0.0, 0, ([], [], 0), {}, {}, 0
-    
+
     durations = {}
     sizes     = {}
     done      = 0
     total     = 0
     hits      = 0
     lock      = threading.Lock()
-    cache     = cache or {}
+    if cache is None:
+        cache = {}
     
     # Security: Maximum recursion depth to prevent DoS
     MAX_DEPTH = 30
@@ -382,7 +385,7 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
                                     if entry.is_dir(follow_symlinks=True):
                                         stack.append((entry.path, depth + 1))
                                     elif entry.is_file(follow_symlinks=True):
-                                        if Path(entry.name).suffix.lower() in video_extensions:
+                                        if os.path.splitext(entry.name)[1].lower() in _VIDEO_EXT_SET:
                                             p = Path(entry.path)
                                             with lock:
                                                 total += 1
@@ -392,7 +395,7 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
                                     if entry.is_dir(follow_symlinks=False):
                                         stack.append((entry.path, depth + 1))
                                     elif entry.is_file(follow_symlinks=False):
-                                        if Path(entry.name).suffix.lower() in video_extensions:
+                                        if os.path.splitext(entry.name)[1].lower() in _VIDEO_EXT_SET:
                                             p = Path(entry.path)
                                             with lock:
                                                 total += 1
@@ -506,7 +509,14 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None):
                 continue
             child_subs, child_direct = build(child)
             subfolders.append((child.name, secs, count, fbytes, direct_count, child_subs, child_direct))
-        direct = sorted(folder_direct.get(node, []), key=lambda x: x[0].name.lower())
+        direct = sorted(
+            folder_direct.get(node, []),
+            key=lambda x: (
+                x[1]              if sort_field == "duration" else
+                x[0].name.lower()
+            ),
+            reverse=sort_rev,
+        )
         return subfolders, direct
 
     subfolders, direct = build(root)
@@ -528,8 +538,7 @@ def _run_scan(folder, on_progress, sort_by="name", use_cache=True):
         stop_event.set()
         raise
     total_sec, total_count, tree, durations, sizes, hits = result
-    newly_probed = total_count - hits
-    if durations and newly_probed > 0:
+    if durations and hits < len(durations):
         save_cache(folder, durations)
     return result
 
@@ -539,8 +548,8 @@ def parse_duration_arg(s):
     Parse a human duration string into seconds (float).
     Accepts: 30s, 5m, 1h, 1h30m, 90m, 1:30:00, 5400, 1.5h
     Raises ValueError if the string cannot be parsed.
+    Note: colon format treats first group as hours e.g. 1:30 = 1h30m = 5400s.
     """
-    import re
     s = s.strip().lower()
     try:
         return float(s)
@@ -573,7 +582,6 @@ def apply_filters(durations, sizes, filters):
       folder_pat    glob pattern matched against path.parent.name (case-insensitive)
     Returns (filtered_durations, filtered_sizes).
     """
-    import fnmatch
     min_dur    = filters.get('min_duration')
     max_dur    = filters.get('max_duration')
     exts       = filters.get('exts')
