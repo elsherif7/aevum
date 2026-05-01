@@ -43,13 +43,25 @@ def _load_yt_video_cache():
 
 
 def _save_yt_video_cache(cache):
-    """Persist the per-video cache. Failures are silently ignored."""
+    """Persist the per-video cache atomically. Failures are silently ignored."""
     try:
+        import tempfile
         YT_VCACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        YT_VCACHE_FILE.write_text(
-            json.dumps(cache, indent=None, separators=(',', ':')),
-            encoding="utf-8",
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            dir=YT_VCACHE_FILE.parent,
+            prefix=".tmp_ytcache_",
+            suffix=".json",
         )
+        try:
+            with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
+                f.write(json.dumps(cache, indent=None, separators=(',', ':')))
+            os.replace(tmp_path, YT_VCACHE_FILE)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     except Exception:
         pass
 
@@ -69,10 +81,10 @@ def _get_current_date_pt():
     try:
         import zoneinfo
         pt_now = datetime.datetime.now(zoneinfo.ZoneInfo("America/Los_Angeles"))
-    except (ImportError, Exception):
+    except Exception:
         # Python 3.8 fallback: approximate PDT/PST with -7 (slightly better
         # than always -8, since most of the year the US is on DST).
-        utc_now = datetime.datetime.utcnow()
+        utc_now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         pt_now  = utc_now - datetime.timedelta(hours=7)
     return pt_now.strftime("%Y-%m-%d")
 
@@ -142,7 +154,18 @@ def _merge_into_cache(cache, new_entries_by_id):
 # ---------------------------------------------------------------------------
 
 def _is_url(s):
-    return s.startswith(('http://', 'https://')) or s.startswith('www.')
+    if s.startswith(('http://', 'https://')):
+        return True
+    if s.startswith('www.'):
+        return True  # _parse_yt_url will prepend scheme if needed
+    return False
+
+
+def _normalise_url(url):
+    """Ensure URL has a scheme so urlparse works correctly."""
+    if url.startswith('www.'):
+        return 'https://' + url
+    return url
 
 
 def _parse_iso8601_duration(d):
@@ -171,7 +194,8 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
     if quota_cost is None:
         quota_cost = YT_QUOTA_COST.get(endpoint, 1)
 
-    params['key'] = api_key
+    # Copy params to avoid mutating the caller's dict
+    params = {**params, 'key': api_key}
     url = f"{YT_API_BASE}/{endpoint}?{urllib.parse.urlencode(params)}"
 
     try:
@@ -240,7 +264,7 @@ def _parse_yt_url(url):
     p          = urlparse(url)
     qs         = parse_qs(p.query)
     path_parts = [x for x in p.path.split('/') if x]
-    netloc     = p.netloc.replace('www.', '')
+    netloc     = p.netloc.removeprefix('www.')
 
     # Issue 12: added music.youtube.com
     if netloc not in ('youtube.com', 'youtu.be', 'm.youtube.com', 'music.youtube.com'):
@@ -373,8 +397,7 @@ def _fetch_with_cache(video_ids, api_key, cache, on_progress=None):
         # — no need to reload from disk here.
 
     if not new_ids and on_progress and total > 0:
-        for i in range(1, total + 1):
-            on_progress(i, total)
+        on_progress(total, total)
 
     entries = []
     for vid in video_ids:
@@ -435,7 +458,7 @@ def scan_url(url, on_progress=None, use_cache=True):
                 "Rate limit exceeded. Please try again later."
             )
 
-    kind, vid_id = _parse_yt_url(url)
+    kind, vid_id = _parse_yt_url(_normalise_url(url))
     if kind is None:
         raise ValueError(f"Could not parse YouTube URL: {url}")
 

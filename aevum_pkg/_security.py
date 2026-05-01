@@ -6,6 +6,7 @@ to prevent command injection, path traversal, and unauthorized access.
 """
 
 import os
+import re
 from pathlib import Path
 from typing import List
 
@@ -18,14 +19,23 @@ def _get_allowed_scan_roots() -> List[Path]:
         Path("/media"),
         Path("/mnt"),
     ]
-    
-    # On Windows, allow any valid drive letter
+
     if os.name == "nt":
-        for drive_letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-            drive_path = Path(f"{drive_letter}:\\")
-            if drive_path.exists():
-                roots.append(drive_path)
-    
+        # Only probe drives that the OS reports as existing — avoids hanging
+        # on slow network drives or timing out on unmapped letters.
+        try:
+            import ctypes
+            drives = ctypes.windll.kernel32.GetLogicalDrives()
+            for i, letter in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ"):
+                if drives & (1 << i):
+                    roots.append(Path(f"{letter}:\\"))
+        except Exception:
+            # ctypes unavailable — fall back to checking all letters
+            for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+                drive_path = Path(f"{letter}:\\")
+                if drive_path.exists():
+                    roots.append(drive_path)
+
     return [r for r in roots if r.exists()]
 
 
@@ -123,6 +133,10 @@ def validate_export_path(out_path: str, scan_folder: Path) -> Path:
     """
     out_path = Path(out_path).resolve()
 
+    # Parent directory must exist — the file itself need not.
+    if not out_path.parent.exists():
+        raise ValueError(f"Output directory does not exist: {out_path.parent}")
+
     # Block writes into known system directories
     system_roots = []
     if os.name == "nt":
@@ -202,8 +216,7 @@ def validate_alias_name(name: str) -> str:
         )
     
     # Only allow alphanumeric and safe characters
-    import re
-    if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+    if not re.fullmatch(r'[a-zA-Z0-9_-]+', name):
         raise ValueError(
             "Alias name can only contain letters, numbers, hyphens, and underscores"
         )
