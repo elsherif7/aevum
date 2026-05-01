@@ -56,7 +56,7 @@ def save_api_key(api_key: str) -> bool:
     Returns:
         True if saved successfully, False otherwise
     """
-    if not api_key or len(api_key) < 10:  # Changed from 20 to 10 for flexibility
+    if not api_key or len(api_key) < 30:
         print(f"  Error: Invalid API key format", file=sys.stderr)
         return False
     

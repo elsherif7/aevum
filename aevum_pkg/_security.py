@@ -19,10 +19,10 @@ def _get_allowed_scan_roots() -> List[Path]:
         Path("/mnt"),
     ]
     
-    # On Windows, add common media drives
+    # On Windows, allow any valid drive letter
     if os.name == "nt":
-        for drive in "DEFGHIJ":
-            drive_path = Path(f"{drive}:\\")
+        for drive_letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            drive_path = Path(f"{drive_letter}:\\")
             if drive_path.exists():
                 roots.append(drive_path)
     
@@ -65,19 +65,14 @@ def validate_scan_path(folder_path: str) -> Path:
             f"Cannot scan {path}. Access restricted to user directories."
         )
     
-    # Prevent scanning sensitive directories even under allowed roots
-    forbidden_patterns = [
-        ".ssh",
-        ".gnupg", 
-        ".password-store",
-        "wallet",
-        "keychain",
-        ".aws",
-        ".kube",
-    ]
-    
+    # Prevent scanning sensitive directories even under allowed roots.
+    # Match against the exact folder name (case-insensitive) or dotfile form.
+    forbidden_names = {
+        ".ssh", ".gnupg", ".password-store", "wallet",
+        "keychain", ".aws", ".kube",
+    }
     for part in path.parts:
-        if any(pattern in part.lower() for pattern in forbidden_patterns):
+        if part.lower() in forbidden_names:
             raise PermissionError(
                 f"Cannot scan sensitive directory: {part}"
             )
@@ -109,51 +104,49 @@ def _is_relative_to(path: Path, root: Path) -> bool:
 def validate_export_path(out_path: str, scan_folder: Path) -> Path:
     """
     Validate export destination path to prevent arbitrary writes.
-    
-    Security: Prevents path traversal and overwriting system files.
-    
+
+    Security: Blocks known system directories rather than whitelisting user
+    dirs. The old whitelist (Desktop/Documents/Downloads + scan sibling) was
+    too restrictive — users routinely export to custom locations on other
+    drives — and always silently fell back to the Desktop.
+
     Args:
         out_path: User-provided output path
         scan_folder: The folder being scanned (for context)
-        
+
     Returns:
         Validated Path object
-        
+
     Raises:
-        PermissionError: If path is outside allowed directories
+        PermissionError: If path targets a system directory
         ValueError: If file extension is invalid
     """
     out_path = Path(out_path).resolve()
-    
-    # Define allowed export directories
-    allowed_dirs = [
-        Path.home() / "Desktop",
-        Path.home() / "Documents",
-        Path.home() / "Downloads",
-        scan_folder.parent,  # Allow sibling to scan folder
-    ]
-    
-    # Check if output path is under allowed directories
-    is_allowed = any(
-        _is_relative_to(out_path, allowed_dir)
-        for allowed_dir in allowed_dirs
-        if allowed_dir.exists()
-    )
-    
-    if not is_allowed:
-        raise PermissionError(
-            f"Cannot write to {out_path}. "
-            f"Only user directories are allowed."
-        )
-    
+
+    # Block writes into known system directories
+    system_roots = []
+    if os.name == "nt":
+        win_dir = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+        system_roots = [win_dir, Path(r"C:\Program Files"), Path(r"C:\Program Files (x86)")]
+    else:
+        system_roots = [Path("/etc"), Path("/usr"), Path("/bin"), Path("/sbin"),
+                        Path("/lib"), Path("/lib64"), Path("/boot"), Path("/sys"),
+                        Path("/proc")]
+
+    for sysroot in system_roots:
+        if _is_relative_to(out_path, sysroot):
+            raise PermissionError(
+                f"Cannot write to system directory: {out_path}"
+            )
+
     # Validate file extension
     allowed_extensions = {'.txt', '.csv', '.json'}
     if out_path.suffix.lower() not in allowed_extensions:
         raise ValueError(
             f"Invalid extension {out_path.suffix}. "
-            f"Allowed: {', '.join(allowed_extensions)}"
+            f"Allowed: {', '.join(sorted(allowed_extensions))}"
         )
-    
+
     return out_path
 
 
