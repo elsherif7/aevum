@@ -8,7 +8,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from ._cache import load_cache, save_cache
 
 # How many ffprobe processes to run at once.
-MAX_WORKERS = min(32, (os.cpu_count() or 4) * 4)
+# ffprobe is both CPU and disk-bound; scaling beyond 2× cores gives no gain
+# on spinning disks and hurts on SSDs too. Cap at 8 for safety.
+MAX_WORKERS = min(8, (os.cpu_count() or 4) * 2)
 
 video_extensions = (
     # Common video
@@ -94,8 +96,8 @@ def _read_mp4_duration(path):
                             if len(box) < min_size:
                                 break
                             if version == 1:
-                                ts  = struct.unpack_from('>I', box, 20)[0]
-                                dur = struct.unpack_from('>Q', box, 24)[0]
+                                ts  = struct.unpack_from('>I', box, 16)[0]
+                                dur = struct.unpack_from('>Q', box, 20)[0]
                             else:
                                 ts  = struct.unpack_from('>I', box, 12)[0]
                                 dur = struct.unpack_from('>I', box, 16)[0]
@@ -164,8 +166,12 @@ def _read_mkv_duration(path):
                     if fid == 0x2AD7B1:
                         timescale_ns = int.from_bytes(data[j:j+fsize], 'big')
                     elif fid == 0x4489:
-                        raw      = data[j:j+fsize]
-                        duration = struct.unpack('>f', raw)[0] if fsize == 4 else struct.unpack('>d', raw)[0]
+                        raw = data[j:j+fsize]
+                        if fsize == 4:
+                            duration = struct.unpack('>f', raw)[0]
+                        elif fsize == 8:
+                            duration = struct.unpack('>d', raw)[0]
+                        # else: unknown size — skip, fall through to ffprobe
                     if fsize == 0:
                         break
                     j += fsize
@@ -305,9 +311,10 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
                     with lock:
                         done += 1
                         hits += 1
-                        _snap = total      # Issue 2: read total under lock
-                    if on_progress and _snap > 0:
-                        on_progress(done, _snap)
+                        _snap_done  = done   # read both under lock
+                        _snap_total = total
+                    if on_progress and _snap_total > 0:
+                        on_progress(_snap_done, _snap_total)
                     return path, entry["duration"], int(entry.get("size", 0))
             except OSError:
                 pass
@@ -318,9 +325,10 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
             file_size = 0
         with lock:
             done += 1
-            _snap = total                  # Issue 2: read total under lock
-        if on_progress and _snap > 0:
-            on_progress(done, _snap)
+            _snap_done  = done   # read both under lock
+            _snap_total = total
+        if on_progress and _snap_total > 0:
+            on_progress(_snap_done, _snap_total)
         return path, sec, file_size
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
@@ -483,7 +491,7 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None):
             key=lambda p: (
                 folder_secs.get(p, 0.0)   if sort_field == "duration" else
                 folder_count.get(p, 0)    if sort_field == "count"    else
-                p
+                p.name.lower()
             ),
             reverse=sort_rev,
         )
@@ -520,7 +528,8 @@ def _run_scan(folder, on_progress, sort_by="name", use_cache=True):
         stop_event.set()
         raise
     total_sec, total_count, tree, durations, sizes, hits = result
-    if durations:
+    newly_probed = total_count - hits
+    if durations and newly_probed > 0:
         save_cache(folder, durations)
     return result
 
