@@ -6,6 +6,14 @@ from pathlib import Path
 
 from ._paths import CACHE_DIR
 
+# Validated field schema for cache entries — defined once at module level.
+_CACHE_ENTRY_FIELDS = {
+    "path":     str,
+    "mtime":    (int, float),
+    "size":     int,
+    "duration": (int, float),
+}
+
 
 def _normalise_path(p):
     """
@@ -111,16 +119,9 @@ def load_cache(root):
             if not isinstance(entry, dict):
                 continue
             
-            required_fields = {
-                "path": str,
-                "mtime": (int, float),
-                "size": int,
-                "duration": (int, float),
-            }
-            
             # Check all required fields exist and have correct types
             valid = True
-            for field, expected_type in required_fields.items():
+            for field, expected_type in _CACHE_ENTRY_FIELDS.items():
                 if field not in entry:
                     valid = False
                     break
@@ -160,7 +161,7 @@ def get_cached_duration(path: Path, cache: dict) -> tuple:
         key = key.lower()
 
     entry = cache.get(key)
-    if entry:
+    if entry is not None:
         try:
             st = path.stat()
             if st.st_mtime == entry["mtime"] and st.st_size == entry["size"]:
@@ -213,10 +214,10 @@ def save_cache(root, durations):
             
             # Set restrictive permissions (user read/write only)
             os.chmod(temp_path, 0o600)
-            
-            # Atomic rename
-            if os.name == 'nt' and cache_path.exists():
-                cache_path.unlink()
+
+            # Atomic rename — os.replace is atomic on all platforms including
+            # modern Windows (Vista+); the explicit unlink is not needed and
+            # widens the race window, so it has been removed.
             os.replace(temp_path, cache_path)
         except Exception:
             # Clean up temp file on error

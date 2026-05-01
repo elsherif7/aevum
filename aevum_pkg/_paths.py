@@ -22,7 +22,7 @@ def appdata_dir() -> Path:
     The directory is NOT created here — callers must mkdir as needed.
     """
     if os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home()))
+        base = Path(os.environ.get("LOCALAPPDATA", str(Path.home())))
     else:
         # XDG Base Directory Specification
         base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))

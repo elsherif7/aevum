@@ -1,6 +1,5 @@
 import json
 import os
-import subprocess
 import sys
 import types
 from pathlib import Path
@@ -71,6 +70,10 @@ def load_config():
                                     if len(k) <= 50 and len(v) <= 4096:
                                         clean_aliases[k] = v
                             validated[key] = clean_aliases
+                    elif key == "project_dir":
+                        # Must be empty or an absolute path
+                        if not value or Path(value).is_absolute():
+                            validated[key] = value
                     else:
                         validated[key] = value
         
@@ -81,17 +84,17 @@ def load_config():
 
 def save_config(cfg):
     """
-    Persist config to disk.
+    Persist config to disk atomically (temp file + rename).
 
-    Issue 25 note: write failures are printed to stderr and propagated back
-    to the caller as False so the caller can decide whether to warn the user
-    more prominently (e.g. the interactive REPL can print a second reminder).
-    Previously the error was printed but the function always returned None,
-    giving the caller no way to react.
+    A non-atomic write_text would corrupt the config on a mid-write crash.
+    Issue 25 note: returns False on failure so callers can react.
     """
     try:
+        import tempfile
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        CONFIG_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        tmp = CONFIG_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        os.replace(tmp, CONFIG_FILE)
         return True
     except Exception as e:
         print(f"  {clr.R}Config write failed:{clr.RST} {e}", file=sys.stderr)
@@ -103,6 +106,7 @@ def _config_key_valid(key):
 
 
 def cmd_doctor(cfg):
+    import subprocess
     print()
     print(f"  {clr.C}{LINE}{clr.RST}")
     print(f"  {clr.C}  Aevum Doctor{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}Environment Check{clr.RST}")
@@ -163,10 +167,10 @@ def cmd_cache(args):
         return
 
     if action == "list":
-        if not CACHE_DIR.exists() or not list(CACHE_DIR.glob("*.json")):
+        files = sorted(CACHE_DIR.glob("*.json")) if CACHE_DIR.exists() else []
+        if not files:
             print(f"  {clr.DIM}Cache is empty.{clr.RST}  {clr.W}{CACHE_DIR}{clr.RST}")
             return
-        files = sorted(CACHE_DIR.glob("*.json"))
         print()
         print(f"  {clr.C}{LINE}{clr.RST}")
         print(f"  {clr.W}  Cache  {clr.DIM}|{clr.RST}  {CACHE_DIR}{clr.RST}")
@@ -178,7 +182,7 @@ def cmd_cache(args):
             total += sz
             try:
                 data        = json.loads(f.read_text(encoding="utf-8"))
-                folder_path = data[0]["path"].rsplit(os.sep, 1)[0] if data else "?"
+                folder_path = str(Path(data[0]["path"]).parent) if data else "?"
                 count       = len(data)
             except Exception:
                 folder_path = "?"
@@ -314,6 +318,12 @@ def cmd_config(args, cfg):
                     sys.exit(1)
             elif isinstance(default, int):
                 coerced = int(value)
+                if key == "top" and not (0 <= coerced <= 100):
+                    print(
+                        f"  {clr.R}[ERROR]{clr.RST} 'top' must be between 0 and 100.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
             else:
                 coerced = value
         except (ValueError, AttributeError):
