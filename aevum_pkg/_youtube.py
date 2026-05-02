@@ -7,7 +7,40 @@ from pathlib import Path
 from ._color import clr
 from ._paths import YT_KEY_FILE, YT_QUOTA_FILE, YT_VCACHE_FILE
 from ._apikey import save_api_key, load_api_key, delete_api_key, get_storage_method
-from ._ratelimit import youtube_limiter
+# ── Rate limiting (inlined from _ratelimit.py) ───────────────────────
+import time as _time_mod
+from collections import deque as _deque
+from threading import Lock as _Lock
+
+class _RateLimiter:
+    """Token bucket rate limiter — 100 req/hr to stay well under YouTube quota."""
+    def __init__(self, max_calls: int, time_window: int):
+        self.max_calls   = max_calls
+        self.time_window = time_window
+        self.calls       = _deque()
+        self.lock        = _Lock()
+
+    def allow_request(self) -> bool:
+        with self.lock:
+            now = _time_mod.time()
+            while self.calls and self.calls[0] < now - self.time_window:
+                self.calls.popleft()
+            if len(self.calls) < self.max_calls:
+                self.calls.append(now)
+                return True
+            return False
+
+    def wait_time(self) -> float:
+        with self.lock:
+            if not self.calls:
+                return 0.0
+            return max(0.0, (self.calls[0] + self.time_window) - _time_mod.time())
+
+    def reset(self):
+        with self.lock:
+            self.calls.clear()
+
+youtube_limiter = _RateLimiter(max_calls=100, time_window=3600)
 
 # Issue 13: file now uses LF line endings (normalised from original CRLF).
 

@@ -9,7 +9,39 @@ from datetime import datetime
 from pathlib import Path
 
 from ._scan import format_duration, format_size
-from ._security import validate_export_path
+# ── Path validation (inlined from _security.py) ──────────────────────
+def _is_relative_to(path, root):
+    try:
+        return path.is_relative_to(root)
+    except AttributeError:
+        try:
+            path.relative_to(root)
+            return True
+        except ValueError:
+            return False
+
+def validate_export_path(out_path: str, scan_folder) -> "Path":
+    """Validate export destination — blocks system dirs, checks extension."""
+    import os as _os
+    out_path = Path(out_path).resolve()
+    if not out_path.parent.exists():
+        raise ValueError(f"Output directory does not exist: {out_path.parent}")
+    system_roots = []
+    if _os.name == "nt":
+        win_dir = Path(_os.environ.get("SystemRoot", r"C:\Windows"))
+        system_roots = [win_dir, Path(r"C:\Program Files"), Path(r"C:\Program Files (x86)")]
+    else:
+        system_roots = [Path("/etc"), Path("/usr"), Path("/bin"), Path("/sbin"),
+                        Path("/lib"), Path("/lib64"), Path("/boot"), Path("/sys"), Path("/proc")]
+    for sysroot in system_roots:
+        if _is_relative_to(out_path, sysroot):
+            raise PermissionError(f"Cannot write to system directory: {out_path}")
+    allowed_extensions = {".txt", ".csv", ".json"}
+    if out_path.suffix.lower() not in allowed_extensions:
+        raise ValueError(
+            f"Invalid extension {out_path.suffix}. Allowed: {', '.join(sorted(allowed_extensions))}"
+        )
+    return out_path
 
 
 def sanitize_csv_field(value: str) -> str:

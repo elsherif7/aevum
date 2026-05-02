@@ -32,10 +32,6 @@ From _dupes:
     find_duplicates     — detect duplicate files by size + hash
     print_duplicates    — print duplicate groups to stdout
 
-From _compare:
-    run_compare         — scan two folders for comparison
-    print_comparison    — print the side-by-side comparison
-
 From _export:
     export_results      — write scan results to TXT/CSV/JSON
     export_url_results  — write YouTube scan results to TXT/CSV/JSON
@@ -49,7 +45,7 @@ From _cache:
     load_cache          — read the duration cache for a folder
     save_cache          — write the duration cache for a folder
 
-From _paths:
+From _config (also owns path constants):
     APPDATA             — platform-correct Aevum data directory (Path)
     CACHE_DIR           — cache subdirectory (Path)
     CONFIG_FILE         — config file path (Path)
@@ -96,12 +92,6 @@ from ._dupes import (
     print_duplicates,
 )
 
-# ── Compare ─────────────────────────────────────────────────────────────────
-from ._compare import (
-    run_compare,
-    print_comparison,
-)
-
 # ── Export ───────────────────────────────────────────────────────────────────
 from ._export import (
     export_results,
@@ -122,17 +112,10 @@ from ._cache import (
 )
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-from ._paths import (
-    APPDATA,
-    CACHE_DIR,
-    CONFIG_FILE,
-)
+from ._paths import APPDATA, CACHE_DIR, CONFIG_FILE
 
 # ── Color ────────────────────────────────────────────────────────────────────
 from ._color import clr, LINE, clear
-
-# ── Exit codes (re-exported as a module for external scripts) ────────────────
-from . import _exit
 
 __all__ = [
     # scan
@@ -144,8 +127,6 @@ __all__ = [
     "print_results", "print_url_results",
     # dupes
     "find_duplicates", "print_duplicates",
-    # compare
-    "run_compare", "print_comparison",
     # export
     "export_results", "export_url_results",
     # config
@@ -156,8 +137,6 @@ __all__ = [
     "APPDATA", "CACHE_DIR", "CONFIG_FILE",
     # color
     "clr", "LINE", "clear",
-    # exit codes
-    "_exit",
     # version
     "__version__",
 ]

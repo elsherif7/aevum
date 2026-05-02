@@ -4,8 +4,7 @@ import sys
 from pathlib import Path
 
 from ._color   import clr, LINE
-from ._paths   import CACHE_DIR, CONFIG_FILE          # Issue 23: central path
-from ._cache   import _cache_key
+from ._paths import APPDATA, CACHE_DIR, CONFIG_FILE, YT_KEY_FILE, YT_QUOTA_FILE, YT_VCACHE_FILE
 from ._scan    import format_size, check_ffprobe
 from ._apikey  import load_api_key, save_api_key, get_storage_method
 from ._youtube import prompt_api_key, yt_cache_stats, yt_cache_clear
@@ -208,6 +207,7 @@ def cmd_cache(args):
     if action == "clear":
         target_folder = getattr(args, "folder", None)
         if target_folder:
+            from ._cache import _cache_key
             key = _cache_key(target_folder)
             if key.exists():
                 key.unlink()
