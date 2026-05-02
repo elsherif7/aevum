@@ -30,7 +30,7 @@ Point it at any folder or YouTube URL and instantly see the total duration — b
 - Quiet mode (`-q`) for use in pipelines
 - Persistent config system (`sort`, `top`, `no_color`, `export_dir`, etc.)
 - Clean, colored terminal UI with `--no-color` for plain output
-- Interactive REPL mode and full headless CLI with subcommands
+- Full CLI with subcommands
 - Fuzzy-match typo suggestions for unknown commands and sort fields
 
 ---
@@ -80,15 +80,7 @@ pip uninstall aevum
 
 ## Usage
 
-### Interactive mode (REPL)
-
-```bash
-aevum
-```
-
-Type any folder path or YouTube URL at the prompt. After each scan a menu appears with options to scan again, sort, export, check duplicates, show files, or quit.
-
-### Headless mode — scan a folder
+### Scan a folder
 
 ```bash
 aevum scan D:\Movies
@@ -194,7 +186,7 @@ aevum version           # Print version
 ## All commands
 
 ```
-aevum                           Open interactive shell
+aevum                           Show help and exit
 aevum <path|url>                Quick scan (shorthand for 'aevum scan')
 aevum scan      <path|url>      Scan one or more folders or YouTube URLs
 aevum compare   <path> <path>   Compare two libraries side-by-side
@@ -342,23 +334,17 @@ Aevum/
   .gitignore
   aevum_pkg/
     __init__.py      — public API surface
-    _cli.py          — main(), arg parsing, REPL, subcommand dispatch
+    _cli.py          — main(), arg parsing, subcommand dispatch
     _scan.py         — ffprobe, native parsers, tree builder, filters
     _youtube.py      — YouTube Data API v3 + per-video cache + quota tracking
     _display.py      — all print/display functions
     _dupes.py        — duplicate detection (BLAKE2b)
-    _compare.py      — folder comparison
-    _export.py       — TXT/CSV/JSON export
+    _export.py       — TXT/CSV/JSON export + path validation
     _config.py       — config, cache commands, doctor
     _cache.py        — duration cache read/write
     _paths.py        — platform-aware AppData/XDG path resolution
     _color.py        — ANSI color singleton (clr)
-    _exit.py         — named exit codes
-    _security.py     — path validation & input sanitization
     _apikey.py       — encrypted API key storage (keyring → Fernet → plaintext)
-    _ratelimit.py    — YouTube API rate limiting (token bucket, 100 req/hr)
-    _errors.py       — secure error handling & logging
-    _audit.py        — security audit logging
 ```
 
 ---
@@ -372,5 +358,4 @@ Aevum/
 - Symlink loop detection (inode tracking) and max recursion depth (30 levels)
 - YouTube API rate-limited to 100 requests/hour via token bucket
 - Atomic file writes (temp → rename) prevent race conditions on cache and config
-- Security events logged locally to `%LOCALAPPDATA%\Aevum\audit.log` (Windows) or `~/.local/share/Aevum/audit.log` (Linux/macOS)
 - No telemetry — nothing is sent anywhere except the YouTube API when scanning URLs
