@@ -15,14 +15,15 @@ Point it at any folder or YouTube URL and instantly see the total duration — b
 - Duration cache — repeat scans are near-instant (keyed by mtime + size)
 - Fast native MP4/MKV/WebM header parsing (ffprobe only as fallback)
 - Parallel scanning with a configurable thread pool
-- Duplicate detection by size + partial SHA-1 hash
+- Duplicate detection by size + partial BLAKE2b hash
 - Folder comparison mode — diff two libraries side by side
 - Sortable tree (by name, duration, or count; ascending or descending)
 - Filter by duration range, extension, or subfolder name pattern
 - Scan multiple folders at once, optionally merged into one grand total
 - Watch mode — re-scan automatically when folder contents change
 - Export results to TXT, CSV, or JSON
-- YouTube support — scan any video, playlist, or channel by URL
+- YouTube support — scan any video, playlist, or channel by URL (YouTube Data API v3 + yt-dlp fallback)
+- Per-video YouTube cache — previously fetched videos skip the API entirely
 - Path alias system — define short names for long folder paths
 - Self-update command (`aevum update` / `aevum -U`)
 - Machine-readable JSON output mode (`--json`) for scripting
@@ -39,37 +40,39 @@ Point it at any folder or YouTube URL and instantly see the total duration — b
 - **Python 3.8+** — https://python.org
 - **FFmpeg** (includes `ffprobe`) — https://ffmpeg.org/download.html  
   After downloading, make sure FFmpeg is on your system PATH.
+- **Optional**: `keyring` and `cryptography` for encrypted API key storage
 
 ---
 
 ## Installation
 
-```
+```bash
 git clone https://github.com/elsherif7/aevum
 cd aevum
 pip install .
-```
 
-That's it. `aevum` will work from any terminal window after install.
+# Optional: encrypted API key storage
+pip install keyring cryptography
+```
 
 ### Update
 
-```
+```bash
 aevum update
 ```
 
-Shows a clean animated progress bar instead of pip's verbose output. Aevum remembers your project folder path after the first update so you can run `aevum update` from anywhere.
+Shows a clean animated progress bar. Aevum saves your project folder path after the first update so you can run `aevum update` from anywhere. Use `aevum clearpath` to reset this.
 
-Or manually from the project folder:
+Or manually:
 
-```
+```bash
 cd Aevum
 pip install . --upgrade
 ```
 
 ### Uninstall
 
-```
+```bash
 pip uninstall aevum
 ```
 
@@ -79,39 +82,40 @@ pip uninstall aevum
 
 ### Interactive mode (REPL)
 
-```
+```bash
 aevum
 ```
 
-Type any folder path or YouTube URL at the prompt. After each scan a menu appears with options to scan again, sort, export, check duplicates, or quit.
+Type any folder path or YouTube URL at the prompt. After each scan a menu appears with options to scan again, sort, export, check duplicates, show files, or quit.
 
 ### Headless mode — scan a folder
 
-```
+```bash
 aevum scan D:\Movies
 aevum scan D:\Movies --sort duration --top 20
 aevum scan D:\Movies --files --out report.csv
 aevum scan D:\Movies --min-duration 5m --ext mkv,mp4
+aevum scan D:\Movies --depth 2
 ```
 
 ### Scan multiple folders
 
-```
+```bash
 aevum scan D:\Movies E:\Shows
 aevum scan D:\Movies E:\Shows --merge
 ```
 
 ### Scan a YouTube URL
 
-```
+```bash
 aevum scan https://youtube.com/@mkbhd
 aevum scan https://youtube.com/playlist?list=PLxxx
 aevum scan https://youtu.be/dQw4w9WgXcQ
 ```
 
-### Watch mode — live re-scan
+### Watch mode
 
-```
+```bash
 aevum watch D:\Movies
 aevum watch D:\Movies --interval 10
 aevum watch D:\Downloads --ext mkv,mp4 --min-duration 5m
@@ -119,27 +123,35 @@ aevum watch D:\Downloads --ext mkv,mp4 --min-duration 5m
 
 ### Compare two folders
 
-```
+```bash
 aevum compare D:\Movies E:\Movies-Backup
 ```
 
 ### Find duplicates
 
-```
+```bash
 aevum dupes D:\Movies
 aevum dupes D:\Movies -o dupes.txt
 ```
 
+### Show all files
+
+```bash
+aevum files D:\Movies
+aevum files D:\Movies --sort name
+```
+
 ### Export results
 
-```
+```bash
 aevum export D:\Movies csv
 aevum export D:\Movies json -o D:\Reports\library.json
+aevum export https://youtube.com/@mkbhd json
 ```
 
 ### Aliases
 
-```
+```bash
 aevum alias list
 aevum alias set M D:\02-Media
 aevum alias remove M
@@ -148,7 +160,7 @@ aevum scan M
 
 ### Config
 
-```
+```bash
 aevum config list
 aevum config set sort duration:desc
 aevum config set top 20
@@ -156,39 +168,25 @@ aevum config set yt_api_key AIzaSy...
 aevum config reset
 ```
 
-### Cache management
+### Cache
 
-```
+```bash
 aevum cache list
 aevum cache clear
 aevum cache clear D:\Movies
 aevum cache path
 ```
 
-### Check YouTube API quota
+### Other commands
 
-```
-aevum quota
-```
-
-### Open AppData folder
-
-```
-aevum appdata
-```
-
-### Environment check
-
-```
-aevum doctor
-```
-
-### Self-update
-
-```
-aevum update
-aevum update --dry-run
-aevum -U
+```bash
+aevum quota             # Check YouTube API quota usage for today
+aevum appdata           # Open Aevum data folder in Explorer / Finder
+aevum doctor            # Check environment (ffprobe, API key, cache)
+aevum clearpath         # Clear saved project path used by 'aevum update'
+aevum update            # Upgrade to latest version
+aevum update --dry-run  # Preview what would run without upgrading
+aevum version           # Print version
 ```
 
 ---
@@ -239,8 +237,6 @@ Run `aevum <command> --help` for options on any command.
 | `--json` | Output machine-readable JSON to stdout |
 | `-q, --quiet` | Suppress all decorative output (errors → stderr only) |
 
----
-
 ## Watch options
 
 | Flag | Description |
@@ -252,8 +248,6 @@ Run `aevum <command> --help` for options on any command.
 | `--min-duration / --max-duration` | Duration filters (same as scan) |
 | `--ext EXT[,EXT]` | Extension filter (same as scan) |
 | `--folder PATTERN` | Subfolder name filter (same as scan) |
-
----
 
 ## Global options
 
@@ -285,23 +279,55 @@ Run `aevum <command> --help` for options on any command.
 
 Every subcommand supports `--json` for machine-readable output:
 
-```
+```bash
 aevum scan D:\Movies --json
 aevum scan D:\Movies --json | python -m json.tool
 aevum dupes D:\Movies --json | python -c "import sys,json; d=json.load(sys.stdin); print(d['groups_found'])"
+aevum doctor --json
+aevum quota --json
 aevum scan D:\Movies -q; echo "exit $?"
 ```
+
+---
+
+## Config reference
+
+Config is stored at `%LOCALAPPDATA%\Aevum\config.json` on Windows, or `~/.local/share/Aevum/config.json` on Linux/macOS.
+
+| Key | Default | Description |
+|---|---|---|
+| `sort` | `name:asc` | Default sort field and direction |
+| `top` | `10` | Default number of top files to show (0 to hide) |
+| `no_color` | `false` | Disable ANSI colors globally |
+| `cache_enabled` | `true` | Enable/disable the duration cache |
+| `export_dir` | `` | Default directory for exported files |
+| `aliases` | `{}` | User-defined path shortcuts (e.g. `{"M": "D:\\02-Media"}`) |
+| `yt_api_key` | `` | YouTube Data API v3 key (stored in OS keyring if available) |
+| `project_dir` | `` | Path to Aevum source folder, saved automatically by `aevum update` |
+
+---
+
+## Cache
+
+Aevum caches video durations so repeat scans of large libraries are near-instant. Each file is cached by its absolute path, mtime, and size — stale entries are automatically ignored. Use `--no-cache` to force a full re-probe, or `aevum cache clear <folder>` to remove the cache for a specific folder only.
+
+YouTube video durations are cached separately per video ID, so re-scanning a channel only fetches new uploads from the API.
+
+| Platform | Cache location |
+|---|---|
+| Windows | `%LOCALAPPDATA%\Aevum\cache\` |
+| Linux / macOS | `~/.local/share/Aevum/cache\` |
+
+Run `aevum appdata` to open the Aevum data folder directly.
 
 ---
 
 ## Supported formats
 
 ### Video
-
 `.mp4` `.mkv` `.avi` `.mov` `.webm` `.flv` `.wmv` `.m4v` `.mpg` `.mpeg` `.3gp` `.ts` `.vob` `.ogv` `.divx` `.rmvb` `.asf` `.m2ts` `.mts` `.m2v` `.f4v` `.f4p` `.nsv` `.roq` `.yuv` `.mxf` `.drc` `.gifv` `.mng` `.qt` `.rm` `.amv` `.svi` `.3g2` `.mpe` `.mpv` `.m1v` `.m2p` `.m4p` `.mpeg1` `.mpeg2` `.mpeg4` `.h264` `.h265` `.hevc` `.avchd` `.ogm` `.ogx` `.dv` `.dvr` `.dvr-ms` `.rec` `.wtv` `.bdmv` `.iso` `.evo` `.ifo` `.mod` `.tod` `.trp` `.tp` `.pva` `.nuv` `.fli` `.flc` `.flic` `.smk` `.bik` `.bik2` `.webp`
 
 ### Audio
-
 `.mp3` `.aac` `.flac` `.wav` `.ogg` `.wma` `.m4a` `.opus` `.aiff` `.aif` `.aifc` `.ape` `.wv` `.tta` `.mka` `.mpa` `.mp2` `.ac3` `.eac3` `.dts` `.dtshd` `.truehd` `.thd` `.pcm` `.caf` `.ra` `.ram` `.oga` `.spx` `.amr` `.awb` `.gsm` `.au` `.snd` `.vox` `.8svx` `.iff` `.svx` `.f32` `.f64` `.s8` `.s16` `.s24` `.s32` `.u8` `.u16` `.u24` `.u32` `.w64` `.rf64` `.bwf` `.mid` `.midi` `.kar` `.xmf` `.mxmf` `.rtttl` `.rtx` `.ota` `.imy` `.mp1`
 
 ---
@@ -312,45 +338,39 @@ aevum scan D:\Movies -q; echo "exit $?"
 Aevum/
   aevum.py           — entry point
   pyproject.toml     — pip install config
+  README.md
+  .gitignore
   aevum_pkg/
+    __init__.py      — public API surface
     _cli.py          — main(), arg parsing, REPL, subcommand dispatch
     _scan.py         — ffprobe, native parsers, tree builder, filters
-    _youtube.py      — YouTube Data API v3 integration
+    _youtube.py      — YouTube Data API v3 + per-video cache + quota tracking
     _display.py      — all print/display functions
-    _dupes.py        — duplicate detection
+    _dupes.py        — duplicate detection (BLAKE2b)
     _compare.py      — folder comparison
     _export.py       — TXT/CSV/JSON export
     _config.py       — config, cache commands, doctor
-    _cache.py        — cache read/write
-    _color.py        — ANSI color singleton
+    _cache.py        — duration cache read/write
+    _paths.py        — platform-aware AppData/XDG path resolution
+    _color.py        — ANSI color singleton (clr)
     _exit.py         — named exit codes
+    _security.py     — path validation & input sanitization
+    _apikey.py       — encrypted API key storage (keyring → Fernet → plaintext)
+    _ratelimit.py    — YouTube API rate limiting (token bucket, 100 req/hr)
+    _errors.py       — secure error handling & logging
+    _audit.py        — security audit logging
 ```
 
 ---
 
-## Cache
+## Security
 
-Aevum caches video durations so repeat scans of large libraries are near-instant. Each file is cached by its absolute path, mtime, and size — stale entries are automatically ignored. Use `--no-cache` to force a full re-probe, or `aevum cache clear <folder>` to remove the cache for a specific folder only.
-
-| Platform | Cache location |
-|---|---|
-| Windows | `%LOCALAPPDATA%\Aevum\cache\` |
-| Linux / macOS | `~/.local/share/Aevum/cache\` (falls back to `~`) |
-
-Run `aevum appdata` to open the Aevum data folder directly.
-
----
-
-## Config
-
-Config is stored at `%LOCALAPPDATA%\Aevum\config.json` on Windows, or `~/.local/share/Aevum/config.json` on Linux/macOS.
-
-| Key | Default | Description |
-|---|---|---|
-| `sort` | `name:asc` | Default sort field and direction |
-| `top` | `10` | Default number of top files to show |
-| `no_color` | `false` | Disable ANSI colors globally |
-| `cache_enabled` | `true` | Enable/disable the duration cache |
-| `export_dir` | `` | Default directory for exported files |
-| `aliases` | `{}` | User-defined path shortcuts (e.g. `{"M": "D:\\02-Media"}`) |
-| `yt_api_key` | `` | YouTube Data API v3 key (stored separately in `yt_api_key.txt`) |
+- All subprocess calls use safe list form — no shell injection possible
+- Paths validated and restricted to user directories before scanning or writing
+- API keys stored in OS keyring (Windows Credential Manager / macOS Keychain / Linux Secret Service) when `keyring` is installed; falls back to Fernet-encrypted file, then plaintext with a warning
+- CSV exports escape formula characters to prevent spreadsheet injection
+- Symlink loop detection (inode tracking) and max recursion depth (30 levels)
+- YouTube API rate-limited to 100 requests/hour via token bucket
+- Atomic file writes (temp → rename) prevent race conditions on cache and config
+- Security events logged locally to `%LOCALAPPDATA%\Aevum\audit.log` (Windows) or `~/.local/share/Aevum/audit.log` (Linux/macOS)
+- No telemetry — nothing is sent anywhere except the YouTube API when scanning URLs
