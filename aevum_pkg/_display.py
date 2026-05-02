@@ -173,28 +173,6 @@ def print_url_results(url, label, total_sec, total_count, entries, top_n=10, una
         print()
 
 
-def print_banner():
-    print()
-    print(f"  {clr.C}{LINE}{clr.RST}")
-    print(f"  {clr.C}  A E V U M{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}Media Library Scanner{clr.RST}")
-    print(f"  {clr.C}{LINE}{clr.RST}")
-    print()
-    print(f"  {clr.W}Type a folder path or YouTube URL (video/playlist/channel) and press Enter.{clr.RST}")
-    print()
-    print(f"  {clr.G}1. scan{clr.RST}   {clr.M}2. clear{clr.RST}   {clr.R}3. quit{clr.RST}")
-    print()
-
-
-def print_post_scan_menu(current_sort="name:asc"):
-    print(f"  {clr.W}What do you want to do?{clr.RST}")
-    print(
-        f"  {clr.G}1. scan{clr.RST}   {clr.B}2. sort{clr.RST}   "
-        f"{clr.M}3. export{clr.RST}   {clr.Y}4. clear{clr.RST}   "
-        f"{clr.R}5. quit{clr.RST}   {clr.C}6. duplicates{clr.RST}   {clr.W}7. files{clr.RST}"
-    )
-    print()
-
-
 def _fuzzy_suggest(word, candidates):
     """
     Return the closest candidate to word within edit-distance 2, or None.
@@ -204,25 +182,23 @@ def _fuzzy_suggest(word, candidates):
     hundreds of times on a large subfolder list would be noticeably slow.
     The threshold of 50 is generous for the intended use-cases (command names,
     sort fields) while protecting against large input.
-    
+
     Security: Limits input lengths to prevent ReDoS attacks.
     """
-    # Security: limit input lengths to prevent DoS
     MAX_WORD_LENGTH = 50
     MAX_CANDIDATE_LENGTH = 50
     MAX_CANDIDATES = 50
-    
+
     if len(word) > MAX_WORD_LENGTH:
         return None
-    
+
     if len(candidates) > MAX_CANDIDATES:
         return None
 
     def _dist(a, b):
-        # Truncate excessively long strings
         a = a[:MAX_WORD_LENGTH]
         b = b[:MAX_CANDIDATE_LENGTH]
-        
+
         if a == b:
             return 0
         la, lb = len(a), len(b)
@@ -240,16 +216,15 @@ def _fuzzy_suggest(word, candidates):
             prev = curr
         return prev[lb]
 
-    # Filter candidates by length first (optimization)
     filtered = [
-        c for c in candidates 
-        if abs(len(c) - len(word)) <= 3 
+        c for c in candidates
+        if abs(len(c) - len(word)) <= 3
         and len(c) <= MAX_CANDIDATE_LENGTH
     ]
-    
+
     if not filtered:
         return None
-    
+
     scored = [(c, _dist(word, c)) for c in filtered]
     best_c, best_d = min(scored, key=lambda x: x[1])
     return best_c if best_d <= 2 else None

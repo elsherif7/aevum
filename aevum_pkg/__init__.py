@@ -28,8 +28,6 @@ From _youtube:
 From _display:
     print_results       — print a human-readable scan result
     print_url_results   — print a human-readable YouTube result
-    print_banner        — print the REPL welcome banner
-
 From _dupes:
     find_duplicates     — detect duplicate files by size + hash
     print_duplicates    — print duplicate groups to stdout
@@ -90,7 +88,6 @@ from ._apikey import (
 from ._display import (
     print_results,
     print_url_results,
-    print_banner,
 )
 
 # ── Duplicates ──────────────────────────────────────────────────────────────
@@ -144,7 +141,7 @@ __all__ = [
     # youtube
     "scan_url", "load_api_key", "save_api_key", "get_quota_status",
     # display
-    "print_results", "print_url_results", "print_banner",
+    "print_results", "print_url_results",
     # dupes
     "find_duplicates", "print_duplicates",
     # compare

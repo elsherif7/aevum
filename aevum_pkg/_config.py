@@ -1,7 +1,6 @@
 import json
 import os
 import sys
-import types
 from pathlib import Path
 
 from ._color   import clr, LINE
@@ -341,26 +340,3 @@ def cmd_config(args, cfg):
                 file=sys.stderr,
             )
 
-
-def repl_config(parts, cfg):
-    """
-    Handle 'config ...' typed inside the interactive REPL.
-
-    Issue 24 fix: values with spaces (e.g. export_dir paths) are now
-    preserved by joining everything from parts[2] onward instead of only
-    taking parts[2].
-    """
-    if not parts:
-        print(
-            f"  {clr.DIM}Usage: config get <key> | config set <key> <value> | "
-            f"config list | config reset{clr.RST}\n"
-        )
-        return
-    ns = types.SimpleNamespace(
-        action=parts[0]               if parts         else "list",
-        key   =parts[1]               if len(parts) > 1 else None,
-        # Issue 24: join remaining tokens so paths with spaces work
-        value =" ".join(parts[2:])    if len(parts) > 2 else None,
-        no_color=False,
-    )
-    cmd_config(ns, cfg)

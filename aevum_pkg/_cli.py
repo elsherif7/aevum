@@ -14,13 +14,12 @@ from ._color   import clr, LINE, clear, _disable_color
 from ._scan    import (check_ffprobe, format_duration, format_size, _run_scan,
                        parse_duration_arg, apply_filters, rebuild_after_filter)
 from ._youtube import _is_url, scan_url, _make_url_progress, get_quota_status
-from ._display import (print_results, print_url_results, print_banner,
-                       print_post_scan_menu, _fuzzy_suggest)
+from ._display import print_results, print_url_results, _fuzzy_suggest
 from ._dupes   import find_duplicates, print_duplicates, print_dupe_warning, dupes_to_json
 from ._compare import run_compare, print_comparison
 from ._export  import export_results, export_url_results
 from ._config  import (CONFIG_DEFAULTS, load_config, save_config,
-                       cmd_doctor, cmd_cache, cmd_config, repl_config)
+                       cmd_doctor, cmd_cache, cmd_config)
 from ._youtube import load_api_key, prompt_api_key
 from ._paths   import CACHE_DIR
 from . import _exit as EX
@@ -278,9 +277,8 @@ def _resolve_out_format(out_path, explicit_fmt):
 def _use_cache(args, cfg):
     """
     Issue 33 fix: single authoritative helper for the use_cache flag so that
-    both the headless CLI and the interactive REPL derive it the same way.
-    The no_cache arg may not be present on all namespaces (e.g. the REPL
-    passes a SimpleNamespace without it), so we use getattr with a default.
+    all callers derive it the same way. The no_cache arg may not be present
+    on all namespaces, so we use getattr with a default.
     """
     if getattr(args, 'no_cache', False):
         return False
@@ -303,9 +301,7 @@ def _resolve_alias(raw, cfg):
 
 # ── UPDATE LOGIC ──────────────────────────────────────────────────────
 # Issue 18 fix: extracted into a shared function so the headless 'update'
-# command and the REPL 'update' handler share identical logic instead of
-# being ~80-line copy-pastes that had already diverged (the REPL path was
-# missing the --dry-run guard).
+# command uses a single clean implementation.
 
 def _do_update(cfg, dry_run=False, quiet=False):
     """
@@ -366,7 +362,6 @@ def _print_global_help():
 
   {clr.W}USAGE{clr.RST}
     aevum [command] [options]
-    aevum                           Open interactive shell
     aevum <path|url>                Quick scan (shorthand for 'aevum scan')
 
   {clr.W}COMMANDS{clr.RST}
@@ -431,8 +426,8 @@ def _parse_args():
     argv = rejoined
 
     if not argv:
-        return types.SimpleNamespace(command='shell', no_color=False, json=False,
-                                     quiet=False, sort=None, top=None)
+        _print_global_help()
+        sys.exit(EX.OK)
 
     if argv[0] in ('-h', '--help'):
         _print_global_help()
@@ -447,7 +442,7 @@ def _parse_args():
     SUBCOMMANDS = (
         'scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config',
         'alias', 'doctor', 'quota', 'version', 'update', 'clearpath',
-        'appdata', 'shell', 'files',
+        'appdata', 'files',
     )
 
     if subcommand not in SUBCOMMANDS:
@@ -680,63 +675,8 @@ def _dispatch_subcommand(sub, argv):
         args.command = sub
         return args
 
-    if sub == 'shell':
-        ns = types.SimpleNamespace(command='shell', no_color=False, json=False,
-                                   quiet=False, sort=None, top=None)
-        for a in argv:
-            if a == '--no-color':
-                ns.no_color = True
-        return ns
-
     _print_global_help()
     sys.exit(EX.ERR_ARGS)
-
-
-# ── REPL HELPERS ──────────────────────────────────────────────────────
-
-def _repl_alias(parts, cfg):
-    """Handle 'alias ...' typed inside the interactive REPL."""
-    action   = parts[0] if parts else "list"
-    name     = parts[1] if len(parts) > 1 else None
-    path_val = parts[2] if len(parts) > 2 else None
-    aliases  = cfg.setdefault("aliases", {})
-
-    if action == "list":
-        if not aliases:
-            print(f"  {clr.DIM}No aliases defined.{clr.RST}  "
-                  f"Add one with: {clr.W}alias set <n> <path>{clr.RST}\n")
-            return
-        print()
-        print(f"  {clr.C}{LINE}{clr.RST}")
-        print(f"  {clr.W}  Aliases{clr.RST}")
-        print(f"  {clr.C}{LINE}{clr.RST}")
-        for k, v in sorted(aliases.items()):
-            exists = Path(v).is_dir()
-            status = f"{clr.G}✓{clr.RST}" if exists else f"{clr.R}✗ (not found){clr.RST}"
-            print(f"  {clr.G}{k:<15}{clr.RST}  {clr.W}{v}{clr.RST}  {status}")
-        print()
-    elif action in ("remove", "rm"):
-        if not name:
-            print(f"  {clr.R}[ERROR]{clr.RST} Usage: alias remove <n>\n")
-            return
-        if name not in aliases:
-            print(f"  {clr.Y}[WARN]{clr.RST}  Alias '{name}' not found.\n")
-            return
-        del aliases[name]
-        save_config(cfg)
-        print(f"  {clr.G}[OK]{clr.RST}  Alias '{name}' removed.\n")
-    elif action == "set":
-        if not name or not path_val:
-            print(f"  {clr.R}[ERROR]{clr.RST} Usage: alias set <n> <path>\n")
-            return
-        resolved = Path(path_val.strip().strip("'\""))
-        if not resolved.exists():
-            print(f"  {clr.Y}[WARN]{clr.RST}  Path does not exist: {resolved}")
-        aliases[name] = str(resolved)
-        save_config(cfg)
-        print(f"  {clr.G}[OK]{clr.RST}  {clr.W}{name}{clr.RST}  {clr.DIM}→{clr.RST}  {clr.W}{resolved}{clr.RST}\n")
-    else:
-        print(f"  {clr.DIM}Usage: alias list | alias set <n> <path> | alias remove <n>{clr.RST}\n")
 
 
 # ── MAIN ──────────────────────────────────────────────────────────────
@@ -790,7 +730,6 @@ def main():
         sys.exit(EX.OK)
 
     # ── update ────────────────────────────────────────────────────────
-    # Issue 18 fix: delegates to _do_update() instead of duplicating the logic.
     if cmd == 'update':
         rc = _do_update(cfg,
                         dry_run=getattr(args, 'dry_run', False),
@@ -1212,7 +1151,7 @@ def main():
             sys.exit(EX.ERR_EXPORT)
         sys.exit(EX.OK)
 
-    # ── files (headless) ──────────────────────────────────────────────
+    # ── files ─────────────────────────────────────────────────────────
     if cmd == 'files':
         folder_raw = _resolve_alias(args.folder.strip().strip("'\""), cfg)
         folder     = Path(folder_raw)
@@ -1240,9 +1179,14 @@ def main():
                       show_files=True, max_depth=getattr(args, 'depth', None) or 50)
         sys.exit(EX.OK)
 
-    # ── scan (headless) ───────────────────────────────────────────────
+    # ── scan ──────────────────────────────────────────────────────────
     if cmd == 'scan' and getattr(args, 'targets', None) is not None:
         targets = [t.strip().strip("'\"") for t in args.targets]
+
+        if not targets:
+            print(f"\n  {clr.R}[ERROR]{clr.RST} No target specified. Usage: aevum scan <path|url>\n",
+                  file=sys.stderr)
+            sys.exit(EX.ERR_ARGS)
 
         # Collapse multi-token unquoted paths (spaces in path name).
         # Issue 20 fix: only collapse when the remaining tokens don't look like
@@ -1264,12 +1208,8 @@ def main():
         do_merge = getattr(args, 'merge', False)
         max_d    = getattr(args, 'depth', None) or 50
 
-        if not targets:
-            pass  # fall through to interactive shell
-
-        elif len(targets) == 1:
+        if len(targets) == 1:
             # ── single target ─────────────────────────────────────────
-            # Issue 19 fix: alias is resolved inside the loop (also see batch below)
             raw     = _resolve_alias(targets[0], cfg)
             filters = _build_filters(args, use_json)
 
@@ -1526,327 +1466,3 @@ def main():
                 print()
 
             sys.exit(EX.OK)
-
-    # ── INTERACTIVE / SHELL MODE ──────────────────────────────────────
-    clear()
-    print_banner()
-
-    if not check_ffprobe():
-        print(f"  {clr.Y}ffprobe not found on PATH.{clr.RST}  {clr.DIM}Local folder scanning won't work.{clr.RST}")
-        print(f"  Download FFmpeg from {clr.C}https://ffmpeg.org/download.html{clr.RST}\n")
-
-    on_progress  = _make_progress_bar()
-    last_scan    = {}
-    current_sort = cfg.get('sort', 'name:asc')
-    default_top  = cfg.get('top', 10)
-
-    # Issue 33: derive use_cache from a SimpleNamespace so _use_cache() works
-    _repl_ns = types.SimpleNamespace(no_cache=False)
-    repl_use_cache = _use_cache(_repl_ns, cfg)
-
-    while True:
-        try:
-            raw = input(f"  {clr.C}aevum{clr.RST}> ").strip()
-        except (KeyboardInterrupt, EOFError):
-            print(f"\n\n  {clr.G}Goodbye!{clr.RST}\n")
-            sys.exit(EX.OK)
-
-        if not raw:
-            continue
-        raw = raw.strip().strip("'\"")
-        if not raw:
-            continue
-
-        _init_map = {'1': 'scan', '2': 'clear', '3': 'quit'}
-        if raw in _init_map:
-            raw = _init_map[raw]
-
-        if raw.lower() in ('exit', 'quit', 'q'):
-            print(f"\n  {clr.G}Goodbye!{clr.RST}\n")
-            sys.exit(EX.OK)
-
-        if raw.lower() in ('clear', 'c'):
-            clear()
-            print_banner()
-            continue
-
-        if raw.lower() in ('reset-key', 'apikey', 'api-key') or raw.lower().startswith('config set yt_api_key'):
-            prompt_api_key()
-            continue
-
-        if raw.lower().startswith('config '):
-            parts = raw.split()
-            repl_config(parts[1:], cfg)
-            continue
-
-        if raw.lower().startswith('alias'):
-            parts = raw.split()
-            _repl_alias(parts[1:], cfg)
-            continue
-
-        if raw.lower() in ('update', 'upgrade'):
-            # Issue 18 fix: delegate to shared _do_update()
-            _do_update(cfg)
-            continue
-
-        if raw.lower() in ('clearpath', 'clear-path'):
-            if 'project_dir' in cfg:
-                _cleared = cfg['project_dir']
-                del cfg['project_dir']
-                save_config(cfg)
-                print(f"  {clr.G}[OK]{clr.RST}  Saved path cleared: {clr.DIM}{_cleared}{clr.RST}\n")
-            else:
-                print(f"  {clr.DIM}No saved path to clear.{clr.RST}\n")
-            continue
-
-        if raw.lower() in ('appdata', 'app-data', 'open-appdata'):
-            folder = _open_appdata()
-            print(f"  {clr.G}[OK]{clr.RST}  Opened  {clr.W}{folder}{clr.RST}\n")
-            continue
-
-        if raw.lower() == 'scan':
-            print(f"\n  {clr.DIM}Enter a folder path or YouTube URL to scan.{clr.RST}\n")
-            continue
-
-        if _is_url(raw):
-            url_prog = _make_progress_bar()
-            try:
-                total_sec, total_count, entries, label, cache_hits, unavailable_count = \
-                    scan_url(raw, url_prog, use_cache=repl_use_cache)
-            except KeyboardInterrupt:
-                print(f"\n\n  {clr.Y}Fetch cancelled.{clr.RST}\n")
-                continue
-            except Exception as e:
-                print(f"\n  {clr.R}[ERROR]{clr.RST} {e}\n")
-                continue
-            api_fetched  = total_count - cache_hits
-            yt_info      = (f"  {clr.W}({cache_hits} cached, {api_fetched} fetched via API){clr.RST}"
-                            if api_fetched > 0 else
-                            f"  {clr.W}({cache_hits} cached, 0 API calls){clr.RST}")
-            unavail_note = f"  {clr.Y}({unavailable_count} unavailable){clr.RST}" if unavailable_count > 0 else ""
-            print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}{unavail_note}".ljust(100))
-            print_url_results(raw, label, total_sec, total_count, entries,
-                              top_n=default_top, unavailable_count=unavailable_count)
-            last_scan = {
-                "folder": raw, "total_sec": total_sec, "total_count": total_count,
-                "tree": None, "durations": {e['title']: e['duration'] for e in entries},
-                "sizes": {}, "dupe_groups": [], "is_url": True,
-                "entries": entries, "label": label,
-            }
-            print_post_scan_menu(current_sort)
-            continue
-
-        raw    = _resolve_alias(raw, cfg)
-        folder = Path(raw)
-        if not folder.exists():
-            print(f"\n  {clr.R}[ERROR]{clr.RST} Path not found: {raw}\n")
-            continue
-        if not folder.is_dir():
-            print(f"\n  {clr.R}[ERROR]{clr.RST} That is a file, not a folder.\n")
-            continue
-        if not check_ffprobe():
-            print(f"\n  {clr.R}[ERROR]{clr.RST} ffprobe not found. Install FFmpeg: {clr.C}https://ffmpeg.org/download.html{clr.RST}\n")
-            continue
-
-        print(f"  {clr.DIM}Collecting files...{clr.RST}", end='', flush=True)
-        try:
-            total_sec, total_count, tree, durations, sizes, hits = _run_scan(
-                folder, on_progress, current_sort, repl_use_cache)
-        except KeyboardInterrupt:
-            print(f"\n\n  {clr.Y}Scan cancelled.{clr.RST}\n")
-            continue
-
-        probed     = total_count - hits
-        cache_info = f"  {clr.W}({hits} cached, {probed} probed){clr.RST}" if hits > 0 else ""
-        print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} files found.{clr.RST}{cache_info}".ljust(100))
-        print_results(folder, total_sec, total_count, tree, durations, sizes, default_top,
-                      show_files=False)
-        groups = find_duplicates(durations, sizes)
-        print_dupe_warning(groups, folder)
-        last_scan = {
-            "folder": folder, "total_sec": total_sec, "total_count": total_count,
-            "tree": tree, "durations": durations, "sizes": sizes,
-            "dupe_groups": groups, "is_url": False,
-        }
-        print_post_scan_menu(current_sort)
-
-        while True:
-            try:
-                choice = input(f"  {clr.C}aevum{clr.RST}> ").strip().lower()
-            except (KeyboardInterrupt, EOFError):
-                print(f"\n\n  {clr.G}Goodbye!{clr.RST}\n")
-                sys.exit(EX.OK)
-
-            _menu_map = {
-                '1': 'scan', '2': 'sort', '3': 'export',
-                '4': 'clear', '5': 'quit', '6': 'duplicates', '7': 'files',
-            }
-            if choice in _menu_map:
-                choice = _menu_map[choice]
-
-            _all_cmds  = ['scan', 'clear', 'export', 'sort', 'quit', 'exit', 'q',
-                          'duplicates', 'dupes', 'files']
-            first_word = choice.split()[0] if choice else ''
-
-            if choice in ('quit', 'exit', 'q'):
-                print(f"\n  {clr.G}Goodbye!{clr.RST}\n")
-                sys.exit(EX.OK)
-
-            elif choice == 'clear':
-                clear()
-                print_banner()
-                break
-
-            elif choice == 'scan':
-                break
-
-            elif first_word == 'sort' or choice == 'sort':
-                if last_scan.get("is_url"):
-                    print(f"  {clr.Y}Sort is not available for URL scans.{clr.RST}\n")
-                    print_post_scan_menu(current_sort)
-                    continue
-                parts       = choice.split()
-                field       = parts[1] if len(parts) >= 2 else None
-                direc       = parts[2] if len(parts) >= 3 else None
-                _field_opts = ('name', 'duration', 'count')
-                _field_map  = {'1': 'name', '2': 'duration', '3': 'count'}
-                while field not in _field_opts:
-                    sug  = _fuzzy_suggest(field, list(_field_opts) + list(_field_map.keys())) if field else None
-                    hint = (f"  {clr.DIM}Did you mean {clr.W}{_field_map.get(sug, sug)}{clr.RST}{clr.DIM}?{clr.RST}"
-                            if sug else "")
-                    if field is not None:
-                        print(f"  {clr.R}Unknown.{clr.RST}{hint}")
-                    print(f"  {clr.DIM}Sort by?{clr.RST}  {clr.G}1. name{clr.RST}   {clr.B}2. duration{clr.RST}   {clr.M}3. count{clr.RST}   {clr.DIM}0. back{clr.RST}")
-                    try:
-                        field = input(f"  {clr.C}aevum{clr.RST}> ").strip().lower()
-                    except (KeyboardInterrupt, EOFError):
-                        print()
-                        field = 'back'
-                    if field in _field_map:
-                        field = _field_map[field]
-                    if field in ('back', '0', ''):
-                        print_post_scan_menu(current_sort)
-                        field = None
-                        break
-                if field is None:
-                    continue
-                _dir_aliases = {
-                    'asc': 'asc', 'ascending': 'asc', 'a': 'asc', '1': 'asc',
-                    'desc': 'desc', 'descending': 'desc', 'd': 'desc', '2': 'desc',
-                }
-                dir_def      = 'asc' if field == 'name' else 'desc'
-                dir_hint_str = (
-                    f"{clr.G}1. ascending{clr.RST} (a→z)   {clr.B}2. descending{clr.RST} (z→a)"
-                    if field == 'name' else
-                    f"{clr.G}1. descending{clr.RST} (high→low)   {clr.B}2. ascending{clr.RST} (low→high)"
-                )
-                while True:
-                    if direc is None:
-                        print(f"  {clr.DIM}Direction?{clr.RST}  {dir_hint_str}   {clr.DIM}0. back  [Enter = default]{clr.RST}")
-                        try:
-                            direc = input(f"  {clr.C}aevum{clr.RST}> ").strip().lower()
-                        except (KeyboardInterrupt, EOFError):
-                            print()
-                            direc = 'back'
-                    if direc in ('back', '0'):
-                        print_post_scan_menu(current_sort)
-                        direc = None
-                        break
-                    if direc == '':
-                        direc = dir_def
-                    resolved = _dir_aliases.get(direc)
-                    if resolved:
-                        direc = resolved
-                        break
-                    sug  = _fuzzy_suggest(direc, list(_dir_aliases.keys()))
-                    hint = (f"  {clr.DIM}Did you mean {clr.W}{sug}{clr.RST}{clr.DIM}?{clr.RST}" if sug else "")
-                    print(f"  {clr.R}Unknown direction.{clr.RST}{hint}")
-                    direc = None
-                if direc is None:
-                    continue
-                current_sort = f"{field}:{direc}"
-                new_total_sec, new_total_count, new_tree, new_durations, new_sizes, _ = _run_scan(
-                    last_scan["folder"], None, current_sort, repl_use_cache)
-                last_scan.update(
-                    total_sec=new_total_sec,
-                    total_count=new_total_count,
-                    tree=new_tree,
-                    durations=new_durations,
-                    sizes=new_sizes,
-                )
-                print_results(last_scan["folder"], new_total_sec,
-                              new_total_count, new_tree, new_durations,
-                              new_sizes, default_top, show_files=False)
-                print_post_scan_menu(current_sort)
-
-            elif first_word == 'export' or choice == 'export':
-                if last_scan.get("is_url"):
-                    print(f"  {clr.Y}Export is not available for URL scans in interactive mode.{clr.RST}\n")
-                    print_post_scan_menu(current_sort)
-                    continue
-                parts     = choice.split()
-                fmt       = parts[1] if len(parts) >= 2 else None
-                _fmt_opts = ('txt', 'csv', 'json')
-                _fmt_map  = {'1': 'txt', '2': 'csv', '3': 'json'}
-                while fmt not in _fmt_opts:
-                    sug  = _fuzzy_suggest(fmt, list(_fmt_opts) + list(_fmt_map.keys())) if fmt else None
-                    hint = (f"  {clr.DIM}Did you mean {clr.W}{_fmt_map.get(sug, sug)}{clr.RST}{clr.DIM}?{clr.RST}"
-                            if sug else "")
-                    if fmt is not None:
-                        print(f"  {clr.R}Unknown format.{clr.RST}{hint}")
-                    print(f"  {clr.DIM}Export as?{clr.RST}  {clr.G}1. txt{clr.RST}   {clr.B}2. csv{clr.RST}   {clr.M}3. json{clr.RST}   {clr.DIM}0. back{clr.RST}")
-                    try:
-                        fmt = input(f"  {clr.C}aevum{clr.RST}> ").strip().lower()
-                    except (KeyboardInterrupt, EOFError):
-                        print()
-                        fmt = 'back'
-                    if fmt in _fmt_map:
-                        fmt = _fmt_map[fmt]
-                    if fmt in ('back', '0', ''):
-                        print_post_scan_menu(current_sort)
-                        fmt = None
-                        break
-                if fmt is None:
-                    continue
-                out_dir  = cfg.get('export_dir') or None
-                out_path = (
-                    Path(out_dir) /
-                    f"aevum_{Path(last_scan['folder']).name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{fmt}"
-                ) if out_dir else None
-                try:
-                    dest = export_results(last_scan["folder"], last_scan["total_sec"],
-                                          last_scan["total_count"], last_scan["tree"],
-                                          last_scan["durations"], fmt, out_path)
-                    print(f"\n  {clr.G}Exported{clr.RST}  {clr.DIM}→{clr.RST}  {clr.W}{dest}{clr.RST}\n")
-                except Exception as e:
-                    print(f"\n  {clr.R}Export failed:{clr.RST} {e}\n")
-
-            elif choice in ('duplicates', 'dupes'):
-                if last_scan.get("is_url"):
-                    print(f"  {clr.Y}Duplicate detection is not available for URL scans.{clr.RST}\n")
-                    print_post_scan_menu(current_sort)
-                    continue
-                print_duplicates(last_scan["dupe_groups"], last_scan["durations"])
-                print_post_scan_menu(current_sort)
-
-            elif choice == 'files':
-                if last_scan.get("is_url"):
-                    print(f"  {clr.Y}File listing is not available for URL scans.{clr.RST}\n")
-                    print_post_scan_menu(current_sort)
-                    continue
-                print_results(last_scan["folder"], last_scan["total_sec"],
-                              last_scan["total_count"], last_scan["tree"],
-                              last_scan["durations"], last_scan["sizes"],
-                              default_top, show_files=True)
-                print_post_scan_menu(current_sort)
-
-            else:
-                sug = _fuzzy_suggest(first_word, _all_cmds) if first_word else None
-                if sug:
-                    print(f"  {clr.R}Unknown command.{clr.RST}  {clr.DIM}Did you mean{clr.RST}  {clr.W}{sug}{clr.RST}{clr.DIM}?{clr.RST}")
-                else:
-                    print(f"  {clr.R}Invalid command.{clr.RST} "
-                          f"Type  {clr.G}1. scan{clr.RST}   {clr.B}2. sort{clr.RST}   "
-                          f"{clr.M}3. export{clr.RST}   {clr.Y}4. clear{clr.RST}   "
-                          f"{clr.R}5. quit{clr.RST}   {clr.C}6. duplicates{clr.RST}   {clr.W}7. files{clr.RST}")
-                print_post_scan_menu(current_sort)
