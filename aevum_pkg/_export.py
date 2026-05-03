@@ -233,7 +233,7 @@ def _build_content(folder, total_sec, total_count, tree, durations, fmt):
                 round(sec, 2),  # Numbers are safe
                 sanitize_csv_field(format_duration(sec)["hours_fmt"]),
             ])
-        return rows  # returned as list; _write_content handles csv.writer
+        return rows  # returned as list; _write_content_atomic handles csv.writer
 
     # fmt == "txt"
     buf = io.StringIO()
@@ -304,12 +304,12 @@ def export_url_results(url, label, total_sec, total_count, entries, fmt, out_pat
     content = _build_url_content(url, label, total_sec, total_count, entries, fmt)
 
     try:
-        _write_content(dest, content, fmt)
+        _write_content_atomic(dest, content, fmt)
     except OSError:
         desktop = Path.home() / "Desktop"
         desktop.mkdir(parents=True, exist_ok=True)
         dest    = desktop / filename
-        _write_content(dest, content, fmt)
+        _write_content_atomic(dest, content, fmt)
 
     return dest
 
