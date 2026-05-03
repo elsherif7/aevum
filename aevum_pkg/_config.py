@@ -4,8 +4,8 @@ import sys
 from pathlib import Path
 
 from ._color   import clr, LINE
-from ._paths import APPDATA, CACHE_DIR, CONFIG_FILE, YT_KEY_FILE, YT_QUOTA_FILE, YT_VCACHE_FILE
-from ._scan    import format_size, check_ffprobe
+from ._paths import CACHE_DIR, CONFIG_FILE
+from ._scan    import format_size
 from ._apikey  import load_api_key, save_api_key, get_storage_method
 from ._youtube import prompt_api_key, yt_cache_stats, yt_cache_clear
 
@@ -90,9 +90,20 @@ def save_config(cfg):
     try:
         import tempfile
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        tmp = CONFIG_FILE.with_suffix(".tmp")
-        tmp.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-        os.replace(tmp, CONFIG_FILE)
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            dir=CONFIG_FILE.parent, suffix=".tmp", prefix=".config_"
+        )
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                f.write(json.dumps(cfg, indent=2))
+            os.chmod(tmp_path, 0o600)
+            os.replace(tmp_path, CONFIG_FILE)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
         return True
     except Exception as e:
         print(f"  {clr.R}Config write failed:{clr.RST} {e}", file=sys.stderr)
