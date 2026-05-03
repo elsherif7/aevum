@@ -98,11 +98,15 @@ def print_top_files(durations, n=10):
     print()
 
 
+_DEFAULT_SPEEDS = (1.0, 1.25, 1.5, 1.75, 2.0)
+
+
 def print_results(folder, total_sec, total_count, tree, durations=None, sizes=None,
-                  top_n=10, show_files=False, max_depth=50):
+                  top_n=10, show_files=False, max_depth=50, speeds=None):
     """
     Issue 26 fix: max_depth parameter added so --depth N from the CLI is
     correctly forwarded all the way into print_tree.
+    speeds: extra custom speeds shown after a divider below the defaults.
     """
     fmt        = format_duration(total_sec)
     sizes      = sizes or {}
@@ -131,16 +135,23 @@ def print_results(folder, total_sec, total_count, tree, durations=None, sizes=No
     print(f"  {clr.C}{LINE}{clr.RST}")
     print(f"  {clr.W}  Playback Speed{clr.RST}")
     print(f"  {clr.C}{LINE}{clr.RST}")
-    for speed in (1.0, 1.25, 1.5, 1.75, 2.0):
+    _extras = [s for s in (speeds or []) if s not in _DEFAULT_SPEEDS]
+    for speed in _DEFAULT_SPEEDS:
         adjusted = format_duration(total_sec / speed)
-        label    = f"{speed:.2f}".rstrip("0").rstrip(".") + "x"
-        print(f"  {clr.W}  {label:<6}        {clr.DIM}:{clr.RST}  {clr.W}{adjusted['hours_fmt']}{clr.RST}  {clr.DIM}({adjusted['days_fmt']}){clr.RST}")
+        label    = f"{speed:.6g}x"
+        print(f"  {clr.W}  {label:<10}     {clr.DIM}:{clr.RST}  {clr.W}{adjusted['hours_fmt']}{clr.RST}  {clr.DIM}({adjusted['days_fmt']}){clr.RST}")
+    if _extras:
+        print(f"  {clr.DIM}  {chr(9472) * 40}{clr.RST}")
+        for speed in _extras:
+            adjusted = format_duration(total_sec / speed)
+            label    = f"{speed:.6g}x"
+            print(f"  {clr.W}  {label:<10}     {clr.DIM}:{clr.RST}  {clr.W}{adjusted['hours_fmt']}{clr.RST}  {clr.DIM}({adjusted['days_fmt']}){clr.RST}")
     print()
     if durations and top_n > 0:
         print_top_files(durations, top_n)
 
 
-def print_url_results(url, label, total_sec, total_count, entries, top_n=10, unavailable_count=0):
+def print_url_results(url, label, total_sec, total_count, entries, top_n=10, unavailable_count=0, speeds=None):
     fmt = format_duration(total_sec)
     print()
     print(f"  {clr.C}{LINE}{clr.RST}")
@@ -157,10 +168,17 @@ def print_url_results(url, label, total_sec, total_count, entries, top_n=10, una
     print(f"  {clr.C}{LINE}{clr.RST}")
     print(f"  {clr.W}  Playback Speed{clr.RST}")
     print(f"  {clr.C}{LINE}{clr.RST}")
-    for speed in (1.0, 1.25, 1.5, 1.75, 2.0):
+    _extras = [s for s in (speeds or []) if s not in _DEFAULT_SPEEDS]
+    for speed in _DEFAULT_SPEEDS:
         adjusted = format_duration(total_sec / speed)
-        slabel   = f"{speed:.2f}".rstrip("0").rstrip(".") + "x"
-        print(f"  {clr.W}  {slabel:<6}        {clr.DIM}:{clr.RST}  {clr.W}{adjusted['hours_fmt']}{clr.RST}  {clr.DIM}({adjusted['days_fmt']}){clr.RST}")
+        slabel   = f"{speed:.6g}x"
+        print(f"  {clr.W}  {slabel:<10}     {clr.DIM}:{clr.RST}  {clr.W}{adjusted['hours_fmt']}{clr.RST}  {clr.DIM}({adjusted['days_fmt']}){clr.RST}")
+    if _extras:
+        print(f"  {clr.DIM}  {chr(9472) * 40}{clr.RST}")
+        for speed in _extras:
+            adjusted = format_duration(total_sec / speed)
+            slabel   = f"{speed:.6g}x"
+            print(f"  {clr.W}  {slabel:<10}     {clr.DIM}:{clr.RST}  {clr.W}{adjusted['hours_fmt']}{clr.RST}  {clr.DIM}({adjusted['days_fmt']}){clr.RST}")
     print()
     if entries and top_n > 0:
         ranked = sorted(entries, key=lambda e: e["duration"], reverse=True)[:top_n]

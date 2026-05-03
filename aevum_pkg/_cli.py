@@ -503,24 +503,70 @@ def _parse_args():
     if argv[0] in ('-U', '--upgrade'):
         argv = ['update'] + argv[1:]
 
-    subcommand  = argv[0]
     SUBCOMMANDS = (
         'scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config',
         'alias', 'doctor', 'quota', 'version', 'update', 'clearpath',
         'appdata', 'files',
     )
 
+    # Flags that consume the next token as their value.
+    _VALUE_FLAGS = {
+        '--speed', '-s', '--sort', '-t', '--top', '-o', '--out',
+        '--format', '--depth', '-i', '--interval',
+        '--min-duration', '--max-duration', '--ext', '--folder',
+    }
+
+    # If no command word was given (e.g. aevum --speed 0.5 D:\path or
+    # aevum D:\path) find the first non-flag token to use as the command
+    # or path.  Flags and their values are collected separately.
+    flags_before = []
+    first_pos    = None   # first non-flag token index in original argv
+    _j = 0
+    while _j < len(argv):
+        tok = argv[_j]
+        if tok.startswith('-'):
+            flags_before.append(tok)
+            bare = tok.split('=')[0]
+            if '=' not in tok and bare in _VALUE_FLAGS and _j + 1 < len(argv):
+                _j += 1
+                flags_before.append(argv[_j])
+        else:
+            first_pos = _j
+            break
+        _j += 1
+
+    if first_pos is None:
+        # only flags, no command or path
+        _print_global_help()
+        sys.exit(EX.OK)
+
+    # Rebuild argv with flags moved after the first positional token
+    if flags_before:
+        argv = argv[first_pos:first_pos+1] + flags_before + argv[first_pos+1:]
+
+    subcommand = argv[0]
+
     if subcommand not in SUBCOMMANDS:
         suggestion = _fuzzy_suggest(subcommand, list(SUBCOMMANDS))
         if (subcommand.startswith(('/', '\\', '.')) or
                 ':' in subcommand or
                 subcommand.startswith(('http://', 'https://', 'www.'))):
-            # Issue 20 fix: if there are multiple non-flag tokens they are
-            # separate targets, not a space-split path.  Only join them into a
-            # single path when there is exactly one non-flag token (the common
-            # case of an unquoted path with no spaces in it).
-            flags      = [t for t in argv if t.startswith('-')]
-            path_parts = [t for t in argv if not t.startswith('-')]
+            # No command word — treat as shorthand scan.
+            # Pair each flag with its value so path tokens are isolated.
+            flags      = []
+            path_parts = []
+            _k = 0
+            while _k < len(argv):
+                t = argv[_k]
+                if t.startswith('-'):
+                    flags.append(t)
+                    bare = t.split('=')[0]
+                    if '=' not in t and bare in _VALUE_FLAGS and _k + 1 < len(argv):
+                        _k += 1
+                        flags.append(argv[_k])
+                else:
+                    path_parts.append(t)
+                _k += 1
             if len(path_parts) == 1:
                 argv = ['scan', path_parts[0]] + flags
             else:
@@ -549,8 +595,10 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("-s", "--sort",  default=None, metavar="FIELD[:DIR]")
         p.add_argument("-t", "--top",   type=int, default=None, metavar="N")
         p.add_argument("--no-cache", action="store_true")
+        p.add_argument("--speed", dest="speeds", type=float, action="append",
+                       default=None, metavar="SPEED")
         _add_common_flags(p)
-        args = p.parse_args(argv)
+        args = p.parse_intermixed_args(argv)
         args.folder  = ' '.join(args.folder_parts)
         args.command = sub
         return args
@@ -578,8 +626,10 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("--max-duration", default=None, metavar="DURATION")
         p.add_argument("--ext", default=None, metavar="EXT[,EXT]")
         p.add_argument("--folder", dest="folder_pat", default=None, metavar="PATTERN")
+        p.add_argument("--speed", dest="speeds", type=float, action="append",
+                       default=None, metavar="SPEED")
         _add_common_flags(p)
-        args = p.parse_args(argv)
+        args = p.parse_intermixed_args(argv)
         args.command = sub
         return args
 
@@ -600,8 +650,10 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("--max-duration", default=None, metavar="DURATION")
         p.add_argument("--ext", default=None, metavar="EXT[,EXT]")
         p.add_argument("--folder", dest="folder_pat", default=None, metavar="PATTERN")
+        p.add_argument("--speed", dest="speeds", type=float, action="append",
+                       default=None, metavar="SPEED")
         _add_common_flags(p)
-        args = p.parse_args(argv)
+        args = p.parse_intermixed_args(argv)
         args.command = sub
         return args
 
@@ -615,7 +667,7 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("-s", "--sort", default=None, metavar="FIELD[:DIR]")
         p.add_argument("--no-cache", action="store_true")
         _add_common_flags(p)
-        args = p.parse_args(argv)
+        args = p.parse_intermixed_args(argv)
         args.command = sub
         return args
 
@@ -628,7 +680,7 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("-o", "--out", default=None, metavar="FILE")
         p.add_argument("--no-cache", action="store_true")
         _add_common_flags(p)
-        args = p.parse_args(argv)
+        args = p.parse_intermixed_args(argv)
         args.command = sub
         return args
 
@@ -643,7 +695,7 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("-s", "--sort", default=None, metavar="FIELD[:DIR]")
         p.add_argument("--no-cache", action="store_true")
         _add_common_flags(p)
-        args = p.parse_args(argv)
+        args = p.parse_intermixed_args(argv)
         args.command = sub
         return args
 
@@ -659,7 +711,7 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("action", nargs="?", default="list", choices=["list", "clear", "path"])
         p.add_argument("folder", nargs="?", default=None)
         p.add_argument("--no-color", action="store_true")
-        args = p.parse_args(argv)
+        args = p.parse_intermixed_args(argv)
         args.command = sub
         return args
 
@@ -676,7 +728,7 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("key",   nargs="?", default=None)
         p.add_argument("value", nargs="?", default=None)
         p.add_argument("--no-color", action="store_true")
-        args = p.parse_args(argv)
+        args = p.parse_intermixed_args(argv)
         args.command = sub
         return args
 
@@ -688,7 +740,7 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("--dry-run", action="store_true",
                        help="Show what would run without actually upgrading")
         _add_common_flags(p)
-        args = p.parse_args(argv)
+        args = p.parse_intermixed_args(argv)
         args.command = sub
         return args
 
@@ -705,7 +757,7 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("name",   nargs="?", default=None)
         p.add_argument("path",   nargs="?", default=None)
         p.add_argument("--no-color", action="store_true")
-        args = p.parse_args(argv)
+        args = p.parse_intermixed_args(argv)
         args.command = sub
         return args
 
@@ -713,7 +765,7 @@ def _dispatch_subcommand(sub, argv):
         p = argparse.ArgumentParser(prog="aevum doctor",
             description="Check environment: ffprobe, API key, cache, Python version.")
         _add_common_flags(p)
-        args = p.parse_args(argv)
+        args = p.parse_intermixed_args(argv)
         args.command = sub
         return args
 
@@ -721,7 +773,7 @@ def _dispatch_subcommand(sub, argv):
         p = argparse.ArgumentParser(prog="aevum quota",
             description="Check YouTube API quota usage for today.")
         _add_common_flags(p)
-        args = p.parse_args(argv)
+        args = p.parse_intermixed_args(argv)
         args.command = sub
         return args
 
@@ -736,7 +788,7 @@ def _dispatch_subcommand(sub, argv):
         p = argparse.ArgumentParser(prog="aevum clearpath",
             description="Clear the saved Aevum project path used by 'aevum update'.")
         _add_common_flags(p)
-        args = p.parse_args(argv)
+        args = p.parse_intermixed_args(argv)
         args.command = sub
         return args
 
@@ -1051,7 +1103,8 @@ def main():
                         # Issue 26: forward depth (None → default 50 inside print_results)
                         print_results(folder, total_sec, total_count, tree,
                                       durations, sizes, top, show_files=False,
-                                      max_depth=getattr(args, 'depth', None) or 50)
+                                      max_depth=getattr(args, 'depth', None) or 50,
+                                      speeds=getattr(args, 'speeds', None) or None)
                         print(f"  {clr.DIM}Next check in {interval}s — Ctrl+C to stop{clr.RST}\n")
                     last_sec = total_sec
 
@@ -1241,7 +1294,8 @@ def main():
             cache_info = f"  {clr.DIM}({hits} cached, {probed} probed){clr.RST}" if hits > 0 else ""
             print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} files found.{cache_info}".ljust(100))
         print_results(folder, total_sec, total_count, tree, durations, sizes, top,
-                      show_files=True, max_depth=getattr(args, 'depth', None) or 50)
+                      show_files=True, max_depth=getattr(args, 'depth', None) or 50,
+                      speeds=getattr(args, 'speeds', None) or None)
         sys.exit(EX.OK)
 
     # ── scan ──────────────────────────────────────────────────────────
@@ -1271,7 +1325,8 @@ def main():
         out_path = getattr(args, 'out', None)
         fmt      = _resolve_out_format(out_path, getattr(args, 'fmt', None))
         do_merge = getattr(args, 'merge', False)
-        max_d    = getattr(args, 'depth', None) or 50
+        max_d        = getattr(args, 'depth', None) or 50
+        custom_speeds = getattr(args, 'speeds', None) or None
 
         if len(targets) == 1:
             # ── single target ─────────────────────────────────────────
@@ -1304,7 +1359,8 @@ def main():
                         unavail_note = f"  {clr.Y}({unavailable_count} unavailable){clr.RST}" if unavailable_count > 0 else ""
                         print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}{unavail_note}".ljust(100))
                     print_url_results(raw, label, total_sec, total_count, entries,
-                                      top_n=top, unavailable_count=unavailable_count)
+                                      top_n=top, unavailable_count=unavailable_count,
+                                      speeds=custom_speeds)
                 sys.exit(EX.OK)
 
             folder = Path(raw)
@@ -1356,7 +1412,8 @@ def main():
 
             # Issue 26: forward max_depth
             print_results(folder, total_sec, total_count, tree, durations, sizes, top,
-                          show_files=getattr(args, 'files', False), max_depth=max_d)
+                          show_files=getattr(args, 'files', False), max_depth=max_d,
+                          speeds=custom_speeds)
             groups = find_duplicates(durations, sizes)
             if not quiet:
                 print_dupe_warning(groups, folder)
@@ -1484,10 +1541,17 @@ def main():
                 print(f"  {clr.C}{LINE}{clr.RST}")
                 print(f"  {clr.W}  Playback Speed{clr.RST}")
                 print(f"  {clr.C}{LINE}{clr.RST}")
-                for speed in (1.0, 1.25, 1.5, 1.75, 2.0):
+                _extras = [s for s in (custom_speeds or []) if s not in (1.0, 1.25, 1.5, 1.75, 2.0)]
+                for speed in [1.0, 1.25, 1.5, 1.75, 2.0]:
                     adj  = format_duration(merged_sec / speed)
-                    slbl = f"{speed:.2f}".rstrip('0').rstrip('.') + "x"
-                    print(f"  {clr.W}  {slbl:<6}        {clr.DIM}:{clr.RST}  {clr.W}{adj['hours_fmt']}{clr.RST}  {clr.DIM}({adj['days_fmt']}){clr.RST}")
+                    slbl = f"{speed:.6g}x"
+                    print(f"  {clr.W}  {slbl:<10}     {clr.DIM}:{clr.RST}  {clr.W}{adj['hours_fmt']}{clr.RST}  {clr.DIM}({adj['days_fmt']}){clr.RST}")
+                if _extras:
+                    print(f"  {clr.DIM}  {chr(9472) * 40}{clr.RST}")
+                    for speed in _extras:
+                        adj  = format_duration(merged_sec / speed)
+                        slbl = f"{speed:.6g}x"
+                        print(f"  {clr.W}  {slbl:<10}     {clr.DIM}:{clr.RST}  {clr.W}{adj['hours_fmt']}{clr.RST}  {clr.DIM}({adj['days_fmt']}){clr.RST}")
                 print()
                 if top > 0:
                     from ._display import print_top_files
@@ -1509,7 +1573,8 @@ def main():
                 for folder, total_sec, total_count, tree, durations, sizes, hits in results:
                     # Issue 26: forward max_depth
                     print_results(folder, total_sec, total_count, tree, durations, sizes, top,
-                                  show_files=getattr(args, 'files', False), max_depth=max_d)
+                                  show_files=getattr(args, 'files', False), max_depth=max_d,
+                                  speeds=custom_speeds)
                     groups = find_duplicates(durations, sizes)
                     if not quiet:
                         print_dupe_warning(groups, folder)
