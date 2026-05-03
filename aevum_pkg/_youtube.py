@@ -232,7 +232,9 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
     url = f"{YT_API_BASE}/{endpoint}?{urllib.parse.urlencode(params)}"
 
     try:
-        with urllib.request.urlopen(url, timeout=15) as r:
+        import ssl as _ssl
+        _ctx = _ssl.create_default_context()
+        with urllib.request.urlopen(url, timeout=15, context=_ctx) as r:
             result = json.loads(r.read().decode('utf-8'))
     except urllib.error.HTTPError as e:
         # Issue 10: extract the API error message from the JSON body
@@ -463,17 +465,22 @@ def scan_url(url, on_progress=None, use_cache=True):
         if not api_key:
             return 0, 0, [], 'cancelled', 0, 0
     
-    # Check quota before making requests — only swallow non-PermissionError failures
+    # Check quota before making requests
     try:
         used, remaining, pct = get_quota_status()
-    except Exception:
-        pass
-    else:
         if remaining < 100:
             raise PermissionError(
                 f"Daily quota nearly exhausted ({used:,}/10,000 units used). "
                 f"Remaining: {remaining:,} units. Try again tomorrow."
             )
+    except PermissionError:
+        raise
+    except Exception as _quota_err:
+        # Quota check failed (e.g. corrupted tracker file) — log and continue
+        print(
+            f"  {clr.Y}[WARN]{clr.RST}  Could not read quota tracker: {_quota_err}",
+            file=sys.stderr,
+        )
     
     # Security: Apply rate limiting
     if not youtube_limiter.allow_request():

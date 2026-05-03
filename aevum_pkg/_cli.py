@@ -381,12 +381,14 @@ def _do_update(cfg, dry_run=False, quiet=False):
 
     src_dir = _find_project_dir()
 
-    # Saved path stale?
+    # Warn if a saved path exists but no longer resolves — _find_project_dir()
+    # already returns None in that case so we just need the warning message.
     saved = cfg.get('project_dir', '')
     if saved and not (Path(saved) / "pyproject.toml").exists():
         print(f"\n  {clr.Y}[WARN]{clr.RST}  Saved project path no longer exists: {clr.W}{saved}{clr.RST}")
         print(f"  The project folder may have moved or been renamed.")
-        src_dir = None
+        # Do NOT force src_dir = None here: _find_project_dir() may have
+        # already found a valid fallback via cwd, so we keep its result.
 
     if src_dir is None:
         print(f"\n  {clr.Y}Aevum project folder not found.{clr.RST}")
