@@ -552,13 +552,13 @@ def parse_duration_arg(s):
     """
     s = s.strip().lower()
     try:
-        return float(s)
+        return min(float(s), 365 * 24 * 3600)
     except ValueError:
         pass
     m = re.fullmatch(r'(\d+):(\d{1,2})(?::(\d{1,2}))?', s)
     if m:
         h, mn, sc = m.groups()
-        return int(h) * 3600 + int(mn) * 60 + int(sc or 0)
+        return min(int(h) * 3600 + int(mn) * 60 + int(sc or 0), 365 * 24 * 3600)
     total = 0.0
     found = False
     for value, unit in re.findall(r'(\d+(?:\.\d+)?)([hms])', s):
@@ -568,7 +568,7 @@ def parse_duration_arg(s):
         elif unit == 'm': total += v * 60
         elif unit == 's': total += v
     if found:
-        return total
+        return min(total, 365 * 24 * 3600)  # cap at 1 year
     raise ValueError(f"Cannot parse duration: '{s}'  (try: 30s, 5m, 1h, 1h30m, 1:30:00)")
 
 

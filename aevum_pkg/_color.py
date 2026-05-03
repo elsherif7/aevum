@@ -24,7 +24,9 @@ if os.name == "nt":
     import ctypes
     _kernel32 = ctypes.windll.kernel32
     _handle   = _kernel32.GetStdHandle(-11)   # STD_OUTPUT_HANDLE
-    if _handle and _handle != -1:
+    # INVALID_HANDLE_VALUE is -1 as a signed pointer; compare via c_void_p
+    _INVALID  = ctypes.c_void_p(-1).value
+    if _handle and ctypes.c_void_p(_handle).value != _INVALID:
         # ENABLE_PROCESSED_OUTPUT | ENABLE_WRAP_AT_EOL_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING
         _kernel32.SetConsoleMode(_handle, 0x0001 | 0x0002 | 0x0004)
 

@@ -25,26 +25,51 @@ KEY_NAME = "youtube-api-key"
 
 
 def _get_cipher():
-    """Get Fernet cipher for fallback encryption."""
+    """
+    Get Fernet cipher for fallback encrypted-file storage.
+
+    Uses PBKDF2-HMAC-SHA256 with a random 32-byte salt stored alongside
+    the key file.  The salt makes offline bruteforce attacks expensive even
+    when the hostname/username are known.  This is still a best-effort
+    fallback — the system keyring (Method 1) remains the only genuinely
+    secure option.
+    """
     try:
         from cryptography.fernet import Fernet
         import hashlib
+        import secrets as _secrets
         import socket
 
-        # Derive a machine-specific key from hostname + username.
-        # Note: anyone with access to the file also knows these values,
-        # so this is obfuscation rather than strong encryption. The
-        # keyring path (Method 1) is the only genuinely secure option.
+        salt_file = YT_KEY_FILE.with_suffix(".salt")
+
+        # Load existing salt or create a fresh one
+        if salt_file.exists():
+            try:
+                salt = salt_file.read_bytes()
+                if len(salt) != 32:
+                    raise ValueError("bad salt length")
+            except Exception:
+                salt = _secrets.token_bytes(32)
+                salt_file.write_bytes(salt)
+                os.chmod(salt_file, 0o600)
+        else:
+            salt = _secrets.token_bytes(32)
+            salt_file.parent.mkdir(parents=True, exist_ok=True)
+            salt_file.write_bytes(salt)
+            os.chmod(salt_file, 0o600)
+
         try:
             login = os.getlogin()
         except OSError:
-            login = os.getenv('LOGNAME') or os.getenv('USER') or os.getenv('USERNAME') or 'unknown'
+            login = os.getenv("LOGNAME") or os.getenv("USER") or os.getenv("USERNAME") or "unknown"
 
-        machine_id   = f"{socket.gethostname()}-{login}"
-        key_material = hashlib.sha256(machine_id.encode()).digest()
-        key          = base64.urlsafe_b64encode(key_material)
+        import socket
+        machine_id = f"{socket.gethostname()}-{login}".encode()
+
+        key_material = hashlib.pbkdf2_hmac("sha256", machine_id, salt, 100_000)
+        key = base64.urlsafe_b64encode(key_material)
         return Fernet(key)
-    except (ImportError, OSError):
+    except (ImportError, OSError, ValueError):
         return None
 
 
@@ -61,7 +86,7 @@ def save_api_key(api_key: str) -> bool:
     Returns:
         True if saved successfully, False otherwise
     """
-    if not api_key or len(api_key) < 30:
+    if not api_key or not (35 <= len(api_key) <= 45):
         print(f"  Error: Invalid API key format", file=sys.stderr)
         return False
     
