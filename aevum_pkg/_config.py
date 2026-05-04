@@ -64,7 +64,7 @@ def load_config():
                             clean_aliases = {}
                             for k, v in value.items():
                                 if isinstance(k, str) and isinstance(v, str):
-                                    # Limit alias name length
+                                    # Limit lengths only
                                     if len(k) <= 50 and len(v) <= 4096:
                                         clean_aliases[k] = v
                             validated[key] = clean_aliases

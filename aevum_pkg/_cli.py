@@ -350,16 +350,57 @@ def _use_cache(args, cfg):
 
 def _resolve_alias(raw, cfg):
     """
-    If raw matches a known alias (case-insensitive), return the real path.
+    If raw matches a known alias (case-insensitive), return the expansion.
     Otherwise return raw unchanged.
 
-    Issue 17 fix: empty string is returned immediately to avoid Path("")
-    silently resolving to cwd and triggering an unexpected full scan.
+    Aliases can now hold any text — a folder path, a flag, a flag+value,
+    or even a whole command fragment.  The expansion is always returned as
+    a list of tokens so callers that need multi-token expansion can use it
+    directly (e.g. `--speed 0.5` → ['--speed', '0.5']).
+
+    For backwards compatibility, callers that only pass a single string and
+    just need a path still get a plain string back when the expansion is a
+    single token.  Multi-token expansions are returned as a list.
+
+    Issue 17 fix: empty string is returned immediately.
     """
-    if not raw:                          # Issue 17
+    if not raw:
         return raw
     aliases = cfg.get("aliases") or {}
-    return aliases.get(raw) or aliases.get(raw.upper()) or aliases.get(raw.lower()) or raw
+    expanded = aliases.get(raw) or aliases.get(raw.upper()) or aliases.get(raw.lower())
+    if expanded is None:
+        return raw
+    # Split into tokens so "--speed 0.5" works correctly
+    import shlex
+    try:
+        tokens = shlex.split(expanded)
+    except ValueError:
+        tokens = expanded.split()
+    return tokens if len(tokens) > 1 else (tokens[0] if tokens else raw)
+
+
+def _expand_aliases_in_argv(argv, cfg):
+    """
+    Walk argv and replace any token that matches an alias with its expansion.
+    Tokens that start with '-' are never treated as alias names.
+    This runs before argparse so every subcommand benefits automatically.
+    """
+    aliases = cfg.get("aliases") or {}
+    result = []
+    for tok in argv:
+        if tok.startswith('-'):
+            result.append(tok)
+            continue
+        expanded = aliases.get(tok) or aliases.get(tok.upper()) or aliases.get(tok.lower())
+        if expanded is not None:
+            import shlex
+            try:
+                result.extend(shlex.split(expanded))
+            except ValueError:
+                result.extend(expanded.split())
+        else:
+            result.append(tok)
+    return result
 
 
 # ── UPDATE LOGIC ──────────────────────────────────────────────────────
@@ -436,7 +477,7 @@ def _print_global_help():
     export    <path|url> <format>   Scan and write results to a file
     watch     <path>                Re-scan automatically when folder changes
     files     <path>                Scan and show all files under each folder
-    alias                           Manage short aliases for folder paths
+    alias                           Manage aliases (paths, flags, or any shorthand)
     cache                           Manage the duration cache
     config                          Read/write configuration
     quota                           Check YouTube API quota usage
@@ -502,6 +543,14 @@ def _parse_args():
         sys.exit(EX.OK)
     if argv[0] in ('-U', '--upgrade'):
         argv = ['update'] + argv[1:]
+
+    # Expand aliases early so every subcommand benefits.
+    # We load config here just for alias expansion; main() reloads it normally.
+    try:
+        _early_cfg = load_config()
+        argv = _expand_aliases_in_argv(argv, _early_cfg)
+    except Exception:
+        pass  # never let alias expansion crash startup
 
     SUBCOMMANDS = (
         'scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config',
@@ -747,12 +796,15 @@ def _dispatch_subcommand(sub, argv):
     if sub == 'alias':
         p = argparse.ArgumentParser(prog="aevum alias",
             formatter_class=argparse.RawDescriptionHelpFormatter,
-            description="Manage short aliases for long folder paths.",
+            description="Manage aliases — shortcuts for paths, flags, or any text.",
             epilog=("Examples:\n"
                     "  aevum alias list\n"
                     "  aevum alias set M D:\\02-Media\n"
+                    "  aevum alias set sp \"--speed 0.5\"\n"
+                    "  aevum alias set top20 \"--top 20\"\n"
                     "  aevum alias remove M\n"
-                    "  aevum scan M\n"))
+                    "  aevum scan M sp\n"
+                    "  aevum scan M top20\n"))
         p.add_argument("action", nargs="?", default="list", choices=["list", "set", "remove", "rm"])
         p.add_argument("name",   nargs="?", default=None)
         p.add_argument("path",   nargs="?", default=None)
@@ -889,16 +941,54 @@ def main():
         if action == 'list':
             if not aliases:
                 print(f"  {clr.DIM}No aliases defined.{clr.RST}  "
-                      f"Add one with: {clr.W}aevum alias set <n> <path>{clr.RST}\n")
+                      f"Add one with: {clr.W}aevum alias set <name> <value>{clr.RST}\n")
                 sys.exit(EX.OK)
+
+            _SUBCOMMANDS = {
+                'scan', 'compare', 'dupes', 'export', 'watch', 'cache',
+                'config', 'alias', 'doctor', 'quota', 'version', 'update',
+                'clearpath', 'appdata', 'files',
+            }
+
+            def _alias_type(v):
+                import shlex
+                try:
+                    tokens = shlex.split(v)
+                except ValueError:
+                    tokens = v.split()
+                if not tokens:
+                    return 'unknown', None
+                first = tokens[0]
+                _is_path = (
+                    first.startswith(('/', '\\', '.')) or
+                    (len(first) >= 2 and first[1] == ':')
+                )
+                if _is_path:
+                    exists = Path(v.strip("\'\"")).exists()
+                    return 'path', exists
+                if first.lower() in _SUBCOMMANDS:
+                    return 'command', None
+                if any(t.startswith('-') for t in tokens):
+                    return 'flag', None
+                return 'unknown', None
+
             print()
             print(f"  {clr.C}{LINE}{clr.RST}")
             print(f"  {clr.W}  Aliases{clr.RST}")
             print(f"  {clr.C}{LINE}{clr.RST}")
             for k, v in sorted(aliases.items()):
-                exists = Path(v).is_dir()
-                status = f"{clr.G}✓{clr.RST}" if exists else f"{clr.R}✗ (not found){clr.RST}"
-                print(f"  {clr.G}{k:<15}{clr.RST}  {clr.W}{v}{clr.RST}  {status}")
+                kind, extra = _alias_type(v)
+                if kind == 'path':
+                    type_label = f"{clr.B}[path]{clr.RST}"
+                    ok_label   = f"  {clr.G}\u2713{clr.RST}" if extra else f"  {clr.R}\u2717 not found{clr.RST}"
+                    status = f"{type_label}{ok_label}"
+                elif kind == 'command':
+                    status = f"{clr.M}[command]{clr.RST}"
+                elif kind == 'flag':
+                    status = f"{clr.C}[flag]{clr.RST}"
+                else:
+                    status = f"{clr.R}[unknown]{clr.RST}  {clr.DIM}not a command, flag, or path{clr.RST}"
+                print(f"  {clr.G}{k:<15}{clr.RST}  {clr.W}{v:<35}{clr.RST}  {status}")
             print()
             sys.exit(EX.OK)
 
@@ -916,14 +1006,21 @@ def main():
 
         if action == 'set':
             if not name or not path_val:
-                print(f"  {clr.R}[ERROR]{clr.RST} Usage: aevum alias set <n> <path>", file=sys.stderr)
+                print(f"  {clr.R}[ERROR]{clr.RST} Usage: aevum alias set <name> <value>", file=sys.stderr)
                 sys.exit(EX.ERR_ARGS)
-            resolved = Path(path_val.strip().strip("'\""))
-            if not resolved.exists():
-                print(f"  {clr.Y}[WARN]{clr.RST}  Path does not exist: {resolved}")
-            aliases[name] = str(resolved)
+            # Accept any value — paths, flags, commands, or combinations.
+            # Only warn about non-existent paths when the value actually looks
+            # like a filesystem path (contains a separator or drive letter).
+            value = path_val.strip().strip("'\"")
+            _looks_like_path = (
+                value.startswith(('/', '\\', '.')) or
+                (len(value) >= 2 and value[1] == ':')  # Windows drive, e.g. D:
+            )
+            if _looks_like_path and not Path(value).exists():
+                print(f"  {clr.Y}[WARN]{clr.RST}  Path does not exist: {value}")
+            aliases[name] = value
             save_config(cfg)
-            print(f"  {clr.G}[OK]{clr.RST}  {clr.W}{name}{clr.RST}  {clr.DIM}→{clr.RST}  {clr.W}{resolved}{clr.RST}")
+            print(f"  {clr.G}[OK]{clr.RST}  {clr.W}{name}{clr.RST}  {clr.DIM}→{clr.RST}  {clr.W}{value}{clr.RST}")
             sys.exit(EX.OK)
 
         sys.exit(EX.OK)
