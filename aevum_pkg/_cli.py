@@ -807,9 +807,9 @@ def _dispatch_subcommand(sub, argv):
                     "  aevum scan M top20\n"))
         p.add_argument("action", nargs="?", default="list", choices=["list", "set", "remove", "rm"])
         p.add_argument("name",   nargs="?", default=None)
-        p.add_argument("path",   nargs="?", default=None)
+        p.add_argument("path",   nargs=argparse.REMAINDER, default=None)
         p.add_argument("--no-color", action="store_true")
-        args = p.parse_intermixed_args(argv)
+        args = p.parse_args(argv)
         args.command = sub
         return args
 
@@ -937,6 +937,9 @@ def main():
         action   = getattr(args, 'action', 'list') or 'list'
         name     = getattr(args, 'name', None)
         path_val = getattr(args, 'path', None)
+        # REMAINDER gives a list; join it so "--speed 0.5" works unquoted
+        if isinstance(path_val, list):
+            path_val = ' '.join(path_val) if path_val else None
 
         if action == 'list':
             if not aliases:
