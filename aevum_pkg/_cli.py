@@ -944,8 +944,8 @@ def main():
 
         if action == 'list':
             if not aliases:
-                print(f"  {clr.DIM}No aliases defined.{clr.RST}  "
-                      f"Add one with: {clr.W}aevum alias set <name> <value>{clr.RST}\n")
+                print(f"  {clr.W}No aliases defined.{clr.RST}")
+                print(f"  Add one with: {clr.W}aevum alias set <name> <value>{clr.RST}\n")
                 sys.exit(EX.OK)
 
             _SUBCOMMANDS = {
@@ -976,23 +976,35 @@ def main():
                     return 'flag', None
                 return 'unknown', None
 
+            # Group aliases by kind: command, flag, path, unknown
+            grouped = {'command': [], 'flag': [], 'path': [], 'unknown': []}
+            for k, v in sorted(aliases.items()):
+                kind, extra = _alias_type(v)
+                grouped[kind].append((k, v, extra))
+
             print()
             print(f"  {clr.C}{LINE}{clr.RST}")
             print(f"  {clr.W}  Aliases{clr.RST}")
             print(f"  {clr.C}{LINE}{clr.RST}")
-            for k, v in sorted(aliases.items()):
-                kind, extra = _alias_type(v)
-                if kind == 'path':
-                    type_label = f"{clr.B}[path]{clr.RST}"
-                    ok_label   = f"  {clr.G}\u2713{clr.RST}" if extra else f"  {clr.R}\u2717 not found{clr.RST}"
-                    status = f"{type_label}{ok_label}"
-                elif kind == 'command':
-                    status = f"{clr.M}[command]{clr.RST}"
-                elif kind == 'flag':
-                    status = f"{clr.C}[flag]{clr.RST}"
-                else:
-                    status = f"{clr.R}[unknown]{clr.RST}  {clr.DIM}not a command, flag, or path{clr.RST}"
-                print(f"  {clr.G}{k:<15}{clr.RST}  {clr.W}{v:<35}{clr.RST}  {status}")
+
+            first_section = True
+            for kind in ('command', 'flag', 'path', 'unknown'):
+                items = grouped[kind]
+                if not items:
+                    continue
+                if not first_section:
+                    print(f"  {clr.DIM}  {chr(9472) * 40}{clr.RST}")
+                first_section = False
+                for k, v, extra in items:
+                    if kind == 'path':
+                        status = f"{clr.B}[path]{clr.RST}" + (f"  {clr.R}\u2717 not found{clr.RST}" if not extra else "")
+                    elif kind == 'command':
+                        status = f"{clr.M}[command]{clr.RST}"
+                    elif kind == 'flag':
+                        status = f"{clr.C}[flag]{clr.RST}"
+                    else:
+                        status = f"{clr.R}[unknown]{clr.RST}"
+                    print(f"  {clr.G}{k:<15}{clr.RST}  {clr.W}{v:<35}{clr.RST}  {status}")
             print()
             sys.exit(EX.OK)
 
