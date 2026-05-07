@@ -548,7 +548,10 @@ def _parse_args():
     # We load config here just for alias expansion; main() reloads it normally.
     try:
         _early_cfg = load_config()
-        argv = _expand_aliases_in_argv(argv, _early_cfg)
+        # Never expand aliases when the user is managing aliases themselves —
+        # expansion would corrupt the name/value tokens (e.g. 'man' → its path).
+        if argv[0] != 'alias':
+            argv = _expand_aliases_in_argv(argv, _early_cfg)
     except Exception:
         pass  # never let alias expansion crash startup
 
@@ -794,24 +797,25 @@ def _dispatch_subcommand(sub, argv):
         return args
 
     if sub == 'alias':
-        p = argparse.ArgumentParser(prog="aevum alias",
-            formatter_class=argparse.RawDescriptionHelpFormatter,
-            description="Manage aliases — shortcuts for paths, flags, or any text.",
-            epilog=("Examples:\n"
-                    "  aevum alias list\n"
-                    "  aevum alias set M D:\\02-Media\n"
-                    "  aevum alias set sp \"--speed 0.5\"\n"
-                    "  aevum alias set top20 \"--top 20\"\n"
-                    "  aevum alias remove M\n"
-                    "  aevum scan M sp\n"
-                    "  aevum scan M top20\n"))
-        p.add_argument("action", nargs="?", default="list", choices=["list", "set", "remove", "rm"])
-        p.add_argument("name",   nargs="?", default=None)
-        p.add_argument("path",   nargs=argparse.REMAINDER, default=None)
-        p.add_argument("--no-color", action="store_true")
-        args = p.parse_args(argv)
-        args.command = sub
-        return args
+        # Manual parse: argparse chokes on flag-like values (--speed) and
+        # alias expansion must be skipped to avoid corrupting name tokens.
+        no_color = '--no-color' in argv
+        tokens   = [t for t in argv if t != '--no-color']
+        ACTIONS  = ('list', 'set', 'remove', 'rm')
+        action   = 'list'
+        name     = None
+        path_val = None
+        if tokens:
+            if tokens[0] in ACTIONS:
+                action = tokens[0]
+                if len(tokens) >= 2:
+                    name = tokens[1]
+                if len(tokens) >= 3:
+                    path_val = ' '.join(tokens[2:])
+        return types.SimpleNamespace(
+            command='alias', action=action, name=name, path=path_val,
+            no_color=no_color, json=False, quiet=False,
+        )
 
     if sub == 'doctor':
         p = argparse.ArgumentParser(prog="aevum doctor",
@@ -937,9 +941,6 @@ def main():
         action   = getattr(args, 'action', 'list') or 'list'
         name     = getattr(args, 'name', None)
         path_val = getattr(args, 'path', None)
-        # REMAINDER gives a list; join it so "--speed 0.5" works unquoted
-        if isinstance(path_val, list):
-            path_val = ' '.join(path_val) if path_val else None
 
         if action == 'list':
             if not aliases:
@@ -1014,7 +1015,7 @@ def main():
             # Accept any value — paths, flags, commands, or combinations.
             # Only warn about non-existent paths when the value actually looks
             # like a filesystem path (contains a separator or drive letter).
-            value = path_val.strip().strip("'\"")
+            value = path_val
             _looks_like_path = (
                 value.startswith(('/', '\\', '.')) or
                 (len(value) >= 2 and value[1] == ':')  # Windows drive, e.g. D:
