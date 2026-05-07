@@ -87,7 +87,7 @@ class EX:
     ERR_EXPORT = 4
     ERR_API    = 5
 
-__version__ = "1.0.0"
+__version__ = "2.1.0"
 
 
 # ── JSON OUTPUT ───────────────────────────────────────────────────────
@@ -466,11 +466,11 @@ def _print_global_help():
     print(f"""
   {clr.C}aevum {__version__}{clr.RST}  {clr.DIM}—{clr.RST}  {clr.W}Media Library Scanner{clr.RST}
 
-  {clr.W}USAGE{clr.RST}
+  {clr.W}Usage{clr.RST}
     aevum [command] [options]
     aevum <path|url>                Quick scan (shorthand for 'aevum scan')
 
-  {clr.W}COMMANDS{clr.RST}
+  {clr.W}Commands{clr.RST}
     scan      <path|url>            Scan a folder or YouTube URL
     compare   <path> <path>         Compare two libraries side-by-side
     dupes     <path>                Find duplicate files (by size + hash)
@@ -487,7 +487,7 @@ def _print_global_help():
     appdata                         Open the Aevum data folder
     version                         Print version and exit
 
-  {clr.W}GLOBAL OPTIONS{clr.RST}
+  {clr.W}Global Options{clr.RST}
     --no-color                      Disable ANSI color output
     --json                          Machine-readable JSON output to stdout
     -q, --quiet                     Suppress decorative output (errors → stderr only)
@@ -495,7 +495,7 @@ def _print_global_help():
     -V, --version                   Show version
     -U, --upgrade                   Alias for 'aevum update'
 
-  {clr.W}EXIT CODES{clr.RST}
+  {clr.W}Exit Codes{clr.RST}
     0  success
     1  bad arguments / path not found
     2  missing dependency (ffprobe)
