@@ -1028,6 +1028,10 @@ def main():
             # Only warn about non-existent paths when the value actually looks
             # like a filesystem path (contains a separator or drive letter).
             value = path_val
+            if name in aliases:
+                print(f"  {clr.R}[ERROR]{clr.RST}  Alias '{clr.W}{name}{clr.RST}' already exists  {clr.DIM}→{clr.RST}  {clr.W}{aliases[name]}{clr.RST}")
+                print(f"  {clr.DIM}Remove it first with:{clr.RST}  {clr.W}aevum alias rm {name}{clr.RST}")
+                sys.exit(EX.ERR_ARGS)
             _looks_like_path = (
                 value.startswith(('/', '\\', '.')) or
                 (len(value) >= 2 and value[1] == ':')  # Windows drive, e.g. D:
