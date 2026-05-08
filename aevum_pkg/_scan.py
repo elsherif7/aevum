@@ -180,6 +180,9 @@ def _read_mkv_duration(path):
                         # else: unknown size — skip, fall through to ffprobe
                     if fsize == 0:
                         continue  # zero-length field is valid; don't abort the block
+                    # B-05: bounds check — malformed fsize could jump j past end
+                    if j + fsize > end:
+                        break
                     j += fsize
                 if duration is not None:
                     return duration * timescale_ns / 1_000_000_000

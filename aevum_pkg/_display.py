@@ -137,12 +137,16 @@ def print_results(folder, total_sec, total_count, tree, durations=None, sizes=No
     print(f"  {clr.C}{LINE}{clr.RST}")
     _extras = [s for s in (speeds or []) if s not in _DEFAULT_SPEEDS]
     for speed in _DEFAULT_SPEEDS:
+        if speed <= 0:  # B-01: guard against division by zero
+            continue
         adjusted = format_duration(total_sec / speed)
         label    = f"{speed:.6g}x"
         print(f"  {clr.W}  {label:<10}     {clr.DIM}:{clr.RST}  {clr.W}{adjusted['hours_fmt']}{clr.RST}  {clr.DIM}({adjusted['days_fmt']}){clr.RST}")
     if _extras:
         print(f"  {clr.DIM}  {chr(9472) * 40}{clr.RST}")
         for speed in _extras:
+            if speed <= 0:  # B-01: guard against division by zero
+                continue
             adjusted = format_duration(total_sec / speed)
             label    = f"{speed:.6g}x"
             print(f"  {clr.W}  {label:<10}     {clr.DIM}:{clr.RST}  {clr.W}{adjusted['hours_fmt']}{clr.RST}  {clr.DIM}({adjusted['days_fmt']}){clr.RST}")
@@ -170,12 +174,16 @@ def print_url_results(url, label, total_sec, total_count, entries, top_n=10, una
     print(f"  {clr.C}{LINE}{clr.RST}")
     _extras = [s for s in (speeds or []) if s not in _DEFAULT_SPEEDS]
     for speed in _DEFAULT_SPEEDS:
+        if speed <= 0:  # B-01: guard against division by zero
+            continue
         adjusted = format_duration(total_sec / speed)
         slabel   = f"{speed:.6g}x"
         print(f"  {clr.W}  {slabel:<10}     {clr.DIM}:{clr.RST}  {clr.W}{adjusted['hours_fmt']}{clr.RST}  {clr.DIM}({adjusted['days_fmt']}){clr.RST}")
     if _extras:
         print(f"  {clr.DIM}  {chr(9472) * 40}{clr.RST}")
         for speed in _extras:
+            if speed <= 0:  # B-01: guard against division by zero
+                continue
             adjusted = format_duration(total_sec / speed)
             slabel   = f"{speed:.6g}x"
             print(f"  {clr.W}  {slabel:<10}     {clr.DIM}:{clr.RST}  {clr.W}{adjusted['hours_fmt']}{clr.RST}  {clr.DIM}({adjusted['days_fmt']}){clr.RST}")

@@ -50,7 +50,8 @@ def print_comparison(folder_a, folder_b, data_a, data_b):
     print(f"  {clr.W}  {name_b:<30}{clr.RST}  {clr.Y}{format_duration(sec_b)['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.Y}{count_b} files{clr.RST}")
     print()
     delta_col = clr.G if delta_sec >= 0 else clr.R
-    print(f"  {clr.W}  Delta{{'':<25}}{clr.RST}  {delta_col}{delta_sign}{format_duration(abs(delta_sec))['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {delta_col}{delta_csign}{delta_count} files{clr.RST}")
+    # B-02: fix f-string bug — {{'':<25}} is literal, not a format expression
+    print(f"  {clr.W}  {'Delta':<25}{clr.RST}  {delta_col}{delta_sign}{format_duration(abs(delta_sec))['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {delta_col}{delta_csign}{delta_count} files{clr.RST}")
     print()
     if only_a:
         print(f"  {clr.C}{LINE}{clr.RST}")

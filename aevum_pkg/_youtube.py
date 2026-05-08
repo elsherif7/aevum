@@ -283,6 +283,9 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
 
     Issue 10 fix: HTTPError is caught and re-raised with a human-readable
     message that includes the API error description (e.g. "quota exceeded").
+    
+    B-07 fix: rate limiter check moved here so it fires per API call, not
+    once per scan_url invocation.
     """
     import urllib.request
     import urllib.parse
@@ -290,6 +293,13 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
 
     if quota_cost is None:
         quota_cost = YT_QUOTA_COST.get(endpoint, 1)
+
+    # B-07: apply rate limiting per API call
+    if not youtube_limiter.allow_request():
+        wait = youtube_limiter.wait_time()
+        raise PermissionError(
+            f"Rate limit exceeded. Please wait {int(wait)}s before next request."
+        )
 
     # Copy params to avoid mutating the caller's dict
     params = {**params, 'key': api_key}
@@ -545,22 +555,8 @@ def scan_url(url, on_progress=None, use_cache=True):
             f"  {clr.Y}[WARN]{clr.RST}  Could not read quota tracker: {_quota_err}",
             file=sys.stderr,
         )
-    
-    # Security: Apply rate limiting
-    if not youtube_limiter.allow_request():
-        wait = youtube_limiter.wait_time()
-        print(
-            f"  {clr.Y}[RATE LIMIT]{clr.RST} "
-            f"Please wait {int(wait)}s before next request.",
-            file=sys.stderr
-        )
-        time.sleep(wait)
-        
-        # Try again after waiting
-        if not youtube_limiter.allow_request():
-            raise PermissionError(
-                "Rate limit exceeded. Please try again later."
-            )
+
+    # B-07: rate limiting is now enforced per API call inside _yt_api_request
 
     kind, vid_id = _parse_yt_url(_normalise_url(url))
     if kind is None:

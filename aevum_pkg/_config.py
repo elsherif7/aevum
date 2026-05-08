@@ -26,6 +26,10 @@ def load_config():
     
     Security: Validates JSON structure and types to prevent deserialization
     attacks. Only accepts expected configuration keys and types.
+    
+    Q-04 fix: warns when a config value is rejected so users can debug
+    config issues instead of silently getting defaults.
+    B-06 fix: normalizes bare sort names (e.g. "duration" -> "duration:desc").
     """
     try:
         with CONFIG_FILE.open('r', encoding='utf-8') as f:
@@ -49,8 +53,14 @@ def load_config():
                         # Limit to reasonable range
                         if 0 <= value <= 100:
                             validated[key] = value
+                        else:
+                            print(f"  [CONFIG] Warning: 'top' value {value!r} out of range (0-100), using default.", file=sys.stderr)
                     elif key == "sort":
-                        # Validate sort field
+                        # B-06: normalize bare sort names (e.g. "duration" → "duration:desc")
+                        # to be consistent with _resolve_sort() in _cli.py
+                        if ':' not in value:
+                            _sort_defaults = {'name': 'asc', 'duration': 'desc', 'count': 'desc'}
+                            value = value + ':' + _sort_defaults.get(value, 'asc')
                         valid_sorts = [
                             "name:asc", "name:desc",
                             "duration:asc", "duration:desc",
@@ -58,6 +68,8 @@ def load_config():
                         ]
                         if value in valid_sorts:
                             validated[key] = value
+                        else:
+                            print(f"  [CONFIG] Warning: 'sort' value {value!r} is not valid, using default.", file=sys.stderr)
                     elif key == "aliases":
                         # Validate aliases is a dict of str -> str
                         if isinstance(value, dict):
@@ -67,13 +79,19 @@ def load_config():
                                     # Limit lengths only
                                     if len(k) <= 50 and len(v) <= 4096:
                                         clean_aliases[k] = v
+                                    else:
+                                        print(f"  [CONFIG] Warning: alias '{k}' exceeds length limit, skipped.", file=sys.stderr)
                             validated[key] = clean_aliases
                     elif key == "project_dir":
                         # Must be empty or an absolute path
                         if not value or Path(value).is_absolute():
                             validated[key] = value
+                        else:
+                            print(f"  [CONFIG] Warning: 'project_dir' must be an absolute path, using default.", file=sys.stderr)
                     else:
                         validated[key] = value
+                else:
+                    print(f"  [CONFIG] Warning: '{key}' has wrong type (expected {expected_type.__name__}), using default.", file=sys.stderr)
         
         return {**CONFIG_DEFAULTS, **validated}
     except (json.JSONDecodeError, OSError):
