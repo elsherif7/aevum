@@ -47,22 +47,12 @@ def _cache_key(root):
     Stable filename for the cache of a given root folder.
     
     Security: Uses SHA-256 instead of SHA-1 (cryptographically broken).
-    Validates cache file path is under CACHE_DIR to prevent path traversal.
+    The hex digest is [0-9a-f] only, so the resulting filename can never
+    escape CACHE_DIR via path traversal.
     """
     normalized = _normalise_path(root)
-    
-    # Use SHA-256 instead of SHA-1 (more secure)
     h = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
-    
-    cache_file = CACHE_DIR / f"{h}.json"
-    
-    # Security: verify cache_file is actually under CACHE_DIR
-    try:
-        cache_file.resolve().relative_to(CACHE_DIR.resolve())
-    except ValueError:
-        raise PermissionError("Cache path validation failed")
-    
-    return cache_file
+    return CACHE_DIR / f"{h}.json"
 
 
 def load_cache(root):

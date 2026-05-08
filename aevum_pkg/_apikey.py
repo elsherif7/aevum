@@ -5,8 +5,8 @@ Uses system keyring (encrypted) instead of plaintext files.
 Falls back to encrypted file storage if keyring is unavailable.
 """
 
-import base64
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -21,7 +21,10 @@ except ImportError:
 from ._paths import YT_KEY_FILE
 
 SERVICE_NAME = "aevum-media-scanner"
-KEY_NAME = "youtube-api-key"
+KEY_NAME     = "youtube-api-key"
+
+# H-01: compile once at module level — not inside save_api_key on every call
+_YT_KEY_PATTERN = re.compile(r'^AIza[0-9A-Za-z\-_]{35}$')
 
 
 def _get_cipher():
@@ -81,9 +84,8 @@ def save_api_key(api_key: str) -> bool:
         True if saved successfully, False otherwise
     """
     # S-02: Validate API key format (YouTube keys start with AIza)
-    import re
-    YT_KEY_PATTERN = re.compile(r'^AIza[0-9A-Za-z\-_]{35}$')
-    if not api_key or not YT_KEY_PATTERN.match(api_key):
+    # H-01: use pre-compiled regex (module-level constant)
+    if not api_key or not _YT_KEY_PATTERN.match(api_key):
         print(f"  Error: Invalid API key format (expected AIza...)", file=sys.stderr)
         return False
     
@@ -162,13 +164,23 @@ def load_api_key() -> str:
             cipher = _get_cipher()
             if cipher:
                 encrypted = YT_KEY_FILE.read_bytes()
-                decrypted = cipher.decrypt(encrypted)
-                return decrypted.decode('utf-8')
+                # H-02: only fall through to plaintext if the file is clearly
+                # not Fernet-encrypted (small size = plaintext key).
+                # Fernet ciphertext for a 39-char key is ~116 bytes.
+                if len(encrypted) > 80:
+                    try:
+                        decrypted = cipher.decrypt(encrypted)
+                        return decrypted.decode('utf-8').strip()
+                    except Exception:
+                        # Decryption failed — do NOT fall through to plaintext;
+                        # returning ciphertext as a key would silently break API calls.
+                        return ""
+                # Small file — treat as plaintext
+                return encrypted.decode('utf-8', errors='replace').strip()
         except Exception:
-            # Maybe it's plaintext, try that
             pass
         
-        # Method 3: Plaintext fallback
+        # Method 3: Plaintext fallback (no cipher available)
         try:
             return YT_KEY_FILE.read_text(encoding='utf-8').strip()
         except Exception:

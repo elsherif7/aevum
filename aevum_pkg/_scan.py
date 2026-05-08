@@ -85,6 +85,9 @@ def _read_mp4_duration(path):
                 name, size, hdr_size = read_atom(file_size)
                 if name is None or size < hdr_size:
                     break
+                # H-05: guard against zero-size top-level atom causing infinite loop
+                if size == 0:
+                    break
                 if name == b'moov':
                     moov_end = pos + size
                     inner = pos + hdr_size
@@ -92,6 +95,9 @@ def _read_mp4_duration(path):
                         f.seek(inner)
                         iname, isize, ihdr = read_atom(moov_end)
                         if iname is None or isize < ihdr:
+                            break
+                        # H-04: guard against zero-size inner atom causing infinite loop
+                        if isize == 0:
                             break
                         if iname == b'mvhd':
                             box = f.read(min(isize - ihdr, 40))
@@ -264,7 +270,8 @@ def format_size(b):
 
 def format_duration(seconds):
     # Issue 6: clamp negatives so delta formatting never produces garbage output
-    seconds = max(0.0, float(seconds))
+    # H-07: clamp to reasonable max (100 years) to prevent integer overflow
+    seconds = max(0.0, min(float(seconds), 100 * 365 * 86400))
     days    = int(seconds // 86400)
     hours   = int((seconds % 86400) // 3600)
     minutes = int((seconds % 3600) // 60)

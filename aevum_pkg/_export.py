@@ -148,59 +148,32 @@ def _write_content_atomic(dest, content, fmt):
     Write content atomically using temp file + rename.
     
     Security: Prevents TOCTOU races and sets restrictive permissions (user-only).
+    H-11: removed the Windows-specific dest.unlink() before os.replace() which
+    created a TOCTOU window. os.replace() on modern Windows (Vista+) is atomic.
     """
-    if fmt == "csv":
-        # For CSV, write atomically via temp file
-        temp_fd, temp_path = tempfile.mkstemp(
-            dir=dest.parent,
-            prefix=f".{dest.name}_",
-            suffix=".tmp"
-        )
-        
-        try:
-            with os.fdopen(temp_fd, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
+    mode    = ('w', {'newline': '', 'encoding': 'utf-8'}) if fmt == "csv" else ('w', {'encoding': 'utf-8'})
+    temp_fd, temp_path = tempfile.mkstemp(
+        dir=dest.parent,
+        prefix=f".{dest.stem}_",
+        suffix=".tmp"
+    )
+    try:
+        with os.fdopen(temp_fd, mode[0], **mode[1]) as f:
+            if fmt == "csv":
+                import csv as _csv
+                writer = _csv.writer(f)
                 for row in content:
                     writer.writerow(row)
-            
-            # Set restrictive permissions before moving
-            os.chmod(temp_path, 0o600)
-            
-            # Atomic rename
-            if os.name == 'nt' and dest.exists():
-                dest.unlink()
-            os.replace(temp_path, dest)
-        except Exception:
-            try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
-            raise
-    else:
-        # For text/JSON, write atomically via temp file
-        temp_fd, temp_path = tempfile.mkstemp(
-            dir=dest.parent,
-            prefix=f".{dest.name}_",
-            suffix=".tmp"
-        )
-        
-        try:
-            with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+            else:
                 f.write(content)
-            
-            # Set restrictive permissions
-            os.chmod(temp_path, 0o600)
-            
-            # Atomic rename
-            if os.name == 'nt' and dest.exists():
-                dest.unlink()
-            os.replace(temp_path, dest)
-        except Exception:
-            try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
-            raise
+        os.chmod(temp_path, 0o600)
+        os.replace(temp_path, dest)   # atomic on all supported platforms
+    except Exception:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+        raise
 
 
 def _build_content(folder, total_sec, total_count, tree, durations, fmt):

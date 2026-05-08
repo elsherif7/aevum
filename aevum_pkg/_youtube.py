@@ -170,10 +170,18 @@ def _get_current_date_pt():
 
 
 def _load_quota_tracker():
-    """Load quota tracker. Returns (date_str, units_used)."""
+    """Load quota tracker. Returns (date_str, units_used).
+    
+    H-09: validate units_used is a non-negative integer to prevent
+    a corrupted file from bypassing the quota guard.
+    """
     try:
         data = json.loads(YT_QUOTA_FILE.read_text(encoding="utf-8"))
-        return data.get("date", ""), data.get("units_used", 0)
+        date = data.get("date", "")
+        raw  = data.get("units_used", 0)
+        # Clamp to valid range — never trust disk data blindly
+        units_used = max(0, min(int(raw), YT_QUOTA_DAILY_LIMIT))
+        return date, units_used
     except Exception:
         return "", 0
 
@@ -271,7 +279,9 @@ def _parse_iso8601_duration(d):
     if not m:
         return 0.0
     h, mi, s = m.groups()
-    return float(h or 0) * 3600 + float(mi or 0) * 60 + float(s or 0)
+    # H-08: clamp to reasonable max and ensure non-negative
+    result = float(h or 0) * 3600 + float(mi or 0) * 60 + float(s or 0)
+    return max(0.0, min(result, 365 * 86400))  # cap at 1 year
 
 
 def _yt_api_request(endpoint, params, api_key, quota_cost=None):
@@ -417,7 +427,11 @@ def _yt_get_channel_uploads_playlist(channel_id_or_handle, api_key):
 def _yt_fetch_playlist_video_ids(playlist_id, api_key, on_progress=None):
     ids        = []
     page_token = None
-    while True:
+    # H-06: cap pagination at 2000 pages (100,000 videos) to prevent infinite
+    # loops from malformed/adversarial nextPageToken responses.
+    MAX_PAGES  = 2000
+    page_count = 0
+    while page_count < MAX_PAGES:
         params = {'part': 'contentDetails', 'playlistId': playlist_id, 'maxResults': 50}
         if page_token:
             params['pageToken'] = page_token
@@ -430,6 +444,7 @@ def _yt_fetch_playlist_video_ids(playlist_id, api_key, on_progress=None):
             if vid:
                 ids.append(vid)
         page_token = data.get('nextPageToken')
+        page_count += 1
         # Use a spinner-style callback (total unknown until pagination ends)
         if on_progress:
             on_progress(len(ids), max(len(ids), 1))
