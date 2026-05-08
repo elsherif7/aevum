@@ -289,13 +289,24 @@ def export_url_results(url, label, total_sec, total_count, entries, fmt, out_pat
     regardless of the requested format.  Now txt, csv, and json are all
     properly implemented to match the behaviour of export_results() for
     local folder scans.
+    
+    S-06 fix: validate output path to prevent arbitrary file writes.
     """
     stamp    = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe     = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)[:40]
-    filename = f"aevum_yt_{safe}_{stamp}.{fmt}"
+    random_suffix = secrets.token_hex(4)
+    filename = f"aevum_yt_{safe}_{stamp}_{random_suffix}.{fmt}"
 
     if out_path:
-        dest = Path(out_path)
+        # S-06: validate output path
+        try:
+            dest = validate_export_path(out_path, Path.home())
+        except (PermissionError, ValueError) as e:
+            print(f"  Warning: {e}", file=__import__('sys').stderr)
+            print(f"  Falling back to safe location...", file=__import__('sys').stderr)
+            desktop = Path.home() / "Desktop"
+            desktop.mkdir(parents=True, exist_ok=True)
+            dest = desktop / filename
     else:
         desktop = Path.home() / "Desktop"
         desktop.mkdir(parents=True, exist_ok=True)

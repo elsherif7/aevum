@@ -20,7 +20,13 @@ def _normalise_path(p):
     Return a normalised absolute path with symlinks resolved.
     
     Security: Always resolve symlinks to prevent cache poisoning
-    and TOCTOU attacks. Validates path is within allowed boundaries.
+    and TOCTOU attacks.
+    
+    S-05/S-10 fix: removed overly restrictive path validation that rejected
+    valid media paths (network shares, removable drives, non-home directories).
+    Path access control should happen at the scan entry point, not in the
+    cache key function.  The cache accepts any path the OS allows the process
+    to read.
     
     Issue 22 fix: on Windows, paths are lowercased so that a file cached as
     'C:\\Movies\\File.MKV' is still found when looked up as
@@ -30,37 +36,9 @@ def _normalise_path(p):
     try:
         # Resolve symlinks FIRST to prevent attacks
         resolved = Path(p).resolve(strict=False)
-        
-        # Security check: ensure path is under user's home or common media dirs
-        allowed_roots = [
-            Path.home(),
-            Path("/media"),
-            Path("/mnt"),
-        ]
-        
-        is_allowed = False
-        for root in allowed_roots:
-            if not root.exists():
-                continue
-            try:
-                resolved.relative_to(root)
-                is_allowed = True
-                break
-            except ValueError:
-                continue
-        
-        if not is_allowed and os.name == "nt":
-            # On Windows, allow any valid drive letter
-            drive = resolved.drive
-            if drive and len(drive) >= 2 and drive[1] == ':' and drive[0].upper().isalpha():
-                is_allowed = True
-        
-        if not is_allowed:
-            raise PermissionError(f"Path {resolved} is outside allowed directories")
-        
         s = str(resolved)
         return s.lower() if os.name == "nt" else s
-    except (OSError, RuntimeError, PermissionError) as e:
+    except (OSError, RuntimeError) as e:
         raise PermissionError(f"Invalid path: {e}")
 
 

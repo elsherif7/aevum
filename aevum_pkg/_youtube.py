@@ -13,25 +13,71 @@ from collections import deque as _deque
 from threading import Lock as _Lock
 
 class _RateLimiter:
-    """Token bucket rate limiter — 100 req/hr to stay well under YouTube quota."""
+    """
+    Token bucket rate limiter — 100 req/hr to stay well under YouTube quota.
+
+    S-09 fix: state is persisted to disk so the limit is enforced across
+    multiple process invocations (e.g. shell loops).  The backing file is
+    a simple JSON list of UTC timestamps.  Entries older than time_window
+    are pruned on every load/save.
+    """
     def __init__(self, max_calls: int, time_window: int):
         self.max_calls   = max_calls
         self.time_window = time_window
         self.calls       = _deque()
         self.lock        = _Lock()
+        self._state_file = None   # set lazily after _paths is importable
+
+    def _state_path(self):
+        if self._state_file is None:
+            from ._paths import APPDATA
+            self._state_file = APPDATA / "yt_ratelimit.json"
+        return self._state_file
+
+    def _load(self):
+        """Load persisted timestamps into self.calls (pruning stale ones)."""
+        try:
+            import json as _json
+            raw = _json.loads(self._state_path().read_text(encoding="utf-8"))
+            now = _time_mod.time()
+            self.calls = _deque(
+                t for t in raw if isinstance(t, (int, float)) and t >= now - self.time_window
+            )
+        except Exception:
+            self.calls = _deque()
+
+    def _save(self):
+        """Persist current timestamps atomically."""
+        try:
+            import json as _json, tempfile, os as _os
+            p = self._state_path()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=p.parent, suffix=".tmp")
+            try:
+                with _os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
+                    f.write(_json.dumps(list(self.calls)))
+                _os.replace(tmp_path, p)
+            except Exception:
+                try: _os.unlink(tmp_path)
+                except OSError: pass
+        except Exception:
+            pass
 
     def allow_request(self) -> bool:
         with self.lock:
+            self._load()
             now = _time_mod.time()
             while self.calls and self.calls[0] < now - self.time_window:
                 self.calls.popleft()
             if len(self.calls) < self.max_calls:
                 self.calls.append(now)
+                self._save()
                 return True
             return False
 
     def wait_time(self) -> float:
         with self.lock:
+            self._load()
             if not self.calls:
                 return 0.0
             return max(0.0, (self.calls[0] + self.time_window) - _time_mod.time())
@@ -39,6 +85,7 @@ class _RateLimiter:
     def reset(self):
         with self.lock:
             self.calls.clear()
+            self._save()
 
 youtube_limiter = _RateLimiter(max_calls=100, time_window=3600)
 
@@ -132,13 +179,30 @@ def _load_quota_tracker():
 
 
 def _save_quota_tracker(date, units_used):
-    """Persist quota tracker. Failures are silently ignored."""
+    """Persist quota tracker atomically. Failures are silently ignored.
+    
+    S-04 fix: use temp-file + rename (atomic) instead of write_text which
+    could corrupt the tracker on a mid-write crash and silently reset the
+    quota counter to 0.
+    """
     try:
+        import tempfile
         YT_QUOTA_FILE.parent.mkdir(parents=True, exist_ok=True)
-        YT_QUOTA_FILE.write_text(
-            json.dumps({"date": date, "units_used": units_used}, indent=2),
-            encoding="utf-8",
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            dir=YT_QUOTA_FILE.parent,
+            prefix=".tmp_quota_",
+            suffix=".json",
         )
+        try:
+            with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
+                f.write(json.dumps({"date": date, "units_used": units_used}, indent=2))
+            os.replace(tmp_path, YT_QUOTA_FILE)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     except Exception:
         pass
 

@@ -28,47 +28,41 @@ def _get_cipher():
     """
     Get Fernet cipher for fallback encrypted-file storage.
 
-    Uses PBKDF2-HMAC-SHA256 with a random 32-byte salt stored alongside
-    the key file.  The salt makes offline bruteforce attacks expensive even
-    when the hostname/username are known.  This is still a best-effort
-    fallback — the system keyring (Method 1) remains the only genuinely
-    secure option.
+    S-01 fix: The previous implementation derived the encryption key from
+    hostname+username (both trivially known to any local user), making the
+    encryption provide only marginal protection over plaintext.
+
+    The new implementation generates a truly random 32-byte key and stores
+    it in a separate key file with 0o600 permissions.  This is still a
+    best-effort fallback — the system keyring (Method 1) remains the only
+    genuinely secure option — but it is no longer trivially reversible by
+    any local user who can read the ciphertext file.
     """
     try:
         from cryptography.fernet import Fernet
-        import hashlib
         import secrets as _secrets
-        import socket
 
-        salt_file = YT_KEY_FILE.with_suffix(".salt")
+        key_file = YT_KEY_FILE.with_suffix(".key")
 
-        # Load existing salt or create a fresh one
-        if salt_file.exists():
+        # Load existing random key or create a fresh one
+        if key_file.exists():
             try:
-                salt = salt_file.read_bytes()
-                if len(salt) != 32:
-                    raise ValueError("bad salt length")
+                raw_key = key_file.read_bytes()
+                # Fernet keys are 44 bytes when base64-encoded
+                if len(raw_key) != 44:
+                    raise ValueError("bad key length")
+                # Validate it is a valid Fernet key by constructing one
+                Fernet(raw_key)
+                return Fernet(raw_key)
             except Exception:
-                salt = _secrets.token_bytes(32)
-                salt_file.write_bytes(salt)
-                os.chmod(salt_file, 0o600)
-        else:
-            salt = _secrets.token_bytes(32)
-            salt_file.parent.mkdir(parents=True, exist_ok=True)
-            salt_file.write_bytes(salt)
-            os.chmod(salt_file, 0o600)
+                pass  # fall through to generate a new key
 
-        try:
-            login = os.getlogin()
-        except OSError:
-            login = os.getenv("LOGNAME") or os.getenv("USER") or os.getenv("USERNAME") or "unknown"
-
-        import socket
-        machine_id = f"{socket.gethostname()}-{login}".encode()
-
-        key_material = hashlib.pbkdf2_hmac("sha256", machine_id, salt, 100_000)
-        key = base64.urlsafe_b64encode(key_material)
-        return Fernet(key)
+        # Generate a fresh random Fernet key
+        new_key = Fernet.generate_key()
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        key_file.write_bytes(new_key)
+        os.chmod(key_file, 0o600)
+        return Fernet(new_key)
     except (ImportError, OSError, ValueError):
         return None
 
@@ -86,8 +80,11 @@ def save_api_key(api_key: str) -> bool:
     Returns:
         True if saved successfully, False otherwise
     """
-    if not api_key or not (35 <= len(api_key) <= 45):
-        print(f"  Error: Invalid API key format", file=sys.stderr)
+    # S-02: Validate API key format (YouTube keys start with AIza)
+    import re
+    YT_KEY_PATTERN = re.compile(r'^AIza[0-9A-Za-z\-_]{35}$')
+    if not api_key or not YT_KEY_PATTERN.match(api_key):
+        print(f"  Error: Invalid API key format (expected AIza...)", file=sys.stderr)
         return False
     
     # Method 1: System keyring (best - OS-encrypted storage)

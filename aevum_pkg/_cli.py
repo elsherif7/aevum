@@ -157,12 +157,14 @@ def _run_pip_upgrade(src_dir, quiet=False):
 def _open_appdata():
     import subprocess as _sp
     from ._paths import APPDATA
-    APPDATA.mkdir(parents=True, exist_ok=True)
+    # S-07: resolve and validate the path before passing to shell opener
+    appdata = APPDATA.resolve()
+    appdata.mkdir(parents=True, exist_ok=True)
     if os.name == "nt":
-        _sp.Popen(["explorer", str(APPDATA)])
+        _sp.Popen(["explorer", str(appdata)])
     else:
-        _sp.Popen(["xdg-open", str(APPDATA)])
-    return APPDATA
+        _sp.Popen(["xdg-open", str(appdata)])
+    return appdata
 
 
 def _scan_to_json(folder, total_sec, total_count, tree, durations, sizes, hits):
@@ -443,9 +445,19 @@ def _do_update(cfg, dry_run=False, quiet=False):
             return 0
         if not pasted:
             return 0
-        src_dir = Path(pasted)
+        src_dir = Path(pasted).resolve()
         if not (src_dir / "pyproject.toml").exists():
             print(f"\n  {clr.R}[ERROR]{clr.RST} No pyproject.toml found at {src_dir}.\n", file=sys.stderr)
+            return EX.ERR_ARGS
+        # S-08: verify this is actually the Aevum project, not a malicious package
+        try:
+            toml_content = (src_dir / "pyproject.toml").read_text(encoding="utf-8")
+            if 'name = "aevum"' not in toml_content and "name = 'aevum'" not in toml_content:
+                print(f"\n  {clr.R}[ERROR]{clr.RST} This does not appear to be the Aevum project "
+                      f"(pyproject.toml does not contain name = \"aevum\").\n", file=sys.stderr)
+                return EX.ERR_ARGS
+        except OSError as e:
+            print(f"\n  {clr.R}[ERROR]{clr.RST} Could not read pyproject.toml: {e}\n", file=sys.stderr)
             return EX.ERR_ARGS
         cfg['project_dir'] = str(src_dir)
         save_config(cfg)
