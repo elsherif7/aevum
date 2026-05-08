@@ -303,6 +303,8 @@ Config is stored at `%LOCALAPPDATA%\Aevum\config.json` on Windows, or `~/.local/
 
 Aevum caches video durations so repeat scans of large libraries are near-instant. Each file is cached by its absolute path, mtime, and size — stale entries are automatically ignored. Use `--no-cache` to force a full re-probe, or `aevum cache clear <folder>` to remove the cache for a specific folder only.
 
+The cache works correctly on all filesystems including FAT32 and exFAT (common on external drives and SD cards), which have 2-second mtime precision.
+
 YouTube video durations are cached separately per video ID, so re-scanning a channel only fetches new uploads from the API.
 
 | Platform | Cache location |
@@ -338,6 +340,7 @@ Aevum/
     _scan.py         — ffprobe, native parsers, tree builder, filters
     _youtube.py      — YouTube Data API v3 + per-video cache + quota tracking
     _display.py      — all print/display functions
+    _compare.py      — folder comparison logic
     _dupes.py        — duplicate detection (BLAKE2b)
     _export.py       — TXT/CSV/JSON export + path validation
     _config.py       — config, cache commands, doctor
@@ -345,6 +348,7 @@ Aevum/
     _paths.py        — platform-aware AppData/XDG path resolution
     _color.py        — ANSI color singleton (clr)
     _apikey.py       — encrypted API key storage (keyring → Fernet → plaintext)
+    _exit.py         — CLI exit codes
 ```
 
 ---
@@ -352,10 +356,15 @@ Aevum/
 ## Security
 
 - All subprocess calls use safe list form — no shell injection possible
-- Paths validated and restricted to user directories before scanning or writing
-- API keys stored in OS keyring (Windows Credential Manager / macOS Keychain / Linux Secret Service) when `keyring` is installed; falls back to Fernet-encrypted file, then plaintext with a warning
+- Output paths validated before writing — system directories are blocked
+- API keys stored in OS keyring (Windows Credential Manager / macOS Keychain / Linux Secret Service) when `keyring` is installed; falls back to a randomly-keyed Fernet-encrypted file, then plaintext with a warning
+- API key format validated (`AIza...`) before storage to prevent accidental credential writes
 - CSV exports escape formula characters to prevent spreadsheet injection
 - Symlink loop detection (inode tracking) and max recursion depth (30 levels)
-- YouTube API rate-limited to 100 requests/hour via token bucket
-- Atomic file writes (temp → rename) prevent race conditions on cache and config
+- YouTube API rate-limited to 100 requests/hour via persistent token bucket (enforced across process invocations)
+- YouTube playlist pagination capped at 100,000 videos to prevent infinite loops
+- Atomic file writes (temp → rename) on all persistent state — cache, config, quota tracker, rate limiter
+- Duration values clamped to prevent integer overflow from corrupted cache or malformed API responses
+- Quota tracker validated on load — negative values cannot bypass the daily quota guard
+- `LOCALAPPDATA` / `XDG_DATA_HOME` environment variables validated as absolute paths before use
 - No telemetry — nothing is sent anywhere except the YouTube API when scanning URLs
