@@ -121,6 +121,8 @@ def get_cached_duration(path: Path, cache: dict) -> tuple:
     """
     Get duration from cache.
 
+    H-12: use 2-second tolerance for mtime comparison (FAT/exFAT precision).
+
     Returns:
         (duration, hit) tuple - (0.0, False) if not in cache
     """
@@ -132,7 +134,7 @@ def get_cached_duration(path: Path, cache: dict) -> tuple:
     if entry is not None:
         try:
             st = path.stat()
-            if abs(st.st_mtime - entry["mtime"]) < 1e-6 and st.st_size == entry["size"]:
+            if abs(st.st_mtime - entry["mtime"]) < 2.0 and st.st_size == entry["size"]:
                 return entry["duration"], True
         except OSError:
             pass

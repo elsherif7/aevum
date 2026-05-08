@@ -342,11 +342,13 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
             try:
                 st    = path.stat()
                 entry = cache[key]
-                if st.st_mtime == entry["mtime"] and st.st_size == entry["size"]:
+                # H-12: use float comparison with tolerance for mtime
+                # (filesystem timestamps have limited precision on FAT/exFAT)
+                if abs(st.st_mtime - entry["mtime"]) < 2.0 and st.st_size == entry["size"]:
                     with lock:
                         done += 1
                         hits += 1
-                        _snap_done  = done   # read both under lock
+                        _snap_done  = done
                         _snap_total = total
                     if on_progress and _snap_total > 0:
                         on_progress(_snap_done, _snap_total)
@@ -360,7 +362,7 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
             file_size = 0
         with lock:
             done += 1
-            _snap_done  = done   # read both under lock
+            _snap_done  = done
             _snap_total = total
         if on_progress and _snap_total > 0:
             on_progress(_snap_done, _snap_total)
