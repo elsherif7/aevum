@@ -303,6 +303,10 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
 
     # Copy params to avoid mutating the caller's dict
     params = {**params, 'key': api_key}
+    # S-03 note: API key is in URL query string (YouTube API v3 design).
+    # This means the key appears in server logs, proxy logs, and network monitoring.
+    # This is a known limitation of the YouTube Data API v3 design.
+    # For production use cases, consider OAuth 2.0 service accounts instead.
     url = f"{YT_API_BASE}/{endpoint}?{urllib.parse.urlencode(params)}"
 
     try:

@@ -122,10 +122,15 @@ def _read_mkv_duration(path):
     Issue 3 fix: increased read size from 2 MB to 8 MB so that Info blocks
     placed after large Tracks/SeekHead structures are still found without
     falling back to ffprobe.
+    
+    P-01 fix: use a two-pass strategy — try 2 MB first (covers most files),
+    then retry with 8 MB only if the Info block was not found.  This reduces
+    average memory usage from 8 MB/file to ~2 MB/file for typical MKVs.
     """
-    try:
-        with open(path, 'rb') as f:
-            data = f.read(min(8 * 1024 * 1024, os.path.getsize(path)))
+    file_size = os.path.getsize(path)
+
+    def _try_parse(data):
+        """Inner parser — returns duration float or None."""
 
         def read_vint(buf, pos):
             if pos >= len(buf):
@@ -191,9 +196,26 @@ def _read_mkv_duration(path):
                 i += esize
             else:
                 i += 1
+        return None
+
+    try:
+        # P-01: two-pass strategy — try 2 MB first (covers most MKV files),
+        # then retry with 8 MB only if the Info block was not found.
+        SMALL_READ = 2 * 1024 * 1024
+        LARGE_READ = 8 * 1024 * 1024
+        with open(path, 'rb') as f:
+            data = f.read(min(SMALL_READ, file_size))
+        result = _try_parse(data)
+        if result is not None:
+            return result
+        # Info block not found in first 2 MB — retry with 8 MB
+        if file_size > SMALL_READ:
+            with open(path, 'rb') as f:
+                data = f.read(min(LARGE_READ, file_size))
+            return _try_parse(data)
+        return None
     except Exception:
-        pass
-    return None
+        return None
 
 
 def get_duration(path):
@@ -541,6 +563,8 @@ def _run_scan(folder, on_progress, sort_by="name", use_cache=True):
         stop_event.set()
         raise
     total_sec, total_count, tree, durations, sizes, hits = result
+    # B-04: save cache only when new files were probed (hits < total files)
+    # This avoids unnecessary disk writes when all results came from cache.
     if durations and hits < len(durations):
         save_cache(folder, durations)
     return result

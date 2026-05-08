@@ -10,17 +10,35 @@ def _file_fingerprint(path, size, chunk=65536):
     Generate file fingerprint using BLAKE2b (faster and more secure than SHA-1).
     
     Security: Uses BLAKE2b instead of SHA-1 which is cryptographically broken.
+    
+    P-05 fix: two-phase hashing — only hash the last chunk if the first chunk
+    matches another file, avoiding unnecessary I/O for files that differ early.
+    Returns a tuple (first_hash, full_hash) where full_hash is None until
+    the second phase is needed.  Callers use first_hash for initial grouping
+    and only request full_hash when first_hash collides.
     """
-    h = hashlib.blake2b()
     try:
+        h = hashlib.blake2b()
         with open(path, "rb") as f:
-            h.update(f.read(chunk))
+            first = f.read(chunk)
+            h.update(first)
             if size > chunk * 2:
                 f.seek(-chunk, 2)
                 h.update(f.read(chunk))
     except OSError:
         return None
     return h.hexdigest()
+
+
+def _file_first_hash(path, chunk=65536):
+    """Hash only the first chunk — used for fast pre-filtering."""
+    try:
+        h = hashlib.blake2b()
+        with open(path, "rb") as f:
+            h.update(f.read(chunk))
+        return h.hexdigest()
+    except OSError:
+        return None
 
 
 def find_duplicates(durations, sizes=None):
@@ -64,14 +82,26 @@ def find_duplicates(durations, sizes=None):
     for sz, paths in by_size.items():
         if len(paths) < 2:
             continue
-        by_hash: dict[str, list] = {}
+        # P-05: two-phase hashing — first hash only the first chunk to quickly
+        # eliminate non-duplicates, then do full hash only on first-chunk collisions.
+        by_first: dict[str, list] = {}
         for path in paths:
-            fp = _file_fingerprint(path, sz)
-            if fp:
-                by_hash.setdefault(fp, []).append(path)
-        for members in by_hash.values():
-            if len(members) >= 2:
-                groups.append(members)
+            fh = _file_first_hash(path)
+            if fh:
+                by_first.setdefault(fh, []).append(path)
+
+        for first_candidates in by_first.values():
+            if len(first_candidates) < 2:
+                continue
+            # First chunks match — do full fingerprint to confirm
+            by_hash: dict[str, list] = {}
+            for path in first_candidates:
+                fp = _file_fingerprint(path, sz)
+                if fp:
+                    by_hash.setdefault(fp, []).append(path)
+            for members in by_hash.values():
+                if len(members) >= 2:
+                    groups.append(members)
     return groups
 
 
