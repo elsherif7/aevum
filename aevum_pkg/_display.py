@@ -332,7 +332,7 @@ def print_stats(folder, durations, sizes):
     folder_sec: dict   = {}
     folder_bytes: dict = {}
     for p, sec in durations.items():
-        fn = p.parent.name
+        fn = str(p.parent)   # use full path to avoid name collisions
         folder_sec[fn]   = folder_sec.get(fn, 0.0) + sec
         folder_bytes[fn] = folder_bytes.get(fn, 0) + sizes.get(p, 0)
     densest = None
@@ -343,7 +343,7 @@ def print_stats(folder, durations, sizes):
             ratio = fsec / fb
             if ratio > best_ratio:
                 best_ratio = ratio
-                densest    = fn
+                densest    = Path(fn).name  # display just the folder name
 
     print()
     print(f"  {clr.C}{LINE}{clr.RST}")

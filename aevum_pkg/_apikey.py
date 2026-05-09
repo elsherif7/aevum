@@ -164,22 +164,24 @@ def load_api_key() -> str:
             cipher = _get_cipher()
             if cipher:
                 encrypted = YT_KEY_FILE.read_bytes()
-                # H-02: only fall through to plaintext if the file is clearly
-                # not Fernet-encrypted (small size = plaintext key).
-                # Fernet ciphertext for a 39-char key is ~116 bytes.
-                if len(encrypted) > 80:
+                # Always attempt decryption when cipher is available.
+                # Only fall back to plaintext if cipher is None.
+                try:
+                    decrypted = cipher.decrypt(encrypted)
+                    return decrypted.decode('utf-8').strip()
+                except Exception:
+                    # Decryption failed — file may be plaintext (pre-encryption migration)
+                    # Only treat as plaintext if it looks like a valid API key
                     try:
-                        decrypted = cipher.decrypt(encrypted)
-                        return decrypted.decode('utf-8').strip()
+                        candidate = encrypted.decode('utf-8', errors='replace').strip()
+                        if _YT_KEY_PATTERN.match(candidate):
+                            return candidate
                     except Exception:
-                        # Decryption failed — do NOT fall through to plaintext;
-                        # returning ciphertext as a key would silently break API calls.
-                        return ""
-                # Small file — treat as plaintext
-                return encrypted.decode('utf-8', errors='replace').strip()
+                        pass
+                    return ""
         except Exception:
             pass
-        
+
         # Method 3: Plaintext fallback (no cipher available)
         try:
             return YT_KEY_FILE.read_text(encoding='utf-8').strip()

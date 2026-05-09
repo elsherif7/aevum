@@ -63,16 +63,18 @@ def save_snapshot(folder: Path, total_sec: float, total_count: int,
     history = history[-50:]   # keep last 50
 
     f = _history_file(folder)
+    tmp_path = None
     try:
         tmp_fd, tmp_path = tempfile.mkstemp(dir=HISTORY_DIR, suffix=".tmp")
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
             fh.write(json.dumps(history, separators=(",", ":")))
         os.replace(tmp_path, f)
     except Exception:
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
 
 
 def print_history(folder: Path):

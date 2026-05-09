@@ -248,11 +248,16 @@ def cmd_cache(args):
                 print(f"  {clr.DIM}Cache is already empty.{clr.RST}")
                 return
             files      = list(CACHE_DIR.glob("*.json"))
+            failed     = 0
             for f in files:
-                f.unlink()
+                try:
+                    f.unlink()
+                except OSError:
+                    failed += 1
             yt_cleared = yt_cache_clear()
             yt_note    = "  +  YouTube video cache" if yt_cleared else ""
-            print(f"  {clr.G}[OK]{clr.RST}  Cleared {len(files)} local cache files from {CACHE_DIR}{yt_note}")
+            fail_note  = f"  ({failed} failed)" if failed else ""
+            print(f"  {clr.G}[OK]{clr.RST}  Cleared {len(files) - failed} local cache files from {CACHE_DIR}{yt_note}{fail_note}")
 
 
 def cmd_config(args, cfg):

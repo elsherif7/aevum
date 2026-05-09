@@ -360,7 +360,13 @@ def _do_update(cfg, dry_run=False, quiet=False):
         if saved and (Path(saved) / "pyproject.toml").exists():
             return Path(saved)
         if (Path.cwd() / "pyproject.toml").exists():
-            return Path.cwd()
+            # S-08: verify this is actually the Aevum project before trusting cwd
+            try:
+                toml_content = (Path.cwd() / "pyproject.toml").read_text(encoding="utf-8")
+                if 'name = "aevum"' in toml_content or "name = 'aevum'" in toml_content:
+                    return Path.cwd()
+            except OSError:
+                pass
         return None
 
     src_dir = _find_project_dir()
@@ -1630,7 +1636,7 @@ def main():
         on_prog = _make_progress_bar(quiet, use_json)
         uc      = _use_cache(args, cfg)   # Issue 33
         try:
-            data_a, data_b = run_compare(folder_a, folder_b, on_prog, sort, uc)
+            data_a, data_b = run_compare(folder_a, folder_b, on_prog, sort, uc, quiet=quiet)
         except KeyboardInterrupt:
             if use_json:
                 _json_error("Scan interrupted", EX.ERR_SCAN)

@@ -27,7 +27,7 @@ video_extensions = (
     '.m1v', '.m2p', '.m4p', '.mpeg1', '.mpeg2',
     '.mpeg4', '.h264', '.h265', '.hevc', '.avchd',
     '.ogm', '.ogx', '.dv', '.dvr', '.dvr-ms', '.rec',
-    '.wtv', '.bdmv', '.iso', '.evo', '.ifo', '.mod',
+    '.wtv', '.bdmv', '.evo', '.ifo', '.mod',  # '.iso' removed — disc images too large
     '.tod', '.trp', '.tp', '.pva', '.nuv', '.fli',
     '.flc', '.flic', '.smk', '.bik', '.bik2', '.webp',
     # ── Additional video formats ─────────────────────────────────────
@@ -39,7 +39,7 @@ video_extensions = (
     '.cdxl',                         # Commodore CDXL
     '.cine',                         # Phantom Cine high-speed camera
     '.cpk',                          # Sega CRI CPK container
-    '.dat',                          # VCD MPEG-1 DAT / CCTV DAT
+    # '.dat',                        # too generic — matches Windows/game data files
     '.dhav',                         # Dahua DVR video
     '.dif',                          # DV interchange format
     '.dl',                           # DL animation
@@ -288,8 +288,9 @@ def _read_mkv_duration(path):
                 j        = i
                 duration = None
                 while j < end - 4:
-                    fid, j   = read_id(data, j)
-                    fsize, j = read_vint(data, j)
+                    fid, j    = read_id(data, j)
+                    fsize, j  = read_vint(data, j)
+                    field_start = j          # save position after header
                     if fid == 0x2AD7B1:
                         timescale_ns = int.from_bytes(data[j:j+fsize], 'big')
                     elif fid == 0x4489:
@@ -298,13 +299,10 @@ def _read_mkv_duration(path):
                             duration = struct.unpack('>f', raw)[0]
                         elif fsize == 8:
                             duration = struct.unpack('>d', raw)[0]
-                        # else: unknown size — skip, fall through to ffprobe
-                    if fsize == 0:
-                        continue  # zero-length field is valid; don't abort the block
                     # B-05: bounds check — malformed fsize could jump j past end
                     if j + fsize > end:
                         break
-                    j += fsize
+                    j = field_start + fsize  # always advance past field data
                 if duration is not None:
                     return duration * timescale_ns / 1_000_000_000
                 return None
@@ -363,7 +361,9 @@ def get_duration(path):
         )
         val = proc.stdout.strip()
         return float(val) if val and val != 'N/A' else 0.0
-    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, ValueError, OSError):
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, ValueError, OSError) as _e:
+        if isinstance(_e, subprocess.TimeoutExpired):
+            print(f"  [WARN] ffprobe timed out on: {path}", file=sys.stderr)
         return 0.0
 
 
@@ -467,7 +467,8 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
                 pass
         sec = get_duration(path)
         try:
-            file_size = path.stat().st_size
+            st        = path.stat()
+            file_size = st.st_size
         except OSError:
             file_size = 0
         with lock:

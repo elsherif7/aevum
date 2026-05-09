@@ -11,27 +11,30 @@ from ._color import clr, LINE
 from ._scan  import _run_scan, format_duration
 
 
-def run_compare(folder_a, folder_b, on_progress, sort_by, use_cache):
+def run_compare(folder_a, folder_b, on_progress, sort_by, use_cache, quiet=False):
     """
     Scan both folders and return their summary data.
 
     Returns:
         ((sec_a, count_a, dur_a), (sec_b, count_b, dur_b))
     """
-    print(f"  {clr.DIM}Scanning {Path(folder_a).name}...{clr.RST}", end="", flush=True)
+    if not quiet:
+        print(f"  {clr.DIM}Scanning {Path(folder_a).name}...{clr.RST}", end="", flush=True)
     sec_a, count_a, tree_a, dur_a, _, _ = _run_scan(folder_a, on_progress, sort_by, use_cache)
-    print(
-        f"\r  {clr.G}Done{clr.RST}  {clr.DIM}\u2192{clr.RST}  "
-        f"{clr.W}{Path(folder_a).name}{clr.RST}  {clr.DIM}|{clr.RST}  "
-        f"{clr.Y}{count_a} files  {format_duration(sec_a)['hours_fmt']}{clr.RST}".ljust(70)
-    )
-    print(f"  {clr.DIM}Scanning {Path(folder_b).name}...{clr.RST}", end="", flush=True)
+    if not quiet:
+        print(
+            f"\r  {clr.G}Done{clr.RST}  {clr.DIM}\u2192{clr.RST}  "
+            f"{clr.W}{Path(folder_a).name}{clr.RST}  {clr.DIM}|{clr.RST}  "
+            f"{clr.Y}{count_a} files  {format_duration(sec_a)['hours_fmt']}{clr.RST}".ljust(70)
+        )
+        print(f"  {clr.DIM}Scanning {Path(folder_b).name}...{clr.RST}", end="", flush=True)
     sec_b, count_b, tree_b, dur_b, _, _ = _run_scan(folder_b, on_progress, sort_by, use_cache)
-    print(
-        f"\r  {clr.G}Done{clr.RST}  {clr.DIM}\u2192{clr.RST}  "
-        f"{clr.W}{Path(folder_b).name}{clr.RST}  {clr.DIM}|{clr.RST}  "
-        f"{clr.Y}{count_b} files  {format_duration(sec_b)['hours_fmt']}{clr.RST}".ljust(70)
-    )
+    if not quiet:
+        print(
+            f"\r  {clr.G}Done{clr.RST}  {clr.DIM}\u2192{clr.RST}  "
+            f"{clr.W}{Path(folder_b).name}{clr.RST}  {clr.DIM}|{clr.RST}  "
+            f"{clr.Y}{count_b} files  {format_duration(sec_b)['hours_fmt']}{clr.RST}".ljust(70)
+        )
     return (sec_a, count_a, dur_a), (sec_b, count_b, dur_b)
 
 

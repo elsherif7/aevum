@@ -297,12 +297,12 @@ function filterTable() {{
 </html>"""
 
 
-def _build_content(folder, total_sec, total_count, tree, durations, fmt):
+def _build_content(folder, total_sec, total_count, tree, durations, fmt, sizes=None):
     """Build export content string (or row list for CSV) without touching disk."""
     folder = Path(folder)
 
     if fmt == "html":
-        return _build_html(folder, total_sec, total_count, tree, durations, {})
+        return _build_html(folder, total_sec, total_count, tree, durations, sizes or {})
 
     if fmt == "json":
         root_name  = folder.name
