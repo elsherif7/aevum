@@ -6,6 +6,72 @@ from ._scan  import format_duration, format_size
 
 _DEPTH_ATTRS = ("R", "G", "B", "M", "C")
 
+BAR_WIDTH = 28  # character width of the filled bar
+
+
+def _bar(seconds, total_sec, width=BAR_WIDTH):
+    """
+    Return a colored ASCII bar representing seconds / total_sec.
+    The bar uses block characters and shows the percentage at the end.
+    Returns an empty string when total_sec is 0.
+    """
+    if total_sec <= 0:
+        return ""
+    ratio  = min(seconds / total_sec, 1.0)
+    filled = round(ratio * width)
+    pct    = ratio * 100
+    bar    = "█" * filled + "░" * (width - filled)
+    # colour: green for large shares, yellow for mid, dim for small
+    if pct >= 40:
+        col = clr.G
+    elif pct >= 15:
+        col = clr.Y
+    else:
+        col = clr.DIM
+    return f"{col}{bar}{clr.RST}  {clr.DIM}{pct:5.1f}%{clr.RST}"
+
+
+def print_bar_chart(subfolders, total_sec, direct=None):
+    """
+    Print a compact bar-chart section showing each top-level subfolder's
+    share of the total duration.  Files sitting directly in the root folder
+    are grouped as '(root files)'.
+    """
+    if total_sec <= 0:
+        return
+
+    # Build rows: (label, seconds)
+    rows = []
+    for name, sec, count, _fb, _dc, _sub, _dir in subfolders:
+        if count > 0:
+            rows.append((name, sec))
+
+    # Direct root files grouped together
+    if direct:
+        direct_sec = sum(s for _, s in direct)
+        if direct_sec > 0:
+            rows.append(("(root files)", direct_sec))
+
+    if not rows:
+        return
+
+    # Sort by duration descending for a clean waterfall look
+    rows.sort(key=lambda x: x[1], reverse=True)
+
+    # Truncate label to keep the chart tidy
+    MAX_LABEL = 26
+
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print(f"  {clr.W}  Duration Breakdown{clr.RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print()
+    for label, sec in rows:
+        short = label if len(label) <= MAX_LABEL else label[:MAX_LABEL - 1] + "…"
+        dur   = format_duration(sec)["hours_fmt"]
+        bar   = _bar(sec, total_sec)
+        print(f"  {clr.W}{short:<{MAX_LABEL}}{clr.RST}  {bar}  {clr.DIM}{dur}{clr.RST}")
+    print()
+
 
 def _dc(depth: int) -> str:
     """Return the ANSI code for the given tree depth."""
@@ -122,6 +188,9 @@ def print_results(folder, total_sec, total_count, tree, durations=None, sizes=No
         Path(folder).name, total_sec, total_count, subfolders, direct,
         show_files=show_files, fbytes=root_bytes, max_depth=max_depth,
     )
+    # ASCII bar chart — only shown when there is more than one folder to compare
+    if subfolders or direct:
+        print_bar_chart(subfolders, total_sec, direct)
     print(f"  {clr.C}{LINE}{clr.RST}")
     print(f"  {clr.W}  Grand Total{clr.RST}")
     print(f"  {clr.C}{LINE}{clr.RST}")
@@ -197,6 +266,25 @@ def print_url_results(url, label, total_sec, total_count, entries, top_n=10, una
             dur_fmt = format_duration(e["duration"])
             print(f"  {clr.DIM}{i:>2}.{clr.RST}  {clr.W}{dur_fmt['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{e['title'][:60]}{clr.RST}")
         print()
+
+    # Bar chart: top channels by total duration (only when multiple channels present)
+    if entries and total_sec > 0:
+        channel_secs: dict = {}
+        for e in entries:
+            ch = e.get("channel") or "Unknown"
+            channel_secs[ch] = channel_secs.get(ch, 0.0) + e["duration"]
+        if len(channel_secs) > 1:
+            MAX_LABEL = 26
+            print(f"  {clr.C}{LINE}{clr.RST}")
+            print(f"  {clr.W}  Channel Breakdown{clr.RST}")
+            print(f"  {clr.C}{LINE}{clr.RST}")
+            print()
+            for ch, sec in sorted(channel_secs.items(), key=lambda x: x[1], reverse=True):
+                short = ch if len(ch) <= MAX_LABEL else ch[:MAX_LABEL - 1] + "…"
+                dur   = format_duration(sec)["hours_fmt"]
+                bar   = _bar(sec, total_sec)
+                print(f"  {clr.W}{short:<{MAX_LABEL}}{clr.RST}  {bar}  {clr.DIM}{dur}{clr.RST}")
+            print()
 
 
 def _fuzzy_suggest(word, candidates):
