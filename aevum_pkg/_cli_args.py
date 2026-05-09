@@ -12,6 +12,42 @@ from ._exit    import EX
 from ._display import _fuzzy_suggest
 from ._cli_helpers import _expand_aliases_in_argv
 
+
+def _split_two_paths(parts):
+    """
+    Given a list of tokens that represent two paths (possibly with spaces),
+    find the best split point by trying each position and checking which
+    candidate paths exist on disk. Falls back to splitting at the midpoint.
+    """
+    if not parts:
+        return '', ''
+    for i in range(1, len(parts)):
+        a = ' '.join(parts[:i])
+        b = ' '.join(parts[i:])
+        if Path(a).exists() and Path(b).exists():
+            return a, b
+    mid = len(parts) // 2
+    return ' '.join(parts[:mid]), ' '.join(parts[mid:])
+
+
+def _join_path_tokens(parts):
+    """
+    Given a list of tokens that may represent a single path with spaces,
+    find the longest prefix that exists on disk. Falls back to joining all.
+    Tries progressively longer joins so 'D:\\foo bar baz' is found even if
+    'D:\\foo' also exists.
+    """
+    if not parts:
+        return ''
+    best = ' '.join(parts)
+    if Path(best).exists():
+        return best
+    for i in range(len(parts), 0, -1):
+        candidate = ' '.join(parts[:i])
+        if Path(candidate).exists():
+            return candidate
+    return best
+
 # Imported lazily in _parse_args to avoid circular imports at module level.
 # __version__ is imported in _cli.py and passed through _print_global_help.
 
