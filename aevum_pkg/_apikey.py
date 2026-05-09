@@ -131,7 +131,7 @@ def save_api_key(api_key: str) -> bool:
         YT_KEY_FILE.write_text(api_key, encoding='utf-8')
         os.chmod(YT_KEY_FILE, 0o600)
         
-        print(f"  ⚠️  WARNING: API key stored in PLAINTEXT", file=sys.stderr)
+        print(f"  [WARN] API key stored in PLAINTEXT", file=sys.stderr)
         print(f"  Install 'keyring' for secure storage: pip install keyring", 
               file=sys.stderr)
         return True

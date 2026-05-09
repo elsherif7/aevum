@@ -455,12 +455,12 @@ Aevum supports all YouTube properties:
 
 | URL | Supported |
 |---|---|
-| `youtube.com` videos, playlists, channels | ✅ |
-| `youtu.be` short links | ✅ |
-| `m.youtube.com` mobile links | ✅ |
-| `music.youtube.com` | ✅ |
-| `kids.youtube.com` | ✅ |
-| `gaming.youtube.com` | ✅ |
+| `youtube.com` videos, playlists, channels | Yes |
+| `youtu.be` short links | Yes |
+| `m.youtube.com` mobile links | Yes |
+| `music.youtube.com` | Yes |
+| `kids.youtube.com` | Yes |
+| `gaming.youtube.com` | Yes |
 
 Requires a free YouTube Data API v3 key. Set it once with:
 
