@@ -591,6 +591,47 @@ def _parse_args():
     return _dispatch_subcommand(subcommand, argv[1:])
 
 
+def _split_two_paths(parts):
+    """
+    Given a list of tokens that represent two paths (possibly with spaces),
+    find the best split point by trying each position and checking which
+    candidate paths exist on disk. Falls back to splitting at the midpoint.
+    """
+    if not parts:
+        return '', ''
+    # Try every split point; prefer the one where both sides exist
+    for i in range(1, len(parts)):
+        a = ' '.join(parts[:i])
+        b = ' '.join(parts[i:])
+        if Path(a).exists() and Path(b).exists():
+            return a, b
+    # Fallback: split at midpoint
+    mid = len(parts) // 2
+    return ' '.join(parts[:mid]), ' '.join(parts[mid:])
+
+
+def _join_path_tokens(parts):
+    """
+    Given a list of tokens that may represent a single path with spaces,
+    find the longest prefix that exists on disk. Falls back to joining all.
+    Tries progressively longer joins so 'D:\\foo bar baz' is found even if
+    'D:\\foo' also exists.
+    """
+    if not parts:
+        return ''
+    # Try longest match first (greedy) so we don't stop at a partial path
+    best = ' '.join(parts)
+    if Path(best).exists():
+        return best
+    # Try from longest to shortest
+    for i in range(len(parts), 0, -1):
+        candidate = ' '.join(parts[:i])
+        if Path(candidate).exists():
+            return candidate
+    # Nothing found — return full join and let the caller handle the error
+    return best
+
+
 def _dispatch_subcommand(sub, argv):
     if sub == 'files':
         p = argparse.ArgumentParser(prog="aevum files",
@@ -607,7 +648,7 @@ def _dispatch_subcommand(sub, argv):
                        default=None, metavar="SPEED")
         _add_common_flags(p)
         args = p.parse_intermixed_args(argv)
-        args.folder  = ' '.join(args.folder_parts)
+        args.folder  = _join_path_tokens(args.folder_parts)
         args.command = sub
         return args
 
@@ -651,7 +692,7 @@ def _dispatch_subcommand(sub, argv):
                     "  aevum watch D:\\Movies\n"
                     "  aevum watch D:\\Movies --interval 10\n"
                     "  aevum watch D:\\Downloads --ext mkv,mp4 --min-duration 5m\n"))
-        p.add_argument("folder", metavar="PATH")
+        p.add_argument("folder_parts", nargs="*", metavar="PATH")
         p.add_argument("-i", "--interval", type=float, default=5.0, metavar="SECONDS")
         p.add_argument("--no-clear", action="store_true")
         p.add_argument("-s", "--sort",  default=None, metavar="FIELD[:DIR]")
@@ -666,6 +707,7 @@ def _dispatch_subcommand(sub, argv):
                        default=None, metavar="SPEED")
         _add_common_flags(p)
         args = p.parse_intermixed_args(argv)
+        args.folder  = _join_path_tokens(args.folder_parts)
         args.command = sub
         return args
 
@@ -674,13 +716,20 @@ def _dispatch_subcommand(sub, argv):
             formatter_class=argparse.RawDescriptionHelpFormatter,
             description="Compare the duration totals of two local libraries.",
             epilog="Examples:\n  aevum compare D:\\Movies E:\\Movies-Backup\n")
-        p.add_argument("folder_a")
-        p.add_argument("folder_b")
+        p.add_argument("folder_parts", nargs="*", metavar="PATH")
         p.add_argument("-s", "--sort", default=None, metavar="FIELD[:DIR]")
         p.add_argument("--no-cache", action="store_true")
         _add_common_flags(p)
         args = p.parse_intermixed_args(argv)
-        args.command = sub
+        # Split folder_parts into two halves at '--' or just take first two tokens
+        # For compare we need exactly two paths; join consecutive non-flag tokens
+        parts = args.folder_parts
+        # Find split: look for a token that is an existing path boundary
+        # Simple heuristic: split at the midpoint if even, else try each split
+        folder_a, folder_b = _split_two_paths(parts)
+        args.folder_a = folder_a
+        args.folder_b = folder_b
+        args.command  = sub
         return args
 
     if sub == 'dupes':
@@ -688,11 +737,12 @@ def _dispatch_subcommand(sub, argv):
             formatter_class=argparse.RawDescriptionHelpFormatter,
             description="Find duplicate files (by size + partial hash) in a folder.",
             epilog="Examples:\n  aevum dupes D:\\Movies\n  aevum dupes D:\\Movies --json\n")
-        p.add_argument("folder")
+        p.add_argument("folder_parts", nargs="*", metavar="PATH")
         p.add_argument("-o", "--out", default=None, metavar="FILE")
         p.add_argument("--no-cache", action="store_true")
         _add_common_flags(p)
         args = p.parse_intermixed_args(argv)
+        args.folder  = _join_path_tokens(args.folder_parts)
         args.command = sub
         return args
 
@@ -813,12 +863,13 @@ def _dispatch_subcommand(sub, argv):
             formatter_class=argparse.RawDescriptionHelpFormatter,
             description="Show deep statistics for a media library.",
             epilog="Examples:\n  aevum stats D:\\Movies\n  aevum stats D:\\Movies --json\n")
-        p.add_argument("folder", metavar="PATH")
+        p.add_argument("folder_parts", nargs="*", metavar="PATH")
         p.add_argument("--no-cache", action="store_true")
         p.add_argument("--exclude", default=None, metavar="PATTERN[,PATTERN]",
                        help="Exclude folders matching these patterns, comma-separated")
         _add_common_flags(p)
         args = p.parse_intermixed_args(argv)
+        args.folder  = _join_path_tokens(args.folder_parts)
         args.command = sub
         return args
 
@@ -827,12 +878,13 @@ def _dispatch_subcommand(sub, argv):
             formatter_class=argparse.RawDescriptionHelpFormatter,
             description="Print a single-line summary of a media folder.",
             epilog="Examples:\n  aevum summary D:\\Movies\n  aevum summary D:\\Movies --json\n")
-        p.add_argument("folder", metavar="PATH")
+        p.add_argument("folder_parts", nargs="*", metavar="PATH")
         p.add_argument("--no-cache", action="store_true")
         p.add_argument("--exclude", default=None, metavar="PATTERN[,PATTERN]",
                        help="Exclude folders matching these patterns, comma-separated")
         _add_common_flags(p)
         args = p.parse_intermixed_args(argv)
+        args.folder  = _join_path_tokens(args.folder_parts)
         args.command = sub
         return args
 
