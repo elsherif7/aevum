@@ -178,7 +178,27 @@ aevum summary D:\Movies --json
 
 Output: `Movies → 1,243 files | 312h 44m | 2.1 TB`
 
-### Scan history
+### Recent files
+
+```bash
+aevum recent D:\Movies
+aevum recent D:\Movies --since 7d
+aevum recent D:\Movies --since 2025-01-01 --limit 100
+```
+
+Shows files modified within the last 30 days by default, sorted newest first.
+
+### Top files
+
+```bash
+aevum top D:\Movies
+aevum top D:\Movies --by size
+aevum top D:\Movies --limit 50 --by size
+```
+
+Shows top N files by duration (default) or by file size.
+
+
 
 ```bash
 aevum history D:\Movies        # list all past scans
@@ -246,6 +266,8 @@ aevum stats     <path>          Deep statistics: avg, median, formats, sizes
 aevum summary   <path>          One-line summary of a folder
 aevum history   <path>          Show past scan snapshots
 aevum diff      <path>          Show what changed since the last scan
+aevum recent    <path>          Show recently added or modified files
+aevum top       <path>          Show top N files by duration or size
 aevum alias                     Manage short aliases for folder paths
 aevum cache                     Manage the duration cache
 aevum config                    Read/write configuration
