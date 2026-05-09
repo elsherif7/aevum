@@ -12,7 +12,7 @@ from pathlib import Path
 
 from ._color   import clr, LINE, clear, _disable_color
 from ._scan    import (check_ffprobe, format_duration, format_size, _run_scan,
-                       parse_duration_arg, apply_filters, rebuild_after_filter)
+                       parse_duration_arg, parse_since_arg, apply_filters, rebuild_after_filter)
 from ._youtube import _is_url, scan_url, _make_url_progress, get_quota_status
 from ._display import print_results, print_url_results, print_stats, _fuzzy_suggest
 from ._dupes   import find_duplicates, print_duplicates, print_dupe_warning, dupes_to_json
@@ -677,6 +677,10 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("--folder", dest="folder_pat", default=None, metavar="PATTERN")
         p.add_argument("--exclude", default=None, metavar="PATTERN[,PATTERN]",
                        help="Exclude folders matching these patterns, comma-separated (e.g. trailers,samples)")
+        p.add_argument("--since", default=None, metavar="DATE",
+                       help="Only include files modified after this date (e.g. 7d, 30d, 2w, 2025-01-15)")
+        p.add_argument("--until", default=None, metavar="DATE",
+                       help="Only include files modified before this date")
         p.add_argument("--speed", dest="speeds", type=float, action="append",
                        default=None, metavar="SPEED")
         _add_common_flags(p)
@@ -924,6 +928,16 @@ def _build_filters(args, use_json=False):
         filters['exclude'] = {
             x.strip().lower() for x in raw_exclude.split(',') if x.strip()
         }
+    for attr, key in (('since', 'since'), ('until', 'until')):
+        raw = getattr(args, attr, None)
+        if raw:
+            try:
+                filters[key] = parse_since_arg(raw)
+            except ValueError as e:
+                if use_json:
+                    _json_error(str(e), EX.ERR_ARGS)
+                print(f"\n  {clr.R}[ERROR]{clr.RST} {e}\n", file=sys.stderr)
+                sys.exit(EX.ERR_ARGS)
     return filters
 
 

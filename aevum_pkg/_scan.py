@@ -579,6 +579,35 @@ def _run_scan(folder, on_progress, sort_by="name", use_cache=True):
     return result
 
 
+def parse_since_arg(s):
+    """
+    Parse a --since / --until argument into a UTC timestamp (float).
+    Accepts:
+      7d, 30d, 1w, 2w        — relative: N days/weeks ago
+      2025-01-15             — absolute date (midnight local time)
+      2025-01-15T10:30       — absolute datetime
+    Raises ValueError on bad input.
+    """
+    import time as _time
+    import re as _re
+    s = s.strip()
+    # Relative: Nd or Nw
+    m = _re.fullmatch(r'(\d+)([dDwW])', s)
+    if m:
+        n, unit = int(m.group(1)), m.group(2).lower()
+        days = n * 7 if unit == 'w' else n
+        return _time.time() - days * 86400
+    # Absolute date or datetime
+    for fmt in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M', '%Y-%m-%d'):
+        try:
+            import datetime as _dt
+            dt = _dt.datetime.strptime(s, fmt)
+            return dt.timestamp()
+        except ValueError:
+            continue
+    raise ValueError(f"Cannot parse date: '{s}'  (try: 7d, 30d, 2w, 2025-01-15)")
+
+
 def parse_duration_arg(s):
     """
     Parse a human duration string into seconds (float).
@@ -617,13 +646,17 @@ def apply_filters(durations, sizes, filters):
       exts          set of lowercase extensions with dot e.g. {'.mkv', '.mp4'}
       folder_pat    glob pattern matched against path.parent.name (case-insensitive)
       exclude       set of lowercase folder name patterns to skip (glob, case-insensitive)
+      since         float — only include files with mtime >= this timestamp
+      until         float — only include files with mtime <= this timestamp
     Returns (filtered_durations, filtered_sizes).
     """
-    min_dur     = filters.get('min_duration')
-    max_dur     = filters.get('max_duration')
-    exts        = filters.get('exts')
-    folder_pat  = filters.get('folder_pat')
-    exclude_pats = filters.get('exclude')   # set of glob patterns
+    min_dur      = filters.get('min_duration')
+    max_dur      = filters.get('max_duration')
+    exts         = filters.get('exts')
+    folder_pat   = filters.get('folder_pat')
+    exclude_pats = filters.get('exclude')
+    since_ts     = filters.get('since')
+    until_ts     = filters.get('until')
 
     out_dur  = {}
     out_size = {}
@@ -641,6 +674,15 @@ def apply_filters(durations, sizes, filters):
             folder_name = path.parent.name.lower()
             if any(fnmatch.fnmatch(folder_name, pat) for pat in exclude_pats):
                 continue
+        if since_ts is not None or until_ts is not None:
+            try:
+                mtime = path.stat().st_mtime
+                if since_ts is not None and mtime < since_ts:
+                    continue
+                if until_ts is not None and mtime > until_ts:
+                    continue
+            except OSError:
+                pass
         out_dur[path]  = sec
         out_size[path] = sizes.get(path, 0)
     return out_dur, out_size
