@@ -601,6 +601,8 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("-s", "--sort",  default=None, metavar="FIELD[:DIR]")
         p.add_argument("-t", "--top",   type=int, default=None, metavar="N")
         p.add_argument("--no-cache", action="store_true")
+        p.add_argument("--exclude", default=None, metavar="PATTERN[,PATTERN]",
+                       help="Exclude folders matching these patterns, comma-separated (e.g. trailers,samples)")
         p.add_argument("--speed", dest="speeds", type=float, action="append",
                        default=None, metavar="SPEED")
         _add_common_flags(p)
@@ -632,6 +634,8 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("--max-duration", default=None, metavar="DURATION")
         p.add_argument("--ext", default=None, metavar="EXT[,EXT]")
         p.add_argument("--folder", dest="folder_pat", default=None, metavar="PATTERN")
+        p.add_argument("--exclude", default=None, metavar="PATTERN[,PATTERN]",
+                       help="Exclude folders matching these patterns, comma-separated (e.g. trailers,samples)")
         p.add_argument("--speed", dest="speeds", type=float, action="append",
                        default=None, metavar="SPEED")
         _add_common_flags(p)
@@ -656,6 +660,8 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("--max-duration", default=None, metavar="DURATION")
         p.add_argument("--ext", default=None, metavar="EXT[,EXT]")
         p.add_argument("--folder", dest="folder_pat", default=None, metavar="PATTERN")
+        p.add_argument("--exclude", default=None, metavar="PATTERN[,PATTERN]",
+                       help="Exclude folders matching these patterns, comma-separated")
         p.add_argument("--speed", dest="speeds", type=float, action="append",
                        default=None, metavar="SPEED")
         _add_common_flags(p)
@@ -809,6 +815,8 @@ def _dispatch_subcommand(sub, argv):
             epilog="Examples:\n  aevum stats D:\\Movies\n  aevum stats D:\\Movies --json\n")
         p.add_argument("folder", metavar="PATH")
         p.add_argument("--no-cache", action="store_true")
+        p.add_argument("--exclude", default=None, metavar="PATTERN[,PATTERN]",
+                       help="Exclude folders matching these patterns, comma-separated")
         _add_common_flags(p)
         args = p.parse_intermixed_args(argv)
         args.command = sub
@@ -821,6 +829,8 @@ def _dispatch_subcommand(sub, argv):
             epilog="Examples:\n  aevum summary D:\\Movies\n  aevum summary D:\\Movies --json\n")
         p.add_argument("folder", metavar="PATH")
         p.add_argument("--no-cache", action="store_true")
+        p.add_argument("--exclude", default=None, metavar="PATTERN[,PATTERN]",
+                       help="Exclude folders matching these patterns, comma-separated")
         _add_common_flags(p)
         args = p.parse_intermixed_args(argv)
         args.command = sub
@@ -857,6 +867,11 @@ def _build_filters(args, use_json=False):
     folder_pat = getattr(args, 'folder_pat', None)
     if folder_pat:
         filters['folder_pat'] = folder_pat
+    raw_exclude = getattr(args, 'exclude', None)
+    if raw_exclude:
+        filters['exclude'] = {
+            x.strip().lower() for x in raw_exclude.split(',') if x.strip()
+        }
     return filters
 
 
@@ -1116,6 +1131,11 @@ def main():
             folder, on_progress, "name:asc", use_cache)
         if not quiet:
             print()
+        filters = _build_filters(args, use_json)
+        if filters:
+            durations, sizes = apply_filters(durations, sizes, filters)
+            total_sec, total_count, tree, durations, sizes = rebuild_after_filter(
+                folder, durations, sizes, "name:asc")
         if use_json:
             import statistics as _stats
             secs_list = list(durations.values())
@@ -1150,8 +1170,13 @@ def main():
             sys.exit(EX.ERR_ARGS)
         _require_ffprobe("summary", use_json)
         use_cache   = _use_cache(args, cfg)
-        total_sec, total_count, _tree, _dur, sizes, _hits = _run_scan(
+        total_sec, total_count, _tree, durations, sizes, _hits = _run_scan(
             folder, None, "name:asc", use_cache)
+        filters = _build_filters(args, use_json)
+        if filters:
+            durations, sizes = apply_filters(durations, sizes, filters)
+            total_sec, total_count, _tree, durations, sizes = rebuild_after_filter(
+                folder, durations, sizes, "name:asc")
         total_bytes = sum(sizes.values())
         dur_fmt     = format_duration(total_sec)["hours_fmt"]
         size_fmt    = format_size(total_bytes)

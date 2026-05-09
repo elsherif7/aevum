@@ -616,12 +616,14 @@ def apply_filters(durations, sizes, filters):
       max_duration  float seconds
       exts          set of lowercase extensions with dot e.g. {'.mkv', '.mp4'}
       folder_pat    glob pattern matched against path.parent.name (case-insensitive)
+      exclude       set of lowercase folder name patterns to skip (glob, case-insensitive)
     Returns (filtered_durations, filtered_sizes).
     """
-    min_dur    = filters.get('min_duration')
-    max_dur    = filters.get('max_duration')
-    exts       = filters.get('exts')
-    folder_pat = filters.get('folder_pat')
+    min_dur     = filters.get('min_duration')
+    max_dur     = filters.get('max_duration')
+    exts        = filters.get('exts')
+    folder_pat  = filters.get('folder_pat')
+    exclude_pats = filters.get('exclude')   # set of glob patterns
 
     out_dur  = {}
     out_size = {}
@@ -634,6 +636,10 @@ def apply_filters(durations, sizes, filters):
             continue
         if folder_pat is not None:
             if not fnmatch.fnmatch(path.parent.name.lower(), folder_pat.lower()):
+                continue
+        if exclude_pats:
+            folder_name = path.parent.name.lower()
+            if any(fnmatch.fnmatch(folder_name, pat) for pat in exclude_pats):
                 continue
         out_dur[path]  = sec
         out_size[path] = sizes.get(path, 0)
