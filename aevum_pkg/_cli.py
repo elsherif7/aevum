@@ -25,6 +25,7 @@ from ._youtube import load_api_key, prompt_api_key
 from ._paths   import CACHE_DIR
 # Q-02 fix: exit codes extracted to _exit.py
 from ._exit    import EX
+from ._history import save_snapshot, print_history, print_diff, history_to_json, diff_to_json
 
 # Q-03 fix: import version from package instead of duplicating it
 from aevum_pkg import __version__
@@ -431,6 +432,8 @@ def _print_global_help():
     files     <path>                Scan and show all files under each folder
     stats     <path>                Deep statistics: avg, median, formats, sizes
     summary   <path>                One-line summary of a folder
+    history   <path>                Show past scan snapshots for a folder
+    diff      <path>                Show what changed since the last scan
     alias                           Manage aliases (paths, flags, or any shorthand)
     cache                           Manage the duration cache
     config                          Read/write configuration
@@ -512,7 +515,7 @@ def _parse_args():
     SUBCOMMANDS = (
         'scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config',
         'alias', 'doctor', 'quota', 'version', 'update', 'clearpath',
-        'appdata', 'files', 'stats', 'summary',
+        'appdata', 'files', 'stats', 'summary', 'history', 'diff',
     )
 
     # Flags that consume the next token as their value.
@@ -862,6 +865,26 @@ def _dispatch_subcommand(sub, argv):
         args.command = sub
         return args
 
+    if sub == 'history':
+        p = argparse.ArgumentParser(prog="aevum history",
+            description="Show past scan snapshots for a folder.")
+        p.add_argument("folder_parts", nargs="*", metavar="PATH")
+        _add_common_flags(p)
+        args = p.parse_intermixed_args(argv)
+        args.folder  = _join_path_tokens(args.folder_parts)
+        args.command = sub
+        return args
+
+    if sub == 'diff':
+        p = argparse.ArgumentParser(prog="aevum diff",
+            description="Show what changed between the last two scans of a folder.")
+        p.add_argument("folder_parts", nargs="*", metavar="PATH")
+        _add_common_flags(p)
+        args = p.parse_intermixed_args(argv)
+        args.folder  = _join_path_tokens(args.folder_parts)
+        args.command = sub
+        return args
+
     if sub == 'stats':
         p = argparse.ArgumentParser(prog="aevum stats",
             formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1180,6 +1203,35 @@ def main():
     # ── cache ─────────────────────────────────────────────────────────
     if cmd == 'cache':
         cmd_cache(args)
+        sys.exit(EX.OK)
+
+    # ── history ───────────────────────────────────────────────────────
+    if cmd == 'history':
+        folder = Path(_join_path_tokens(args.folder.split()) if args.folder else '.')
+        folder = Path(_resolve_alias(args.folder.strip().strip("'\""), cfg))
+        if not folder.exists() or not folder.is_dir():
+            if use_json:
+                _json_error(f"Not a valid folder: {folder}", EX.ERR_ARGS)
+            print(f"\n  {clr.R}[ERROR]{clr.RST} Not a valid folder: {folder}\n", file=sys.stderr)
+            sys.exit(EX.ERR_ARGS)
+        if use_json:
+            _json_out(history_to_json(folder))
+        else:
+            print_history(folder)
+        sys.exit(EX.OK)
+
+    # ── diff ──────────────────────────────────────────────────────────
+    if cmd == 'diff':
+        folder = Path(_resolve_alias(args.folder.strip().strip("'\""), cfg))
+        if not folder.exists() or not folder.is_dir():
+            if use_json:
+                _json_error(f"Not a valid folder: {folder}", EX.ERR_ARGS)
+            print(f"\n  {clr.R}[ERROR]{clr.RST} Not a valid folder: {folder}\n", file=sys.stderr)
+            sys.exit(EX.ERR_ARGS)
+        if use_json:
+            _json_out(diff_to_json(folder))
+        else:
+            print_diff(folder)
         sys.exit(EX.OK)
 
     # ── stats ─────────────────────────────────────────────────────────
@@ -1675,6 +1727,12 @@ def main():
             print_results(folder, total_sec, total_count, tree, durations, sizes, top,
                           show_files=getattr(args, 'files', False), max_depth=max_d,
                           speeds=custom_speeds)
+            # Auto-save history snapshot after every successful scan
+            try:
+                save_snapshot(Path(folder), total_sec, total_count,
+                              sum(sizes.values()), durations)
+            except Exception:
+                pass  # history is best-effort, never crash the scan
             groups = find_duplicates(durations, sizes)
             if not quiet:
                 print_dupe_warning(groups, folder)
