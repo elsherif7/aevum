@@ -287,6 +287,105 @@ def print_url_results(url, label, total_sec, total_count, entries, top_n=10, una
             print()
 
 
+def print_stats(folder, durations, sizes):
+    """
+    Print deep library statistics:
+    - total / average / median / shortest / longest duration
+    - file format distribution
+    - size distribution buckets
+    - densest folder (most duration per GB)
+    """
+    if not durations:
+        print(f"  {clr.Y}No media files found.{clr.RST}\n")
+        return
+
+    import statistics
+    from collections import Counter
+
+    secs_list  = list(durations.values())
+    total_sec  = sum(secs_list)
+    count      = len(secs_list)
+    avg_sec    = total_sec / count
+    median_sec = statistics.median(secs_list)
+    min_path, min_sec = min(durations.items(), key=lambda x: x[1])
+    max_path, max_sec = max(durations.items(), key=lambda x: x[1])
+
+    # Format distribution
+    ext_counter: Counter = Counter()
+    for p in durations:
+        ext_counter[p.suffix.lower()] += 1
+    top_exts = ext_counter.most_common(8)
+
+    # Size distribution buckets
+    size_buckets = {"< 100 MB": 0, "100 MB – 1 GB": 0, "1 – 5 GB": 0, "> 5 GB": 0}
+    for p, b in sizes.items():
+        if b < 100 * 1024 * 1024:
+            size_buckets["< 100 MB"] += 1
+        elif b < 1024 * 1024 * 1024:
+            size_buckets["100 MB – 1 GB"] += 1
+        elif b < 5 * 1024 * 1024 * 1024:
+            size_buckets["1 – 5 GB"] += 1
+        else:
+            size_buckets["> 5 GB"] += 1
+
+    # Densest folder: most duration-seconds per byte
+    folder_sec: dict   = {}
+    folder_bytes: dict = {}
+    for p, sec in durations.items():
+        fn = p.parent.name
+        folder_sec[fn]   = folder_sec.get(fn, 0.0) + sec
+        folder_bytes[fn] = folder_bytes.get(fn, 0) + sizes.get(p, 0)
+    densest = None
+    best_ratio = 0.0
+    for fn, fsec in folder_sec.items():
+        fb = folder_bytes.get(fn, 0)
+        if fb > 0:
+            ratio = fsec / fb
+            if ratio > best_ratio:
+                best_ratio = ratio
+                densest    = fn
+
+    print()
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print(f"  {clr.W}  Library Statistics{clr.RST}  {clr.DIM}—{clr.RST}  {clr.W}{Path(folder).name}{clr.RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print()
+    print(f"  {clr.W}  Total files   {clr.DIM}:{clr.RST}  {clr.W}{count:,}{clr.RST}")
+    print(f"  {clr.W}  Total         {clr.DIM}:{clr.RST}  {clr.W}{format_duration(total_sec)['hours_fmt']}{clr.RST}")
+    print(f"  {clr.W}  Average       {clr.DIM}:{clr.RST}  {clr.W}{format_duration(avg_sec)['hours_fmt']}{clr.RST}")
+    print(f"  {clr.W}  Median        {clr.DIM}:{clr.RST}  {clr.W}{format_duration(median_sec)['hours_fmt']}{clr.RST}")
+    print(f"  {clr.W}  Shortest      {clr.DIM}:{clr.RST}  {clr.W}{format_duration(min_sec)['hours_fmt']}{clr.RST}  {clr.DIM}{min_path.name}{clr.RST}")
+    print(f"  {clr.W}  Longest       {clr.DIM}:{clr.RST}  {clr.W}{format_duration(max_sec)['hours_fmt']}{clr.RST}  {clr.DIM}{max_path.name}{clr.RST}")
+    print()
+
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print(f"  {clr.W}  Format Distribution{clr.RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print()
+    for ext, n in top_exts:
+        bar = _bar(n, count, width=20)
+        print(f"  {clr.W}{ext or '(none)':<10}{clr.RST}  {bar}  {clr.DIM}{n:,} files{clr.RST}")
+    print()
+
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print(f"  {clr.W}  Size Distribution{clr.RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print()
+    for label, n in size_buckets.items():
+        bar = _bar(n, count, width=20)
+        print(f"  {clr.W}{label:<16}{clr.RST}  {bar}  {clr.DIM}{n:,} files{clr.RST}")
+    print()
+
+    if densest:
+        density_fmt = format_duration(best_ratio * 1024 * 1024 * 1024)["hours_fmt"]
+        print(f"  {clr.C}{LINE}{clr.RST}")
+        print(f"  {clr.W}  Densest Folder{clr.RST}")
+        print(f"  {clr.C}{LINE}{clr.RST}")
+        print()
+        print(f"  {clr.W}  {densest}{clr.RST}  {clr.DIM}({density_fmt} per GB){clr.RST}")
+        print()
+
+
 def _fuzzy_suggest(word, candidates):
     """
     Return the closest candidate to word within edit-distance 2, or None.

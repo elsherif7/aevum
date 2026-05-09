@@ -14,7 +14,7 @@ from ._color   import clr, LINE, clear, _disable_color
 from ._scan    import (check_ffprobe, format_duration, format_size, _run_scan,
                        parse_duration_arg, apply_filters, rebuild_after_filter)
 from ._youtube import _is_url, scan_url, _make_url_progress, get_quota_status
-from ._display import print_results, print_url_results, _fuzzy_suggest
+from ._display import print_results, print_url_results, print_stats, _fuzzy_suggest
 from ._dupes   import find_duplicates, print_duplicates, print_dupe_warning, dupes_to_json
 # Q-01 fix: compare logic extracted to _compare.py
 from ._compare import run_compare, print_comparison
@@ -429,6 +429,8 @@ def _print_global_help():
     export    <path|url> <format>   Scan and write results to a file
     watch     <path>                Re-scan automatically when folder changes
     files     <path>                Scan and show all files under each folder
+    stats     <path>                Deep statistics: avg, median, formats, sizes
+    summary   <path>                One-line summary of a folder
     alias                           Manage aliases (paths, flags, or any shorthand)
     cache                           Manage the duration cache
     config                          Read/write configuration
@@ -510,7 +512,7 @@ def _parse_args():
     SUBCOMMANDS = (
         'scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config',
         'alias', 'doctor', 'quota', 'version', 'update', 'clearpath',
-        'appdata', 'files',
+        'appdata', 'files', 'stats', 'summary',
     )
 
     # Flags that consume the next token as their value.
@@ -800,6 +802,30 @@ def _dispatch_subcommand(sub, argv):
         args.command = sub
         return args
 
+    if sub == 'stats':
+        p = argparse.ArgumentParser(prog="aevum stats",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            description="Show deep statistics for a media library.",
+            epilog="Examples:\n  aevum stats D:\\Movies\n  aevum stats D:\\Movies --json\n")
+        p.add_argument("folder", metavar="PATH")
+        p.add_argument("--no-cache", action="store_true")
+        _add_common_flags(p)
+        args = p.parse_intermixed_args(argv)
+        args.command = sub
+        return args
+
+    if sub == 'summary':
+        p = argparse.ArgumentParser(prog="aevum summary",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            description="Print a single-line summary of a media folder.",
+            epilog="Examples:\n  aevum summary D:\\Movies\n  aevum summary D:\\Movies --json\n")
+        p.add_argument("folder", metavar="PATH")
+        p.add_argument("--no-cache", action="store_true")
+        _add_common_flags(p)
+        args = p.parse_intermixed_args(argv)
+        args.command = sub
+        return args
+
     _print_global_help()
     sys.exit(EX.ERR_ARGS)
 
@@ -1073,6 +1099,81 @@ def main():
     # ── cache ─────────────────────────────────────────────────────────
     if cmd == 'cache':
         cmd_cache(args)
+        sys.exit(EX.OK)
+
+    # ── stats ─────────────────────────────────────────────────────────
+    if cmd == 'stats':
+        folder = Path(_resolve_alias(args.folder.strip().strip("'\""), cfg))
+        if not folder.exists() or not folder.is_dir():
+            if use_json:
+                _json_error(f"Not a valid folder: {folder}", EX.ERR_ARGS)
+            print(f"\n  {clr.R}[ERROR]{clr.RST} Not a valid folder: {folder}\n", file=sys.stderr)
+            sys.exit(EX.ERR_ARGS)
+        _require_ffprobe("stats", use_json)
+        on_progress = _make_progress_bar(quiet, use_json)
+        use_cache   = _use_cache(args, cfg)
+        total_sec, total_count, tree, durations, sizes, hits = _run_scan(
+            folder, on_progress, "name:asc", use_cache)
+        if not quiet:
+            print()
+        if use_json:
+            import statistics as _stats
+            secs_list = list(durations.values())
+            ext_counts: dict = {}
+            for p in durations:
+                e = p.suffix.lower()
+                ext_counts[e] = ext_counts.get(e, 0) + 1
+            _json_out({
+                "status":       "ok",
+                "command":      "stats",
+                "path":         str(folder.resolve()),
+                "total_files":  total_count,
+                "total_sec":    round(total_sec, 2),
+                "avg_sec":      round(total_sec / total_count, 2) if total_count else 0,
+                "median_sec":   round(_stats.median(secs_list), 2) if secs_list else 0,
+                "min_sec":      round(min(secs_list), 2) if secs_list else 0,
+                "max_sec":      round(max(secs_list), 2) if secs_list else 0,
+                "total_bytes":  sum(sizes.values()),
+                "formats":      ext_counts,
+            })
+        else:
+            print_stats(folder, durations, sizes)
+        sys.exit(EX.OK)
+
+    # ── summary ───────────────────────────────────────────────────────
+    if cmd == 'summary':
+        folder = Path(_resolve_alias(args.folder.strip().strip("'\""), cfg))
+        if not folder.exists() or not folder.is_dir():
+            if use_json:
+                _json_error(f"Not a valid folder: {folder}", EX.ERR_ARGS)
+            print(f"\n  {clr.R}[ERROR]{clr.RST} Not a valid folder: {folder}\n", file=sys.stderr)
+            sys.exit(EX.ERR_ARGS)
+        _require_ffprobe("summary", use_json)
+        use_cache   = _use_cache(args, cfg)
+        total_sec, total_count, _tree, _dur, sizes, _hits = _run_scan(
+            folder, None, "name:asc", use_cache)
+        total_bytes = sum(sizes.values())
+        dur_fmt     = format_duration(total_sec)["hours_fmt"]
+        size_fmt    = format_size(total_bytes)
+        if use_json:
+            _json_out({
+                "status":      "ok",
+                "command":     "summary",
+                "path":        str(folder.resolve()),
+                "name":        folder.name,
+                "total_files": total_count,
+                "total_sec":   round(total_sec, 2),
+                "total_bytes": total_bytes,
+                "duration":    dur_fmt,
+                "size":        size_fmt,
+            })
+        elif quiet:
+            print(f"{folder.name}  {total_count:,} files  {dur_fmt}  {size_fmt}")
+        else:
+            print(f"\n  {clr.W}{folder.name}{clr.RST}  {clr.DIM}→{clr.RST}  "
+                  f"{clr.Y}{total_count:,} files{clr.RST}  {clr.DIM}|{clr.RST}  "
+                  f"{clr.W}{dur_fmt}{clr.RST}  {clr.DIM}|{clr.RST}  "
+                  f"{clr.W}{size_fmt}{clr.RST}\n")
         sys.exit(EX.OK)
 
     # ── watch ─────────────────────────────────────────────────────────
