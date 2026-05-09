@@ -258,17 +258,26 @@ def _merge_into_cache(cache, new_entries_by_id):
 # Helpers
 # ---------------------------------------------------------------------------
 
+_YT_DOMAINS = (
+    'youtube.com', 'youtu.be', 'm.youtube.com',
+    'music.youtube.com', 'kids.youtube.com', 'gaming.youtube.com',
+)
+
 def _is_url(s):
     if s.startswith(('http://', 'https://')):
         return True
+    # bare domain shortcuts e.g. "www.youtube.com/..." or "music.youtube.com/..."
+    for domain in _YT_DOMAINS:
+        if s.startswith(domain) or s.startswith('www.' + domain):
+            return True
     if s.startswith('www.'):
-        return True  # _parse_yt_url will prepend scheme if needed
+        return True
     return False
 
 
 def _normalise_url(url):
     """Ensure URL has a scheme so urlparse works correctly."""
-    if url.startswith('www.'):
+    if not url.startswith(('http://', 'https://')):
         return 'https://' + url
     return url
 
@@ -389,8 +398,8 @@ def _parse_yt_url(url):
     path_parts = [x for x in p.path.split('/') if x]
     netloc     = p.netloc.removeprefix('www.')
 
-    # Issue 12: added music.youtube.com
-    if netloc not in ('youtube.com', 'youtu.be', 'm.youtube.com', 'music.youtube.com'):
+    # Issue 12: added music.youtube.com; also support kids and gaming subdomains
+    if netloc not in _YT_DOMAINS:
         return None, None
     if 'list' in qs:
         return 'playlist', qs['list'][0]
