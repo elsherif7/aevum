@@ -7,8 +7,9 @@ Point it at any folder or YouTube URL and instantly see the total duration — b
 
 ## Features
 
-- Scans local folders recursively for video and audio files
+- Scans local folders recursively for video and audio files (247 supported formats)
 - Displays duration and size per subfolder in a color-coded tree view
+- **ASCII bar chart** showing each folder's share of total duration
 - Grand total in days, hours, and minutes, plus total library size
 - Playback speed breakdown (1x → 2x)
 - Top 10 longest files listed after each scan (configurable)
@@ -18,11 +19,19 @@ Point it at any folder or YouTube URL and instantly see the total duration — b
 - Duplicate detection by size + partial BLAKE2b hash
 - Folder comparison mode — diff two libraries side by side
 - Sortable tree (by name, duration, or count; ascending or descending)
-- Filter by duration range, extension, or subfolder name pattern
+- Filter by duration range, extension, subfolder name pattern, or date modified
+- **Exclude folders** by name pattern (`--exclude trailers,samples`)
+- **Date filters** — only show files modified in the last N days (`--since 30d`)
 - Scan multiple folders at once, optionally merged into one grand total
 - Watch mode — re-scan automatically when folder contents change
-- Export results to TXT, CSV, or JSON
-- YouTube support — scan any video, playlist, or channel by URL (YouTube Data API v3 + yt-dlp fallback)
+- Export results to TXT, CSV, JSON, or **HTML** (dark-theme, sortable, searchable)
+- **Deep statistics** — average, median, shortest, longest, format distribution, size buckets (`aevum stats`)
+- **One-line summary** — instant overview of any folder (`aevum summary`)
+- **Scan history** — every scan is saved as a snapshot (`aevum history`)
+- **Diff** — see exactly what changed between two scans (`aevum diff`)
+- YouTube support — scan any video, playlist, or channel by URL
+  - Supports: `youtube.com`, `youtu.be`, `music.youtube.com`, `kids.youtube.com`, `gaming.youtube.com`
+  - Uses YouTube Data API v3 with yt-dlp as fallback
 - Per-video YouTube cache — previously fetched videos skip the API entirely
 - Path alias system — define short names for long folder paths
 - Self-update command (`aevum update` / `aevum -U`)
@@ -32,6 +41,7 @@ Point it at any folder or YouTube URL and instantly see the total duration — b
 - Clean, colored terminal UI with `--no-color` for plain output
 - Full CLI with subcommands
 - Fuzzy-match typo suggestions for unknown commands and sort fields
+- Paths with spaces work without quotes
 
 ---
 
@@ -66,7 +76,7 @@ Shows a clean animated progress bar. Aevum saves your project folder path after 
 Or manually:
 
 ```bash
-cd Aevum
+cd aevum
 pip install . --upgrade
 ```
 
@@ -88,6 +98,9 @@ aevum scan D:\Movies --sort duration --top 20
 aevum scan D:\Movies --files --out report.csv
 aevum scan D:\Movies --min-duration 5m --ext mkv,mp4
 aevum scan D:\Movies --depth 2
+aevum scan D:\Movies --exclude trailers,samples,extras
+aevum scan D:\Movies --since 30d
+aevum scan D:\Movies --since 2025-01-01
 ```
 
 ### Scan multiple folders
@@ -103,6 +116,8 @@ aevum scan D:\Movies E:\Shows --merge
 aevum scan https://youtube.com/@mkbhd
 aevum scan https://youtube.com/playlist?list=PLxxx
 aevum scan https://youtu.be/dQw4w9WgXcQ
+aevum scan https://music.youtube.com/playlist?list=PLxxx
+aevum scan https://kids.youtube.com/channel/UCxxx
 ```
 
 ### Watch mode
@@ -138,8 +153,36 @@ aevum files D:\Movies --sort name
 ```bash
 aevum export D:\Movies csv
 aevum export D:\Movies json -o D:\Reports\library.json
+aevum export D:\Movies html -o D:\Reports\library.html
 aevum export https://youtube.com/@mkbhd json
 ```
+
+### Deep statistics
+
+```bash
+aevum stats D:\Movies
+aevum stats D:\Movies --json
+```
+
+Shows average, median, shortest and longest file, format distribution (MP4 vs MKV vs ...), size distribution buckets, and densest folder.
+
+### One-line summary
+
+```bash
+aevum summary D:\Movies
+aevum summary D:\Movies --json
+```
+
+Output: `Movies → 1,243 files | 312h 44m | 2.1 TB`
+
+### Scan history
+
+```bash
+aevum history D:\Movies        # list all past scans
+aevum diff D:\Movies           # what changed since last scan
+```
+
+Every `aevum scan` automatically saves a snapshot. `aevum diff` shows added and removed files with their durations.
 
 ### Aliases
 
@@ -194,6 +237,10 @@ aevum dupes     <path>          Find duplicate files
 aevum export    <path> <fmt>    Scan and write results to a file
 aevum watch     <path>          Re-scan automatically when folder changes
 aevum files     <path>          Scan and show all files under each folder
+aevum stats     <path>          Deep statistics: avg, median, formats, sizes
+aevum summary   <path>          One-line summary of a folder
+aevum history   <path>          Show past scan snapshots
+aevum diff      <path>          Show what changed since the last scan
 aevum alias                     Manage short aliases for folder paths
 aevum cache                     Manage the duration cache
 aevum config                    Read/write configuration
@@ -217,13 +264,16 @@ Run `aevum <command> --help` for options on any command.
 | `-t, --top N` | Show top N longest files (default: 10, set 0 to hide) |
 | `-f, --files` | Show individual files under each folder in the tree |
 | `-o, --out FILE` | Write results to FILE (format inferred from extension) |
-| `--format txt\|csv\|json` | Explicit export format |
+| `--format txt\|csv\|json\|html` | Explicit export format |
 | `--depth N` | Limit tree display to N levels deep |
 | `--merge` | Aggregate all target folders into one combined grand total |
 | `--min-duration DURATION` | Exclude files shorter than this (e.g. `30s`, `5m`, `1h`, `1:30:00`) |
 | `--max-duration DURATION` | Exclude files longer than this |
 | `--ext EXT[,EXT]` | Only include these extensions, comma-separated (e.g. `mkv,mp4`) |
 | `--folder PATTERN` | Only include files inside folders matching this glob (e.g. `Action*`) |
+| `--exclude PATTERN[,PATTERN]` | Exclude folders matching these patterns (e.g. `trailers,samples`) |
+| `--since DATE` | Only include files modified after this date (e.g. `7d`, `30d`, `2w`, `2025-01-15`) |
+| `--until DATE` | Only include files modified before this date |
 | `--no-cache` | Bypass the duration cache and re-probe every file |
 | `--no-color` | Strip ANSI colors from output |
 | `--json` | Output machine-readable JSON to stdout |
@@ -240,6 +290,7 @@ Run `aevum <command> --help` for options on any command.
 | `--min-duration / --max-duration` | Duration filters (same as scan) |
 | `--ext EXT[,EXT]` | Extension filter (same as scan) |
 | `--folder PATTERN` | Subfolder name filter (same as scan) |
+| `--exclude PATTERN[,PATTERN]` | Exclude folders by name pattern |
 
 ## Global options
 
@@ -275,6 +326,10 @@ Every subcommand supports `--json` for machine-readable output:
 aevum scan D:\Movies --json
 aevum scan D:\Movies --json | python -m json.tool
 aevum dupes D:\Movies --json | python -c "import sys,json; d=json.load(sys.stdin); print(d['groups_found'])"
+aevum stats D:\Movies --json
+aevum summary D:\Movies --json
+aevum history D:\Movies --json
+aevum diff D:\Movies --json
 aevum doctor --json
 aevum quota --json
 aevum scan D:\Movies -q; echo "exit $?"
@@ -307,29 +362,54 @@ The cache works correctly on all filesystems including FAT32 and exFAT (common o
 
 YouTube video durations are cached separately per video ID, so re-scanning a channel only fetches new uploads from the API.
 
-| Platform | Cache location |
+Scan history snapshots are stored separately and kept for the last 50 scans per folder.
+
+| Platform | Cache / data location |
 |---|---|
-| Windows | `%LOCALAPPDATA%\Aevum\cache\` |
-| Linux / macOS | `~/.local/share/Aevum/cache\` |
+| Windows | `%LOCALAPPDATA%\Aevum\` |
+| Linux / macOS | `~/.local/share/Aevum/` |
 
 Run `aevum appdata` to open the Aevum data folder directly.
 
 ---
 
+## YouTube support
+
+Aevum supports all YouTube properties:
+
+| URL | Supported |
+|---|---|
+| `youtube.com` videos, playlists, channels | ✅ |
+| `youtu.be` short links | ✅ |
+| `m.youtube.com` mobile links | ✅ |
+| `music.youtube.com` | ✅ |
+| `kids.youtube.com` | ✅ |
+| `gaming.youtube.com` | ✅ |
+
+Requires a free YouTube Data API v3 key. Set it once with:
+
+```bash
+aevum config set yt_api_key AIzaSy...
+```
+
+---
+
 ## Supported formats
 
-### Video
-`.mp4` `.mkv` `.avi` `.mov` `.webm` `.flv` `.wmv` `.m4v` `.mpg` `.mpeg` `.3gp` `.ts` `.vob` `.ogv` `.divx` `.rmvb` `.asf` `.m2ts` `.mts` `.m2v` `.f4v` `.f4p` `.nsv` `.roq` `.yuv` `.mxf` `.drc` `.gifv` `.mng` `.qt` `.rm` `.amv` `.svi` `.3g2` `.mpe` `.mpv` `.m1v` `.m2p` `.m4p` `.mpeg1` `.mpeg2` `.mpeg4` `.h264` `.h265` `.hevc` `.avchd` `.ogm` `.ogx` `.dv` `.dvr` `.dvr-ms` `.rec` `.wtv` `.bdmv` `.iso` `.evo` `.ifo` `.mod` `.tod` `.trp` `.tp` `.pva` `.nuv` `.fli` `.flc` `.flic` `.smk` `.bik` `.bik2` `.webp`
+Aevum supports **247 file extensions** covering virtually every known video and audio format that FFmpeg can read.
 
-### Audio
-`.mp3` `.aac` `.flac` `.wav` `.ogg` `.wma` `.m4a` `.opus` `.aiff` `.aif` `.aifc` `.ape` `.wv` `.tta` `.mka` `.mpa` `.mp2` `.ac3` `.eac3` `.dts` `.dtshd` `.truehd` `.thd` `.pcm` `.caf` `.ra` `.ram` `.oga` `.spx` `.amr` `.awb` `.gsm` `.au` `.snd` `.vox` `.8svx` `.iff` `.svx` `.f32` `.f64` `.s8` `.s16` `.s24` `.s32` `.u8` `.u16` `.u24` `.u32` `.w64` `.rf64` `.bwf` `.mid` `.midi` `.kar` `.xmf` `.mxmf` `.rtttl` `.rtx` `.ota` `.imy` `.mp1`
+### Video (selected)
+`.mp4` `.mkv` `.avi` `.mov` `.webm` `.flv` `.wmv` `.m4v` `.mpg` `.mpeg` `.3gp` `.ts` `.vob` `.ogv` `.divx` `.rmvb` `.asf` `.m2ts` `.mts` `.m2v` `.f4v` `.mxf` `.dv` `.wtv` `.bdmv` `.nuv` `.av1` `.avif` `.ivf` `.y4m` `.mjpeg` `.mjpg` `.gxf` `.mlv` `.thp` `.swf` `.vc1` `.vp6` `.vp8` `.vp9` `.h264` `.h265` `.hevc` and more
+
+### Audio (selected)
+`.mp3` `.aac` `.flac` `.wav` `.ogg` `.wma` `.m4a` `.opus` `.aiff` `.ape` `.wv` `.tta` `.ac3` `.eac3` `.dts` `.dtshd` `.truehd` `.pcm` `.caf` `.flac` `.dsf` `.dff` `.tak` `.shn` `.qoa` `.hca` `.voc` `.aa` `.aax` `.mpc` `.qcp` `.bonk` `.osq` and more
 
 ---
 
 ## Project structure
 
 ```
-Aevum/
+aevum/
   aevum.py           — entry point
   pyproject.toml     — pip install config
   README.md
@@ -339,10 +419,11 @@ Aevum/
     _cli.py          — main(), arg parsing, subcommand dispatch
     _scan.py         — ffprobe, native parsers, tree builder, filters
     _youtube.py      — YouTube Data API v3 + per-video cache + quota tracking
-    _display.py      — all print/display functions
+    _display.py      — all print/display functions (tree, bar chart, stats)
     _compare.py      — folder comparison logic
     _dupes.py        — duplicate detection (BLAKE2b)
-    _export.py       — TXT/CSV/JSON export + path validation
+    _export.py       — TXT/CSV/JSON/HTML export + path validation
+    _history.py      — scan history snapshots and diff
     _config.py       — config, cache commands, doctor
     _cache.py        — duration cache read/write
     _paths.py        — platform-aware AppData/XDG path resolution
@@ -360,10 +441,11 @@ Aevum/
 - API keys stored in OS keyring (Windows Credential Manager / macOS Keychain / Linux Secret Service) when `keyring` is installed; falls back to a randomly-keyed Fernet-encrypted file, then plaintext with a warning
 - API key format validated (`AIza...`) before storage to prevent accidental credential writes
 - CSV exports escape formula characters to prevent spreadsheet injection
+- HTML exports use `html.escape()` on all user-controlled content
 - Symlink loop detection (inode tracking) and max recursion depth (30 levels)
 - YouTube API rate-limited to 100 requests/hour via persistent token bucket (enforced across process invocations)
 - YouTube playlist pagination capped at 100,000 videos to prevent infinite loops
-- Atomic file writes (temp → rename) on all persistent state — cache, config, quota tracker, rate limiter
+- Atomic file writes (temp → rename) on all persistent state — cache, config, quota tracker, rate limiter, history
 - Duration values clamped to prevent integer overflow from corrupted cache or malformed API responses
 - Quota tracker validated on load — negative values cannot bypass the daily quota guard
 - `LOCALAPPDATA` / `XDG_DATA_HOME` environment variables validated as absolute paths before use
