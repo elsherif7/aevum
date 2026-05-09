@@ -254,6 +254,14 @@ def cmd_alias(args, cfg, use_json, quiet):
                   f"{clr.DIM}\u2192{clr.RST}  {clr.W}{aliases[name]}{clr.RST}")
             print(f"  {clr.DIM}Remove it first with:{clr.RST}  {clr.W}aevum alias rm {name}{clr.RST}")
             sys.exit(EX.ERR_ARGS)
+        # Enforce the same length limits that load_config applies, so a value
+        # that would be silently dropped on next load is rejected here instead.
+        if len(name) > 50:
+            print(f"  {clr.R}[ERROR]{clr.RST} Alias name too long (max 50 characters).", file=sys.stderr)
+            sys.exit(EX.ERR_ARGS)
+        if len(value) > 4096:
+            print(f"  {clr.R}[ERROR]{clr.RST} Alias value too long (max 4096 characters).", file=sys.stderr)
+            sys.exit(EX.ERR_ARGS)
         _looks_like_path = (
             value.startswith(('/', '\\', '.')) or
             (len(value) >= 2 and value[1] == ':')

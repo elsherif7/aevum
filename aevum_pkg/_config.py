@@ -1,6 +1,5 @@
 import json
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -75,16 +74,10 @@ def load_config():
                         # Validate aliases is a dict of str -> str
                         if isinstance(value, dict):
                             clean_aliases = {}
-                            # Only allow safe characters in alias values
-                            # Prevents flag injection and command injection via aliases
-                            _SAFE_ALIAS_VALUE = re.compile(r'^[A-Za-z0-9 :/_\\\.\-@]+$')
                             for k, v in value.items():
                                 if isinstance(k, str) and isinstance(v, str):
                                     if len(k) <= 50 and len(v) <= 4096:
-                                        if _SAFE_ALIAS_VALUE.match(v):
-                                            clean_aliases[k] = v
-                                        else:
-                                            print(f"  [CONFIG] Warning: alias '{k}' value contains unsafe characters, skipped.", file=sys.stderr)
+                                        clean_aliases[k] = v
                                     else:
                                         print(f"  [CONFIG] Warning: alias '{k}' exceeds length limit, skipped.", file=sys.stderr)
                             validated[key] = clean_aliases
