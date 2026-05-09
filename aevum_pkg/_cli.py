@@ -666,7 +666,7 @@ def _dispatch_subcommand(sub, argv):
         p.add_argument("-t", "--top",   type=int, default=None, metavar="N")
         p.add_argument("-f", "--files", action="store_true")
         p.add_argument("-o", "--out",   default=None, metavar="FILE")
-        p.add_argument("--format", dest="fmt", choices=["txt", "csv", "json"], default=None)
+        p.add_argument("--format", dest="fmt", choices=["txt", "csv", "json", "html"], default=None)
         p.add_argument("--depth",  type=int, default=None, metavar="N")
         p.add_argument("--no-cache", action="store_true")
         p.add_argument("--merge", action="store_true",
@@ -756,7 +756,7 @@ def _dispatch_subcommand(sub, argv):
             description="Scan a folder or URL and write results directly to a file.",
             epilog="Examples:\n  aevum export D:\\Movies csv\n  aevum export D:\\Movies json -o library.json\n")
         p.add_argument("target", metavar="PATH|URL")
-        p.add_argument("format", choices=["txt", "csv", "json"])
+        p.add_argument("format", choices=["txt", "csv", "json", "html"])
         p.add_argument("-o", "--out",  default=None, metavar="FILE")
         p.add_argument("-s", "--sort", default=None, metavar="FIELD[:DIR]")
         p.add_argument("--no-cache", action="store_true")

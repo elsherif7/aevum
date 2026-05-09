@@ -36,7 +36,7 @@ def validate_export_path(out_path: str, scan_folder) -> "Path":
     for sysroot in system_roots:
         if _is_relative_to(out_path, sysroot):
             raise PermissionError(f"Cannot write to system directory: {out_path}")
-    allowed_extensions = {".txt", ".csv", ".json"}
+    allowed_extensions = {".txt", ".csv", ".json", ".html"}
     if out_path.suffix.lower() not in allowed_extensions:
         raise ValueError(
             f"Invalid extension {out_path.suffix}. Allowed: {', '.join(sorted(allowed_extensions))}"
@@ -116,18 +116,16 @@ def _resolve_dest(folder, fmt, out_path):
     return desktop / filename
 
 
-def export_results(folder, total_sec, total_count, tree, durations, fmt, out_path=None):
+def export_results(folder, total_sec, total_count, tree, durations, fmt, out_path=None, sizes=None):
     """
     Export scan results to a file with race-condition-safe atomic writes.
-    
-    fmt: 'txt' | 'csv' | 'json'
-    out_path: explicit Path or None to auto-generate next to the scan folder.
-    Returns the Path that was written.
-    
-    Security: Uses atomic writes via temp file + rename to prevent TOCTOU races.
+    fmt: 'txt' | 'csv' | 'json' | 'html'
     """
     dest = _resolve_dest(folder, fmt, out_path)
-    content = _build_content(folder, total_sec, total_count, tree, durations, fmt)
+    if fmt == "html":
+        content = _build_html(folder, total_sec, total_count, tree, durations, sizes or {})
+    else:
+        content = _build_content(folder, total_sec, total_count, tree, durations, fmt)
     
     try:
         _write_content_atomic(dest, content, fmt)
@@ -176,9 +174,135 @@ def _write_content_atomic(dest, content, fmt):
         raise
 
 
+def _build_html(folder, total_sec, total_count, tree, durations, sizes):
+    """Build a self-contained HTML report with collapsible tree and sortable table."""
+    from html import escape
+    folder   = Path(folder)
+    stamp    = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    fd       = format_duration(total_sec)
+    total_bytes = sum(sizes.values()) if sizes else 0
+
+    # Build tree rows recursively
+    def tree_rows(name, seconds, count, subfolders, direct, depth=0):
+        rows = []
+        indent = "&nbsp;" * (depth * 4)
+        fd_ = format_duration(seconds)
+        rows.append(
+            f'<tr><td>{indent}<b>{escape(name)}</b></td>'
+            f'<td>{escape(fd_["hours_fmt"])}</td>'
+            f'<td>{count}</td></tr>'
+        )
+        for sub_name, sub_sec, sub_count, _fb, _dc, sub_sub, sub_direct in subfolders:
+            rows.extend(tree_rows(sub_name, sub_sec, sub_count, sub_sub, sub_direct, depth + 1))
+        return rows
+
+    subfolders, direct, root_bytes = tree
+    tree_html = "\n".join(tree_rows(folder.name, total_sec, total_count, subfolders, direct))
+
+    # Top files table
+    ranked = sorted(durations.items(), key=lambda x: x[1], reverse=True)
+    file_rows = []
+    for i, (path, sec) in enumerate(ranked, 1):
+        fd_ = format_duration(sec)
+        sz  = format_size(sizes.get(path, 0))
+        file_rows.append(
+            f'<tr><td>{i}</td><td>{escape(path.name)}</td>'
+            f'<td>{escape(path.parent.name)}</td>'
+            f'<td data-sec="{sec:.0f}">{escape(fd_["hours_fmt"])}</td>'
+            f'<td>{escape(sz)}</td></tr>'
+        )
+    files_html = "\n".join(file_rows)
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aevum — {escape(folder.name)}</title>
+<style>
+  body {{ font-family: system-ui, sans-serif; background: #0f0f0f; color: #e0e0e0; margin: 0; padding: 24px; }}
+  h1 {{ color: #4fc3f7; margin-bottom: 4px; }}
+  .meta {{ color: #888; font-size: 0.9em; margin-bottom: 24px; }}
+  .card {{ background: #1a1a1a; border-radius: 8px; padding: 20px; margin-bottom: 20px; }}
+  .card h2 {{ color: #4fc3f7; margin-top: 0; font-size: 1em; text-transform: uppercase; letter-spacing: 1px; }}
+  .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }}
+  .stat {{ background: #222; border-radius: 6px; padding: 12px; }}
+  .stat-label {{ color: #888; font-size: 0.8em; }}
+  .stat-value {{ color: #fff; font-size: 1.2em; font-weight: bold; margin-top: 4px; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 0.9em; }}
+  th {{ background: #222; color: #4fc3f7; padding: 8px 12px; text-align: left; cursor: pointer; user-select: none; }}
+  th:hover {{ background: #2a2a2a; }}
+  td {{ padding: 7px 12px; border-bottom: 1px solid #222; }}
+  tr:hover td {{ background: #1e1e1e; }}
+  .search {{ width: 100%; padding: 8px 12px; background: #222; border: 1px solid #333;
+             border-radius: 6px; color: #e0e0e0; font-size: 0.9em; margin-bottom: 12px; box-sizing: border-box; }}
+  .search:focus {{ outline: none; border-color: #4fc3f7; }}
+</style>
+</head>
+<body>
+<h1>📁 {escape(folder.name)}</h1>
+<div class="meta">Scanned: {escape(str(folder))} &nbsp;·&nbsp; {stamp} &nbsp;·&nbsp; Generated by Aevum</div>
+
+<div class="card">
+  <h2>Summary</h2>
+  <div class="stats-grid">
+    <div class="stat"><div class="stat-label">Total Files</div><div class="stat-value">{total_count:,}</div></div>
+    <div class="stat"><div class="stat-label">Total Duration</div><div class="stat-value">{escape(fd["hours_fmt"])}</div></div>
+    <div class="stat"><div class="stat-label">Days</div><div class="stat-value">{escape(fd["days_fmt"])}</div></div>
+    <div class="stat"><div class="stat-label">Total Size</div><div class="stat-value">{escape(format_size(total_bytes))}</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Folder Tree</h2>
+  <table id="tree-table">
+    <thead><tr><th onclick="sortTable('tree-table',0)">Folder</th><th onclick="sortTable('tree-table',1)">Duration</th><th onclick="sortTable('tree-table',2)">Files</th></tr></thead>
+    <tbody>{tree_html}</tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>All Files</h2>
+  <input class="search" type="text" id="file-search" placeholder="Search files..." oninput="filterTable()">
+  <table id="file-table">
+    <thead><tr><th>#</th><th onclick="sortTable('file-table',1)">File</th><th onclick="sortTable('file-table',2)">Folder</th><th onclick="sortTable('file-table',3)">Duration</th><th onclick="sortTable('file-table',4)">Size</th></tr></thead>
+    <tbody id="file-tbody">{files_html}</tbody>
+  </table>
+</div>
+
+<script>
+function sortTable(id, col) {{
+  const t = document.getElementById(id);
+  const rows = Array.from(t.tBodies[0].rows);
+  const asc = t.dataset.sortCol == col && t.dataset.sortDir == 'asc';
+  rows.sort((a, b) => {{
+    const av = a.cells[col]?.dataset.sec ? parseFloat(a.cells[col].dataset.sec)
+             : a.cells[col]?.innerText.trim() || '';
+    const bv = b.cells[col]?.dataset.sec ? parseFloat(b.cells[col].dataset.sec)
+             : b.cells[col]?.innerText.trim() || '';
+    if (typeof av === 'number') return asc ? bv - av : av - bv;
+    return asc ? bv.localeCompare(av) : av.localeCompare(bv);
+  }});
+  rows.forEach(r => t.tBodies[0].appendChild(r));
+  t.dataset.sortCol = col; t.dataset.sortDir = asc ? 'desc' : 'asc';
+}}
+function filterTable() {{
+  const q = document.getElementById('file-search').value.toLowerCase();
+  document.querySelectorAll('#file-tbody tr').forEach(r => {{
+    r.style.display = r.innerText.toLowerCase().includes(q) ? '' : 'none';
+  }});
+}}
+</script>
+</body>
+</html>"""
+
+
 def _build_content(folder, total_sec, total_count, tree, durations, fmt):
     """Build export content string (or row list for CSV) without touching disk."""
     folder = Path(folder)
+
+    if fmt == "html":
+        return _build_html(folder, total_sec, total_count, tree, durations, {})
 
     if fmt == "json":
         root_name  = folder.name
