@@ -14,7 +14,7 @@ from ._color   import clr, LINE, clear, _disable_color
 from ._scan    import (check_ffprobe, format_duration, format_size, _run_scan,
                        parse_duration_arg, parse_since_arg, apply_filters, rebuild_after_filter)
 from ._youtube import _is_url, scan_url, _make_url_progress, get_quota_status
-from ._display import print_results, print_url_results, print_stats, _fuzzy_suggest
+from ._display import print_results, print_url_results, print_stats, print_recent, _fuzzy_suggest
 from ._dupes   import find_duplicates, print_duplicates, print_dupe_warning, dupes_to_json
 # Q-01 fix: compare logic extracted to _compare.py
 from ._compare import run_compare, print_comparison
@@ -434,6 +434,7 @@ def _print_global_help():
     summary   <path>                One-line summary of a folder
     history   <path>                Show past scan snapshots for a folder
     diff      <path>                Show what changed since the last scan
+    recent    <path>                Show recently added or modified files
     alias                           Manage aliases (paths, flags, or any shorthand)
     cache                           Manage the duration cache
     config                          Read/write configuration
@@ -465,6 +466,10 @@ def _print_global_help():
   {clr.W}Watch-only flags{clr.RST}
     -i, --interval SECONDS          Poll interval in seconds (default 5)
     --no-clear                      Don't clear screen between updates
+
+  {clr.W}Recent flags{clr.RST}
+    --since DATE                    Show files modified after this (default: 30d)
+    --limit N                       Max files to show (default: 50)
 
   {clr.W}Alias subcommands{clr.RST}
     aevum alias list                List all aliases with type labels
@@ -555,7 +560,7 @@ def _parse_args():
     SUBCOMMANDS = (
         'scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config',
         'alias', 'doctor', 'quota', 'version', 'update', 'clearpath',
-        'appdata', 'files', 'stats', 'summary', 'history', 'diff',
+        'appdata', 'files', 'stats', 'summary', 'history', 'diff', 'recent',
     )
 
     # Flags that consume the next token as their value.
@@ -905,6 +910,26 @@ def _dispatch_subcommand(sub, argv):
         args.command = sub
         return args
 
+    if sub == 'recent':
+        p = argparse.ArgumentParser(prog="aevum recent",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            description="Show files added or modified within a recent time window.",
+            epilog=("Examples:\n"
+                    "  aevum recent D:\\Movies\n"
+                    "  aevum recent D:\\Movies --since 7d\n"
+                    "  aevum recent D:\\Movies --since 2025-01-01 --limit 100\n"))
+        p.add_argument("folder_parts", nargs="*", metavar="PATH")
+        p.add_argument("--since", default="30d", metavar="DATE",
+                       help="Show files modified after this date (default: 30d)")
+        p.add_argument("--limit", type=int, default=50, metavar="N",
+                       help="Max files to show (default: 50)")
+        p.add_argument("--no-cache", action="store_true")
+        _add_common_flags(p)
+        args = p.parse_intermixed_args(argv)
+        args.folder  = _join_path_tokens(args.folder_parts)
+        args.command = sub
+        return args
+
     if sub == 'history':
         p = argparse.ArgumentParser(prog="aevum history",
             description="Show past scan snapshots for a folder.")
@@ -1243,6 +1268,59 @@ def main():
     # ── cache ─────────────────────────────────────────────────────────
     if cmd == 'cache':
         cmd_cache(args)
+        sys.exit(EX.OK)
+
+    # ── recent ────────────────────────────────────────────────────────
+    if cmd == 'recent':
+        folder = Path(_resolve_alias(args.folder.strip().strip("'\""), cfg))
+        if not folder.exists() or not folder.is_dir():
+            if use_json:
+                _json_error(f"Not a valid folder: {folder}", EX.ERR_ARGS)
+            print(f"\n  {clr.R}[ERROR]{clr.RST} Not a valid folder: {folder}\n", file=sys.stderr)
+            sys.exit(EX.ERR_ARGS)
+        _require_ffprobe("recent", use_json)
+        try:
+            since_ts = parse_since_arg(args.since)
+        except ValueError as e:
+            if use_json:
+                _json_error(str(e), EX.ERR_ARGS)
+            print(f"\n  {clr.R}[ERROR]{clr.RST} {e}\n", file=sys.stderr)
+            sys.exit(EX.ERR_ARGS)
+        on_progress = _make_progress_bar(quiet, use_json)
+        use_cache   = _use_cache(args, cfg)
+        total_sec, total_count, tree, durations, sizes, hits = _run_scan(
+            folder, on_progress, "name:asc", use_cache)
+        if not quiet:
+            print()
+        if use_json:
+            import datetime as _dt
+            entries = []
+            for path, sec in durations.items():
+                try:
+                    mtime = path.stat().st_mtime
+                    if mtime >= since_ts:
+                        entries.append({
+                            "path":     str(path),
+                            "filename": path.name,
+                            "folder":   path.parent.name,
+                            "seconds":  round(sec, 2),
+                            "bytes":    sizes.get(path, 0),
+                            "duration": format_duration(sec)["hours_fmt"],
+                            "modified": _dt.datetime.fromtimestamp(mtime).isoformat(),
+                        })
+                except OSError:
+                    pass
+            entries.sort(key=lambda x: x["modified"], reverse=True)
+            _json_out({
+                "status":      "ok",
+                "command":     "recent",
+                "path":        str(folder.resolve()),
+                "since":       args.since,
+                "total_found": len(entries),
+                "files":       entries[:args.limit],
+            })
+        else:
+            print_recent(folder, durations, sizes, since_ts, limit=args.limit)
         sys.exit(EX.OK)
 
     # ── history ───────────────────────────────────────────────────────

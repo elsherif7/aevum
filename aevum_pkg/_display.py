@@ -386,6 +386,66 @@ def print_stats(folder, durations, sizes):
         print()
 
 
+def print_recent(folder, durations, sizes, since_ts, limit=50):
+    """
+    Print files modified after since_ts, sorted newest first.
+    """
+    import datetime
+    import os
+
+    if not durations:
+        print(f"\n  {clr.Y}No media files found.{clr.RST}\n")
+        return
+
+    # Collect files with their mtime
+    entries = []
+    for path, sec in durations.items():
+        try:
+            mtime = path.stat().st_mtime
+            if mtime >= since_ts:
+                entries.append((path, sec, mtime, sizes.get(path, 0)))
+        except OSError:
+            pass
+
+    if not entries:
+        print(f"\n  {clr.Y}No files found modified after that date.{clr.RST}\n")
+        return
+
+    # Sort newest first
+    entries.sort(key=lambda x: x[2], reverse=True)
+    shown    = entries[:limit]
+    total_sec   = sum(e[1] for e in shown)
+    total_bytes = sum(e[3] for e in shown)
+
+    print()
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print(f"  {clr.W}  Recent Files{clr.RST}  {clr.DIM}—{clr.RST}  "
+          f"{clr.W}{Path(folder).name}{clr.RST}  "
+          f"{clr.DIM}({len(entries)} files found){clr.RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print()
+
+    for path, sec, mtime, fbytes in shown:
+        dt  = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+        dur = format_duration(sec)["hours_fmt"]
+        sz  = format_size(fbytes)
+        print(f"  {clr.DIM}{dt}{clr.RST}  {clr.W}{path.name}{clr.RST}")
+        print(f"             {clr.Y}{dur}{clr.RST}  {clr.DIM}|{clr.RST}  "
+              f"{clr.W}{sz}{clr.RST}  {clr.DIM}({path.parent.name}){clr.RST}")
+        print()
+
+    if len(entries) > limit:
+        print(f"  {clr.DIM}... and {len(entries) - limit} more (use --limit N to show more){clr.RST}\n")
+
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print(f"  {clr.W}  Total{clr.RST}  {clr.DIM}:{clr.RST}  "
+          f"{clr.Y}{len(shown)} files{clr.RST}  {clr.DIM}|{clr.RST}  "
+          f"{clr.W}{format_duration(total_sec)['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  "
+          f"{clr.W}{format_size(total_bytes)}{clr.RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print()
+
+
 def _fuzzy_suggest(word, candidates):
     """
     Return the closest candidate to word within edit-distance 2, or None.
