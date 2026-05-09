@@ -444,20 +444,20 @@ def _print_global_help():
     appdata                         Open the Aevum data folder
     version                         Print version and exit
 
-  {clr.W}Scan / Files / Watch flags{clr.RST}
+  {clr.W}Scan flags{clr.RST}  {clr.DIM}(aevum scan / aevum files / aevum watch){clr.RST}
     -s, --sort FIELD[:DIR]          Sort: name, duration, count  (e.g. duration:desc)
     -t, --top N                     Show top N longest files (default 10, 0 to hide)
-    -f, --files                     Show individual files in the tree
-    -o, --out FILE                  Write results to FILE
-    --format txt|csv|json|html      Explicit export format
-    --depth N                       Limit tree to N levels deep
-    --merge                         Combine multiple targets into one total
+    -f, --files                     Show individual files in the tree  {clr.DIM}(scan only){clr.RST}
+    -o, --out FILE                  Write results to FILE  {clr.DIM}(scan only){clr.RST}
+    --format txt|csv|json|html      Explicit export format  {clr.DIM}(scan only){clr.RST}
+    --depth N                       Limit tree to N levels deep  {clr.DIM}(scan only){clr.RST}
+    --merge                         Combine multiple targets into one total  {clr.DIM}(scan only){clr.RST}
     --min-duration DURATION         Skip files shorter than this (30s, 5m, 1h, 1:30:00)
     --max-duration DURATION         Skip files longer than this
     --ext EXT[,EXT]                 Only include these extensions (mkv,mp4)
     --folder PATTERN                Only include folders matching this glob
     --exclude PATTERN[,PATTERN]     Exclude folders by name (trailers,samples)
-    --since DATE                    Only files modified after this (7d, 30d, 2025-01-15)
+    --since DATE                    Only files modified after this (7d, 30d, 2w, 2025-01-15)
     --until DATE                    Only files modified before this
     --speed SPEED                   Add custom playback speed to breakdown (repeatable)
     --no-cache                      Bypass cache, re-probe every file
@@ -465,6 +465,27 @@ def _print_global_help():
   {clr.W}Watch-only flags{clr.RST}
     -i, --interval SECONDS          Poll interval in seconds (default 5)
     --no-clear                      Don't clear screen between updates
+
+  {clr.W}Alias subcommands{clr.RST}
+    aevum alias list                List all aliases with type labels
+    aevum alias set <name> <value>  Create a new alias (path, flag, or command)
+    aevum alias remove <name>       Remove an alias  (also: alias rm <name>)
+
+  {clr.W}Cache subcommands{clr.RST}
+    aevum cache list                List all cache files and sizes
+    aevum cache clear               Delete all cache files
+    aevum cache clear <path>        Delete cache for one specific folder
+    aevum cache path                Print the cache directory path
+
+  {clr.W}Config subcommands{clr.RST}
+    aevum config list               Show all config keys and values
+    aevum config get <key>          Print one config value
+    aevum config set <key> <value>  Set a config value
+    aevum config reset              Reset all config to defaults
+    {clr.DIM}Keys: sort  top  no_color  cache_enabled  export_dir  yt_api_key{clr.RST}
+
+  {clr.W}Update flags{clr.RST}
+    --dry-run                       Show what would run without actually upgrading
 
   {clr.W}Global Options{clr.RST}
     --no-color                      Disable ANSI color output
@@ -475,12 +496,9 @@ def _print_global_help():
     -U, --upgrade                   Alias for 'aevum update'
 
   {clr.W}Exit Codes{clr.RST}
-    0  success
-    1  bad arguments / path not found
-    2  missing dependency (ffprobe)
-    3  scan error / interrupted
-    4  export / write failed
-    5  YouTube API error
+    0  success          1  bad arguments / path not found
+    2  missing ffprobe  3  scan error / interrupted
+    4  export failed    5  YouTube API error
 
   {clr.DIM}Run 'aevum <command> --help' for full options on any command.{clr.RST}
 """)

@@ -100,7 +100,10 @@ aevum scan D:\Movies --min-duration 5m --ext mkv,mp4
 aevum scan D:\Movies --depth 2
 aevum scan D:\Movies --exclude trailers,samples,extras
 aevum scan D:\Movies --since 30d
+aevum scan D:\Movies --since 2w
 aevum scan D:\Movies --since 2025-01-01
+aevum scan D:\Movies --until 2025-06-01
+aevum scan D:\Movies --speed 1.5 --speed 2.5
 ```
 
 ### Scan multiple folders
@@ -189,9 +192,11 @@ Every `aevum scan` automatically saves a snapshot. `aevum diff` shows added and 
 ```bash
 aevum alias list
 aevum alias set M D:\02-Media
-aevum alias remove M
+aevum alias remove M          # also: aevum alias rm M
 aevum scan M
 ```
+
+Aliases can point to a path, a flag, or any command fragment. They cannot be overwritten — remove first, then re-add.
 
 ### Config
 
@@ -273,12 +278,14 @@ Run `aevum <command> --help` for options on any command.
 | `--folder PATTERN` | Only include files inside folders matching this glob (e.g. `Action*`) |
 | `--exclude PATTERN[,PATTERN]` | Exclude folders matching these patterns (e.g. `trailers,samples`) |
 | `--since DATE` | Only include files modified after this date (e.g. `7d`, `30d`, `2w`, `2025-01-15`) |
-| `--until DATE` | Only include files modified before this date |
-| `--speed SPEED` | Add a custom playback speed to the breakdown (repeatable, e.g. `--speed 1.5 --speed 3`) |
+| `--until DATE` | Only include files modified before this date (same format as `--since`) |
+| `--speed SPEED` | Add a custom playback speed to the breakdown — repeatable (e.g. `--speed 1.5 --speed 3`) |
 | `--no-cache` | Bypass the duration cache and re-probe every file |
 | `--no-color` | Strip ANSI colors from output |
 | `--json` | Output machine-readable JSON to stdout |
 | `-q, --quiet` | Suppress all decorative output (errors → stderr only) |
+
+> **Note:** `-f/--files`, `-o/--out`, `--format`, `--depth`, and `--merge` are `scan`-only flags. `--min-duration`, `--max-duration`, `--ext`, `--folder`, `--exclude`, `--since`, `--until`, `--speed` also work on `watch`.
 
 ## Watch options
 
@@ -292,14 +299,17 @@ Run `aevum <command> --help` for options on any command.
 | `--ext EXT[,EXT]` | Extension filter (same as scan) |
 | `--folder PATTERN` | Subfolder name filter (same as scan) |
 | `--exclude PATTERN[,PATTERN]` | Exclude folders by name pattern |
+| `--since / --until DATE` | Date filters (same as scan) |
 | `--speed SPEED` | Custom playback speed (same as scan) |
+| `--no-cache` | Bypass cache |
+| `--json` | Stream newline-delimited JSON (includes `watch_update`, `changed`, `total_sec_delta` fields) |
 
 ## Export options
 
 | Flag | Description |
 |---|---|
-| `format` | Output format: `txt`, `csv`, `json`, or `html` |
-| `-o, --out FILE` | Output file path (auto-generated if omitted) |
+| `format` | Output format: `txt`, `csv`, `json`, or `html` (required positional argument) |
+| `-o, --out FILE` | Output file path (auto-generated with timestamp if omitted) |
 | `-s, --sort FIELD[:DIR]` | Sort order for the exported file |
 | `--no-cache` | Bypass cache and re-probe every file |
 
@@ -309,6 +319,54 @@ Run `aevum <command> --help` for options on any command.
 |---|---|
 | `--exclude PATTERN[,PATTERN]` | Exclude folders by name pattern before computing stats |
 | `--no-cache` | Bypass cache |
+
+## Compare options
+
+| Flag | Description |
+|---|---|
+| `-s, --sort FIELD[:DIR]` | Sort field used when scanning each folder |
+| `--no-cache` | Bypass cache |
+
+## Dupes options
+
+| Flag | Description |
+|---|---|
+| `-o, --out FILE` | Write duplicate report to a text file |
+| `--no-cache` | Bypass cache |
+
+## Update options
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Show the pip command that would run without actually upgrading |
+
+## Alias subcommands
+
+```bash
+aevum alias list                  # list all aliases with type labels ([path], [command], [flag])
+aevum alias set <name> <value>    # create alias — value can be a path, flag, or command fragment
+aevum alias remove <name>         # remove an alias (also: alias rm <name>)
+```
+
+Aliases cannot be overwritten — remove first with `aevum alias rm <name>`, then re-add.
+
+## Cache subcommands
+
+```bash
+aevum cache list                  # list all cache files with folder paths and sizes
+aevum cache clear                 # delete all local + YouTube cache files
+aevum cache clear <path>          # delete cache for one specific folder only
+aevum cache path                  # print the cache directory path
+```
+
+## Config subcommands
+
+```bash
+aevum config list                 # show all keys and current values
+aevum config get <key>            # print one value
+aevum config set <key> <value>    # set a value
+aevum config reset                # reset everything to defaults
+```
 
 ## Global options
 
