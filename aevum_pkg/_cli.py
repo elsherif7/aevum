@@ -14,7 +14,7 @@ from ._color   import clr, LINE, clear, _disable_color
 from ._scan    import (check_ffprobe, format_duration, format_size, _run_scan,
                        parse_duration_arg, parse_since_arg, apply_filters, rebuild_after_filter)
 from ._youtube import _is_url, scan_url, _make_url_progress, get_quota_status
-from ._display import print_results, print_url_results, print_stats, print_recent, _fuzzy_suggest
+from ._display import print_results, print_url_results, print_stats, print_recent, print_top, _fuzzy_suggest
 from ._dupes   import find_duplicates, print_duplicates, print_dupe_warning, dupes_to_json
 # Q-01 fix: compare logic extracted to _compare.py
 from ._compare import run_compare, print_comparison
@@ -435,6 +435,7 @@ def _print_global_help():
     history   <path>                Show past scan snapshots for a folder
     diff      <path>                Show what changed since the last scan
     recent    <path>                Show recently added or modified files
+    top       <path>                Show top N files by duration or size
     alias                           Manage aliases (paths, flags, or any shorthand)
     cache                           Manage the duration cache
     config                          Read/write configuration
@@ -560,7 +561,7 @@ def _parse_args():
     SUBCOMMANDS = (
         'scan', 'compare', 'dupes', 'export', 'watch', 'cache', 'config',
         'alias', 'doctor', 'quota', 'version', 'update', 'clearpath',
-        'appdata', 'files', 'stats', 'summary', 'history', 'diff', 'recent',
+        'appdata', 'files', 'stats', 'summary', 'history', 'diff', 'recent', 'top',
     )
 
     # Flags that consume the next token as their value.
@@ -907,6 +908,26 @@ def _dispatch_subcommand(sub, argv):
             description="Clear the saved Aevum project path used by 'aevum update'.")
         _add_common_flags(p)
         args = p.parse_intermixed_args(argv)
+        args.command = sub
+        return args
+
+    if sub == 'top':
+        p = argparse.ArgumentParser(prog="aevum top",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            description="Show top N files by duration or size.",
+            epilog=("Examples:\n"
+                    "  aevum top D:\\Movies\n"
+                    "  aevum top D:\\Movies --by size\n"
+                    "  aevum top D:\\Movies --limit 50 --by size\n"))
+        p.add_argument("folder_parts", nargs="*", metavar="PATH")
+        p.add_argument("--by", choices=["duration", "size"], default="duration",
+                       help="Sort by duration (default) or size")
+        p.add_argument("--limit", type=int, default=20, metavar="N",
+                       help="Number of files to show (default: 20)")
+        p.add_argument("--no-cache", action="store_true")
+        _add_common_flags(p)
+        args = p.parse_intermixed_args(argv)
+        args.folder  = _join_path_tokens(args.folder_parts)
         args.command = sub
         return args
 
@@ -1268,6 +1289,51 @@ def main():
     # ── cache ─────────────────────────────────────────────────────────
     if cmd == 'cache':
         cmd_cache(args)
+        sys.exit(EX.OK)
+
+    # ── top ───────────────────────────────────────────────────────────
+    if cmd == 'top':
+        folder = Path(_resolve_alias(args.folder.strip().strip("'\""), cfg))
+        if not folder.exists() or not folder.is_dir():
+            if use_json:
+                _json_error(f"Not a valid folder: {folder}", EX.ERR_ARGS)
+            print(f"\n  {clr.R}[ERROR]{clr.RST} Not a valid folder: {folder}\n", file=sys.stderr)
+            sys.exit(EX.ERR_ARGS)
+        _require_ffprobe("top", use_json)
+        on_progress = _make_progress_bar(quiet, use_json)
+        use_cache   = _use_cache(args, cfg)
+        _, _, _, durations, sizes, _ = _run_scan(folder, on_progress, "name:asc", use_cache)
+        if not quiet:
+            print()
+        by    = getattr(args, 'by', 'duration')
+        limit = getattr(args, 'limit', 20)
+        if use_json:
+            if by == "size":
+                ranked = sorted(sizes.items(), key=lambda x: x[1], reverse=True)
+                ranked = [(p, s, durations.get(p, 0.0)) for p, s in ranked if p in durations]
+            else:
+                ranked = sorted(durations.items(), key=lambda x: x[1], reverse=True)
+                ranked = [(p, sizes.get(p, 0), s) for p, s in ranked]
+            _json_out({
+                "status":  "ok",
+                "command": "top",
+                "path":    str(folder.resolve()),
+                "by":      by,
+                "files": [
+                    {
+                        "path":     str(p),
+                        "filename": p.name,
+                        "folder":   p.parent.name,
+                        "seconds":  round(sec, 2),
+                        "bytes":    fb,
+                        "duration": format_duration(sec)["hours_fmt"],
+                        "size":     format_size(fb),
+                    }
+                    for p, fb, sec in ranked[:limit]
+                ],
+            })
+        else:
+            print_top(folder, durations, sizes, n=limit, by=by)
         sys.exit(EX.OK)
 
     # ── recent ────────────────────────────────────────────────────────

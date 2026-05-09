@@ -386,6 +386,40 @@ def print_stats(folder, durations, sizes):
         print()
 
 
+def print_top(folder, durations, sizes, n=20, by="duration"):
+    """
+    Print top N files sorted by duration or size.
+    by: 'duration' | 'size'
+    """
+    if not durations:
+        print(f"\n  {clr.Y}No media files found.{clr.RST}\n")
+        return
+
+    if by == "size":
+        ranked = sorted(sizes.items(), key=lambda x: x[1], reverse=True)
+        ranked = [(p, s, durations.get(p, 0.0)) for p, s in ranked if p in durations]
+    else:
+        ranked = sorted(durations.items(), key=lambda x: x[1], reverse=True)
+        ranked = [(p, sizes.get(p, 0), s) for p, s in ranked]
+
+    shown = ranked[:n]
+
+    label = "Longest" if by == "duration" else "Largest"
+    print()
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print(f"  {clr.W}  Top {n} {label} Files{clr.RST}  {clr.DIM}—{clr.RST}  {clr.W}{Path(folder).name}{clr.RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print()
+    for i, (path, fbytes, sec) in enumerate(shown, 1):
+        dur = format_duration(sec)["hours_fmt"]
+        sz  = format_size(fbytes)
+        print(f"  {clr.DIM}{i:>3}.{clr.RST}  {clr.W}{path.name}{clr.RST}")
+        print(f"        {clr.Y}{dur}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{sz}{clr.RST}  {clr.DIM}({path.parent.name}){clr.RST}")
+        print()
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print()
+
+
 def print_recent(folder, durations, sizes, since_ts, limit=50):
     """
     Print files modified after since_ts, sorted newest first.
