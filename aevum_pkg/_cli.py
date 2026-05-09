@@ -444,6 +444,28 @@ def _print_global_help():
     appdata                         Open the Aevum data folder
     version                         Print version and exit
 
+  {clr.W}Scan / Files / Watch flags{clr.RST}
+    -s, --sort FIELD[:DIR]          Sort: name, duration, count  (e.g. duration:desc)
+    -t, --top N                     Show top N longest files (default 10, 0 to hide)
+    -f, --files                     Show individual files in the tree
+    -o, --out FILE                  Write results to FILE
+    --format txt|csv|json|html      Explicit export format
+    --depth N                       Limit tree to N levels deep
+    --merge                         Combine multiple targets into one total
+    --min-duration DURATION         Skip files shorter than this (30s, 5m, 1h, 1:30:00)
+    --max-duration DURATION         Skip files longer than this
+    --ext EXT[,EXT]                 Only include these extensions (mkv,mp4)
+    --folder PATTERN                Only include folders matching this glob
+    --exclude PATTERN[,PATTERN]     Exclude folders by name (trailers,samples)
+    --since DATE                    Only files modified after this (7d, 30d, 2025-01-15)
+    --until DATE                    Only files modified before this
+    --speed SPEED                   Add custom playback speed to breakdown (repeatable)
+    --no-cache                      Bypass cache, re-probe every file
+
+  {clr.W}Watch-only flags{clr.RST}
+    -i, --interval SECONDS          Poll interval in seconds (default 5)
+    --no-clear                      Don't clear screen between updates
+
   {clr.W}Global Options{clr.RST}
     --no-color                      Disable ANSI color output
     --json                          Machine-readable JSON output to stdout
@@ -460,7 +482,7 @@ def _print_global_help():
     4  export / write failed
     5  YouTube API error
 
-  {clr.DIM}Run 'aevum <command> --help' for command-specific options.{clr.RST}
+  {clr.DIM}Run 'aevum <command> --help' for full options on any command.{clr.RST}
 """)
 
 

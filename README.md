@@ -274,6 +274,7 @@ Run `aevum <command> --help` for options on any command.
 | `--exclude PATTERN[,PATTERN]` | Exclude folders matching these patterns (e.g. `trailers,samples`) |
 | `--since DATE` | Only include files modified after this date (e.g. `7d`, `30d`, `2w`, `2025-01-15`) |
 | `--until DATE` | Only include files modified before this date |
+| `--speed SPEED` | Add a custom playback speed to the breakdown (repeatable, e.g. `--speed 1.5 --speed 3`) |
 | `--no-cache` | Bypass the duration cache and re-probe every file |
 | `--no-color` | Strip ANSI colors from output |
 | `--json` | Output machine-readable JSON to stdout |
@@ -291,6 +292,23 @@ Run `aevum <command> --help` for options on any command.
 | `--ext EXT[,EXT]` | Extension filter (same as scan) |
 | `--folder PATTERN` | Subfolder name filter (same as scan) |
 | `--exclude PATTERN[,PATTERN]` | Exclude folders by name pattern |
+| `--speed SPEED` | Custom playback speed (same as scan) |
+
+## Export options
+
+| Flag | Description |
+|---|---|
+| `format` | Output format: `txt`, `csv`, `json`, or `html` |
+| `-o, --out FILE` | Output file path (auto-generated if omitted) |
+| `-s, --sort FIELD[:DIR]` | Sort order for the exported file |
+| `--no-cache` | Bypass cache and re-probe every file |
+
+## Stats / Summary options
+
+| Flag | Description |
+|---|---|
+| `--exclude PATTERN[,PATTERN]` | Exclude folders by name pattern before computing stats |
+| `--no-cache` | Bypass cache |
 
 ## Global options
 
