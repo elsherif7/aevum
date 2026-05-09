@@ -15,6 +15,7 @@ from pathlib import Path
 from ._color import clr, LINE
 from ._scan  import format_duration, format_size
 from ._paths import APPDATA
+from ._display import _safe
 
 HISTORY_DIR = APPDATA / "history"
 
@@ -32,9 +33,12 @@ def _history_file(folder: Path) -> Path:
 
 
 def load_history(folder: Path) -> list:
-    """Return list of snapshot dicts, oldest first. Empty list on error."""
+    """Return list of snapshot dicts, oldest first. Empty list on error or if too large."""
+    MAX_HISTORY_SIZE = 20 * 1024 * 1024  # 20 MB hard limit
     f = _history_file(folder)
     try:
+        if f.exists() and f.stat().st_size > MAX_HISTORY_SIZE:
+            return []
         return json.loads(f.read_text(encoding="utf-8"))
     except Exception:
         return []
@@ -53,10 +57,10 @@ def save_snapshot(folder: Path, total_sec: float, total_count: int,
         "total_sec":   round(total_sec, 2),
         "total_count": total_count,
         "total_bytes": total_bytes,
-        # Store just the filenames + durations (not full paths) to keep size small
+        # Cap stored filenames to prevent unbounded growth
         "files": {
-            Path(p).name: round(s, 2)
-            for p, s in durations.items()
+            Path(p).name[:255]: round(s, 2)
+            for p, s in list(durations.items())[:10000]
         },
     }
     history.append(snapshot)
@@ -160,7 +164,7 @@ def print_diff(folder: Path):
         print(f"  {clr.C}{LINE}{clr.RST}")
         for name in added[:30]:
             dur = format_duration(curr["files"].get(name, 0))["hours_fmt"]
-            print(f"    {clr.G}+{clr.RST}  {clr.W}{name}{clr.RST}  {clr.DIM}{dur}{clr.RST}")
+            print(f"    {clr.G}+{clr.RST}  {clr.W}{_safe(name)}{clr.RST}  {clr.DIM}{dur}{clr.RST}")
         if len(added) > 30:
             print(f"    {clr.DIM}... and {len(added) - 30} more{clr.RST}")
         print()
@@ -171,7 +175,7 @@ def print_diff(folder: Path):
         print(f"  {clr.C}{LINE}{clr.RST}")
         for name in removed[:30]:
             dur = format_duration(prev["files"].get(name, 0))["hours_fmt"]
-            print(f"    {clr.R}-{clr.RST}  {clr.W}{name}{clr.RST}  {clr.DIM}{dur}{clr.RST}")
+            print(f"    {clr.R}-{clr.RST}  {clr.W}{_safe(name)}{clr.RST}  {clr.DIM}{dur}{clr.RST}")
         if len(removed) > 30:
             print(f"    {clr.DIM}... and {len(removed) - 30} more{clr.RST}")
         print()

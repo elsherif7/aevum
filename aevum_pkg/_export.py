@@ -218,6 +218,7 @@ def _build_html(folder, total_sec, total_count, tree, durations, sizes):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
 <title>Aevum — {escape(folder.name)}</title>
 <style>
   body {{ font-family: system-ui, sans-serif; background: #0f0f0f; color: #e0e0e0; margin: 0; padding: 24px; }}

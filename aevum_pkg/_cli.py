@@ -1397,7 +1397,6 @@ def main():
 
     # ── history ───────────────────────────────────────────────────────
     if cmd == 'history':
-        folder = Path(_join_path_tokens(args.folder.split()) if args.folder else '.')
         folder = Path(_resolve_alias(args.folder.strip().strip("'\""), cfg))
         if not folder.exists() or not folder.is_dir():
             if use_json:
@@ -1521,6 +1520,8 @@ def main():
         _require_ffprobe("watch", use_json)
 
         interval  = max(1.0, args.interval)
+        if args.interval < 1.0 and not quiet:
+            print(f"  {clr.Y}[WARN]{clr.RST}  Interval clamped to minimum 1 second.", file=sys.stderr)
         no_clear  = args.no_clear or use_json
         sort      = _resolve_sort(args, cfg)
         top       = _resolve_top(args, cfg)

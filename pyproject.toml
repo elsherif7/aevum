@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aevum"
-version = "2.2.2"
+version = "2.2.3"
 description = "Media Library Scanner"
 requires-python = ">=3.8"
 

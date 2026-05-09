@@ -3,6 +3,17 @@ from pathlib import Path
 from ._color import clr, LINE
 from ._scan  import format_duration, format_size
 
+import re as _re
+
+_ANSI_ESCAPE = _re.compile(r'\x1b(?:\[[0-9;]*[mGKHFJA-Za-z]|\][^\x07]*\x07|[^[])')
+_CTRL_CHARS  = _re.compile(r'[\x00-\x1f\x7f]')
+
+def _safe(name: str, maxlen: int = 200) -> str:
+    """Strip ANSI escape sequences and control characters from display strings."""
+    name = _ANSI_ESCAPE.sub('', name)
+    name = _CTRL_CHARS.sub('', name)
+    return name[:maxlen]
+
 
 _DEPTH_ATTRS = ("R", "G", "B", "M", "C")
 
@@ -158,8 +169,8 @@ def print_top_files(durations, n=10):
     print(f"  {clr.C}{LINE}{clr.RST}")
     for i, (path, sec) in enumerate(ranked, start=1):
         fmt    = format_duration(sec)
-        name   = path.name
-        parent = path.parent.name
+        name   = _safe(path.name)
+        parent = _safe(path.parent.name)
         print(f"  {clr.DIM}{i:>2}.{clr.RST}  {clr.W}{fmt['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{name}{clr.RST}  {clr.DIM}({parent}){clr.RST}")
     print()
 
@@ -413,8 +424,8 @@ def print_top(folder, durations, sizes, n=20, by="duration"):
     for i, (path, fbytes, sec) in enumerate(shown, 1):
         dur = format_duration(sec)["hours_fmt"]
         sz  = format_size(fbytes)
-        print(f"  {clr.DIM}{i:>3}.{clr.RST}  {clr.W}{path.name}{clr.RST}")
-        print(f"        {clr.Y}{dur}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{sz}{clr.RST}  {clr.DIM}({path.parent.name}){clr.RST}")
+        print(f"  {clr.DIM}{i:>3}.{clr.RST}  {clr.W}{_safe(path.name)}{clr.RST}")
+        print(f"        {clr.Y}{dur}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{sz}{clr.RST}  {clr.DIM}({_safe(path.parent.name)}){clr.RST}")
         print()
     print(f"  {clr.C}{LINE}{clr.RST}")
     print()
@@ -463,9 +474,9 @@ def print_recent(folder, durations, sizes, since_ts, limit=50):
         dt  = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
         dur = format_duration(sec)["hours_fmt"]
         sz  = format_size(fbytes)
-        print(f"  {clr.DIM}{dt}{clr.RST}  {clr.W}{path.name}{clr.RST}")
+        print(f"  {clr.DIM}{dt}{clr.RST}  {clr.W}{_safe(path.name)}{clr.RST}")
         print(f"             {clr.Y}{dur}{clr.RST}  {clr.DIM}|{clr.RST}  "
-              f"{clr.W}{sz}{clr.RST}  {clr.DIM}({path.parent.name}){clr.RST}")
+              f"{clr.W}{sz}{clr.RST}  {clr.DIM}({_safe(path.parent.name)}){clr.RST}")
         print()
 
     if len(entries) > limit:

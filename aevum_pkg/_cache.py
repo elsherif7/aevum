@@ -58,22 +58,14 @@ def _cache_key(root):
 def load_cache(root):
     """
     Load the cache for this root folder with validation.
-    
-    Returns a dict mapping normalised absolute path string ->
-        {mtime, size, duration}.
-    Returns {} if no cache exists or it is unreadable.
-    
-    Security: Validates JSON structure and types to prevent deserialization
-    attacks. Only accepts expected data types. Uses constant-time comparison
-    for cache key lookups to prevent timing attacks.
-    
-    Issue 22 fix: keys are normalised via _normalise_path() so Windows
-    case differences never cause spurious cache misses.
-    Issue 23 fix: CACHE_DIR now comes from _paths.py which correctly
-    uses XDG_DATA_HOME on Linux instead of falling back to ~/Aevum.
+    Returns {} if no cache exists, is unreadable, or exceeds size limit.
     """
     path = _cache_key(root)
+    MAX_CACHE_SIZE = 50 * 1024 * 1024  # 50 MB hard limit
     try:
+        if path.exists() and path.stat().st_size > MAX_CACHE_SIZE:
+            print(f"  [WARN] Cache file too large (>{MAX_CACHE_SIZE//1024//1024} MB), ignoring.", file=__import__('sys').stderr)
+            return {}
         with path.open('r', encoding='utf-8') as f:
             data = json.load(f)
         

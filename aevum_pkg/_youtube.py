@@ -115,8 +115,12 @@ YT_QUOTA_COST = {
 
 
 def _load_yt_video_cache():
-    """Load the per-video cache. Returns {} on any error."""
+    """Load the per-video cache. Returns {} on any error or if file is too large."""
+    MAX_YT_CACHE_SIZE = 100 * 1024 * 1024  # 100 MB hard limit
     try:
+        if YT_VCACHE_FILE.exists() and YT_VCACHE_FILE.stat().st_size > MAX_YT_CACHE_SIZE:
+            print(f"  [WARN] YouTube cache too large, ignoring.", file=sys.stderr)
+            return {}
         return json.loads(YT_VCACHE_FILE.read_text(encoding="utf-8"))
     except Exception:
         return {}
@@ -335,15 +339,16 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
             result = json.loads(r.read().decode('utf-8'))
     except urllib.error.HTTPError as e:
         # Issue 10: extract the API error message from the JSON body
+        # Never include the URL (which contains the API key) in error messages
         try:
             body     = e.read().decode('utf-8', errors='replace')
             err_data = json.loads(body)
             msg      = err_data.get('error', {}).get('message', str(e))
         except Exception:
             msg = str(e)
-        raise RuntimeError(f"YouTube API error {e.code}: {msg}")
+        raise RuntimeError(f"YouTube API error {e.code}: {msg}") from None
     except urllib.error.URLError as e:
-        raise RuntimeError(f"YouTube API network error: {e.reason}")
+        raise RuntimeError(f"YouTube API network error: {e.reason}") from None
 
     _add_quota_usage(quota_cost)
     return result

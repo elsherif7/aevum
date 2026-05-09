@@ -280,7 +280,12 @@ def _read_mkv_duration(path):
 
         timescale_ns = 1_000_000
         i = 0
+        MAX_ITERATIONS = 100_000
+        iterations = 0
         while i + 4 <= len(data):
+            iterations += 1
+            if iterations > MAX_ITERATIONS:
+                return None
             eid, i   = read_id(data, i)
             esize, i = read_vint(data, i)
             if eid == 0x1549A966:  # Info
@@ -309,7 +314,7 @@ def _read_mkv_duration(path):
             elif 0 < esize < 0x100000:
                 i += esize
             else:
-                i += 1
+                i += max(1, min(esize, 65536))  # never advance by 1 byte for large elements
         return None
 
     try:

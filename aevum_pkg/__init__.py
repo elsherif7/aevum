@@ -56,7 +56,7 @@ From _color:
     clear               — clear-screen helper
 """
 
-__version__ = "2.2.2"
+__version__ = "2.2.3"
 
 # ── Scan ────────────────────────────────────────────────────────────────────
 from ._scan import (

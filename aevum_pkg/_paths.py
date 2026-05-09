@@ -10,27 +10,28 @@ from pathlib import Path
 def _appdata_dir() -> Path:
     """
     Resolve the platform-correct Aevum data directory.
-    
-    H-10: validate environment variable values before using them as paths.
-    If the env var contains a relative path or path traversal sequences,
-    fall back to the home directory to prevent data landing in unexpected
-    locations.
+    Validates env vars to prevent path traversal attacks.
     """
+    home = Path.home()
     if os.name == "nt":
         raw = os.environ.get("LOCALAPPDATA", "")
         if raw:
             candidate = Path(raw)
-            # Must be absolute — reject relative paths and traversal attempts
-            if candidate.is_absolute():
+            # Must be absolute and must not be a UNC path (\\server\share)
+            # and must resolve to the same path (no traversal sequences)
+            if (candidate.is_absolute()
+                    and not str(candidate).startswith('\\\\')
+                    and candidate.resolve() == candidate):
                 return candidate / "Aevum"
-        return Path.home() / "AppData" / "Local" / "Aevum"
+        return home / "AppData" / "Local" / "Aevum"
     else:
         raw = os.environ.get("XDG_DATA_HOME", "")
         if raw:
             candidate = Path(raw)
-            if candidate.is_absolute():
+            if (candidate.is_absolute()
+                    and candidate.resolve() == candidate):
                 return candidate / "Aevum"
-        return Path.home() / ".local" / "share" / "Aevum"
+        return home / ".local" / "share" / "Aevum"
 
 
 APPDATA        = _appdata_dir()
