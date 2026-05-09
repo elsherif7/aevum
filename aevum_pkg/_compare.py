@@ -44,12 +44,30 @@ def print_comparison(folder_a, folder_b, data_a, data_b):
     sec_b, count_b, dur_b = data_b
     name_a = Path(folder_a).name
     name_b = Path(folder_b).name
+    root_a = Path(folder_a).resolve()
+    root_b = Path(folder_b).resolve()
     delta_sec   = sec_b   - sec_a
     delta_count = count_b - count_a
     delta_sign  = "+" if delta_sec   >= 0 else ""
     delta_csign = "+" if delta_count >= 0 else ""
-    subs_a  = {p.parent.name for p in dur_a}
-    subs_b  = {p.parent.name for p in dur_b}
+
+    def _rel(p, root):
+        """
+        Return the path of p relative to root as a string.
+        Uses the full relative path (e.g. 'Action/Superhero') so that two
+        subfolders with the same leaf name (e.g. 'Action/Extras' and
+        'Comedy/Extras') are correctly treated as distinct entries.
+        Falls back to p.parent.name if the path is not under root.
+        """
+        try:
+            parts = Path(p).resolve().relative_to(root).parts
+            # Drop the filename — we want the containing folder path.
+            return str(Path(*parts[:-1])) if len(parts) > 1 else ""
+        except ValueError:
+            return Path(p).parent.name
+
+    subs_a  = {_rel(p, root_a) for p in dur_a if _rel(p, root_a)}
+    subs_b  = {_rel(p, root_b) for p in dur_b if _rel(p, root_b)}
     only_a  = sorted(subs_a - subs_b)
     only_b  = sorted(subs_b - subs_a)
     in_both = sorted(subs_a & subs_b)

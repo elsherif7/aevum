@@ -50,16 +50,39 @@ def save_snapshot(folder: Path, total_sec: float, total_count: int,
     Append a snapshot to the history for this folder.
     Keeps the last 50 snapshots to cap disk usage.
     Writes atomically.
+
+    Bug fix: store the path relative to the scanned root folder as the key,
+    not just the bare filename (path.name).  Using only the filename caused
+    false "no changes" when a file moved between subfolders, and false
+    "added/removed" pairs when two files in different subfolders shared the
+    same name (e.g. Movies/Action/ep01.mkv vs Movies/Comedy/ep01.mkv).
+
+    Falls back to the bare filename if the path is not under the root
+    (e.g. absolute paths from an older cache format).
     """
     history = load_history(folder)
+    root = Path(folder).resolve()
+
+    def _rel_key(p) -> str:
+        """Return 'SubA/SubB/file.mkv' relative to root, capped at 512 chars."""
+        try:
+            rel = str(Path(p).resolve().relative_to(root))
+        except ValueError:
+            # Path is not under root — fall back to bare name so old snapshots
+            # remain readable rather than crashing.
+            rel = Path(p).name
+        return rel[:512]
+
     snapshot = {
         "ts":          int(time.time()),
         "total_sec":   round(total_sec, 2),
         "total_count": total_count,
         "total_bytes": total_bytes,
-        # Cap stored filenames to prevent unbounded growth
+        # Cap stored entries to prevent unbounded growth.
+        # Key is the relative path from the root so files with the same name
+        # in different subfolders are correctly distinguished.
         "files": {
-            Path(p).name[:255]: round(s, 2)
+            _rel_key(p): round(s, 2)
             for p, s in list(durations.items())[:10000]
         },
     }
