@@ -16,11 +16,11 @@ from ._cache import load_cache, save_cache
 MAX_WORKERS = min(8, (os.cpu_count() or 4) * 2)
 
 video_extensions = (
-    # Common video
+    # ── Common video ─────────────────────────────────────────────────
     '.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv',
     '.wmv', '.m4v', '.mpg', '.mpeg', '.3gp', '.ts',
     '.vob', '.ogv', '.divx', '.rmvb', '.asf', '.m2ts',
-    # Less common video
+    # ── Less common video ────────────────────────────────────────────
     '.mts', '.m2v', '.f4v', '.f4p', '.nsv', '.roq',
     '.yuv', '.mxf', '.drc', '.gifv', '.mng', '.qt',
     '.rm', '.amv', '.svi', '.3g2', '.mpe', '.mpv',
@@ -30,7 +30,64 @@ video_extensions = (
     '.wtv', '.bdmv', '.iso', '.evo', '.ifo', '.mod',
     '.tod', '.trp', '.tp', '.pva', '.nuv', '.fli',
     '.flc', '.flic', '.smk', '.bik', '.bik2', '.webp',
-    # Audio
+    # ── Additional video formats ─────────────────────────────────────
+    '.av1',                          # AV1 raw bitstream
+    '.avif',                         # AV1 Image File Format (video sequences)
+    '.avs', '.avs2', '.avs3',        # AVS / AVS2 / AVS3 (Chinese standards)
+    '.cavs',                         # Chinese AVS video
+    '.cdg',                          # CD+G karaoke video
+    '.cdxl',                         # Commodore CDXL
+    '.cine',                         # Phantom Cine high-speed camera
+    '.cpk',                          # Sega CRI CPK container
+    '.dat',                          # VCD MPEG-1 DAT / CCTV DAT
+    '.dhav',                         # Dahua DVR video
+    '.dif',                          # DV interchange format
+    '.dl',                           # DL animation
+    '.dpg',                          # Nintendo DS DPG video
+    '.dv',                           # DV raw video
+    '.dvr',                          # DVR recordings
+    '.ea',                           # Electronic Arts video
+    '.flh', '.flt',                  # FLIC variants
+    '.gxf',                          # General eXchange Format (broadcast)
+    '.h261', '.h263',                # Raw H.261 / H.263 bitstreams
+    '.ifv',                          # IFV CCTV DVR
+    '.imf',                          # Interoperable Master Format
+    '.ipu',                          # Raw IPU video
+    '.ivf',                          # IVF (VP8/VP9/AV1 raw container)
+    '.ivr',                          # IVR Internet Video Recording
+    '.kux',                          # KUX (YouKu)
+    '.lxf',                          # VR native stream
+    '.m2t',                          # MPEG-2 transport stream (alt ext)
+    '.m4s',                          # MPEG-DASH segment
+    '.mjpeg', '.mjpg',               # Motion JPEG
+    '.mlv',                          # Magic Lantern Video
+    '.mng',                          # Multiple-image Network Graphics
+    '.moflex',                       # MobiClip MOFLEX
+    '.mods',                         # MobiClip MODS
+    '.mpl',                          # Multiplexed video
+    '.msf',                          # Sony PS3 MSF
+    '.mtv',                          # MTV video
+    '.mv',                           # Silicon Graphics Movie
+    '.mvi',                          # Motion Pixels MVI
+    '.mxg',                          # MxPEG clip
+    '.pmp',                          # PlayStation Portable PMP
+    '.psxstr', '.str',               # Sony PlayStation STR
+    '.rpl',                          # RPL / ARMovie
+    '.scm',                          # Scala Multimedia
+    '.seq',                          # Tiertex SEQ
+    '.sfd',                          # Sega Film / CPK
+    '.sol',                          # Sierra SOL
+    '.swf',                          # ShockWave Flash (video content)
+    '.thp',                          # Nintendo THP video
+    '.ty', '.ty+',                   # TiVo TY stream
+    '.vc1',                          # Raw VC-1 bitstream
+    '.viv', '.vivo',                 # VivoActive video
+    '.vp6', '.vp8', '.vp9',          # Raw VP6 / VP8 / VP9
+    '.vqf',                          # TwinVQ video
+    '.wve',                          # Psion WVE
+    '.y4m',                          # YUV4MPEG2 raw video
+    '.yuv',                          # Raw YUV (already above, kept for clarity)
+    # ── Common audio ─────────────────────────────────────────────────
     '.mp3', '.aac', '.flac', '.wav', '.ogg', '.wma',
     '.m4a', '.opus', '.aiff', '.aif', '.aifc', '.ape',
     '.wv', '.tta', '.mka', '.mpa', '.mp2', '.ac3',
@@ -42,6 +99,59 @@ video_extensions = (
     '.u32', '.w64', '.rf64', '.bwf', '.mid', '.midi',
     '.kar', '.xmf', '.mxmf', '.rtttl', '.rtx', '.ota',
     '.imy', '.mp1',
+    # ── Additional audio formats ─────────────────────────────────────
+    '.aa',                           # Audible AA audiobook
+    '.aax',                          # Audible AAX (enhanced audiobook)
+    '.ace',                          # tri-Ace Audio Container
+    '.acm',                          # Interplay ACM audio
+    '.act',                          # ACT Voice recorder
+    '.adp', '.ads',                  # ADP / Sony PS2 ADS
+    '.adts',                         # ADTS raw AAC
+    '.afc',                          # AFC audio
+    '.aix',                          # CRI AIX audio
+    '.apac',                         # Raw APAC
+    '.apc',                          # CRYO APC audio
+    '.avr',                          # AVR (Audio Visual Research)
+    '.bfstm',                        # BFSTM (Nintendo Binary Cafe Stream)
+    '.binka',                        # Bink Audio
+    '.bonk',                         # Bonk audio
+    '.brstm',                        # BRSTM (Binary Revolution Stream)
+    '.dss',                          # Digital Speech Standard
+    '.dsf',                          # DSD Stream File
+    '.dff',                          # DSDIFF (DSD Interchange File Format)
+    '.fwse',                         # Capcom MT Framework sound
+    '.g722', '.g723', '.g726',       # ITU-T G.7xx raw audio
+    '.g728', '.g729',                # ITU-T G.728 / G.729
+    '.hca',                          # CRI HCA audio
+    '.hcom',                         # Macintosh HCOM
+    '.laf',                          # Limitless Audio Format
+    '.latm',                         # LOAS/LATM AAC
+    '.loas',                         # LOAS AudioSyncStream
+    '.mca',                          # MCA Audio Format
+    '.mpc',                          # Musepack
+    '.msf',                          # Sony PS3 MSF audio
+    '.nsp',                          # Computerized Speech Lab NSP
+    '.osq',                          # Raw OSQ lossless audio
+    '.pp_bnk',                       # Pro Pinball Soundbank
+    '.pvf',                          # Portable Voice Format
+    '.qcp',                          # QCP (QCELP) mobile audio
+    '.qoa',                          # Quite OK Audio
+    '.rka',                          # RKA audio
+    '.rsd',                          # RSD audio
+    '.sb0', '.sb1', '.sb2',          # Sound Blaster audio banks
+    '.sd2',                          # Sound Designer II
+    '.shn',                          # Shorten lossless audio
+    '.sln',                          # Asterisk raw signed linear
+    '.tak',                          # Tom's lossless Audio Kompressor
+    '.thd',                          # Dolby TrueHD (already above)
+    '.tta',                          # True Audio (already above)
+    '.vag',                          # Sony PS VAG audio
+    '.voc',                          # Creative Voice File
+    '.vpk',                          # Sony PS2 VPK audio
+    '.w64',                          # Sony Wave64 (already above)
+    '.wsd',                          # Wideband Single-bit Data
+    '.xa',                           # Sony PS XA audio
+    '.xwb',                          # Microsoft XWB (Xbox audio bank)
 )
 
 # Frozenset of the same extensions for O(1) membership testing in hot paths.
