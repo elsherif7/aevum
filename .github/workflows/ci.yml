@@ -26,8 +26,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install ".[dev]"
+          python -m pip install --upgrade pip --no-cache-dir
+          pip install --no-cache-dir ".[dev]"
 
       - name: Run tests
         run: python -m pytest tests/ -v
@@ -66,4 +66,4 @@ jobs:
         run: pip install mypy
 
       - name: Run mypy
-        run: python -m mypy aevum_pkg/_models.py aevum_pkg/_cache.py aevum_pkg/_config.py aevum_pkg/_scan.py aevum_pkg/_apikey.py aevum_pkg/_export.py aevum_pkg/_youtube.py aevum_pkg/_cli_json.py aevum_pkg/_cli_helpers.py aevum_pkg/_history.py aevum_pkg/_dupes.py aevum_pkg/_compare.py --ignore-missing-imports
+        run: python -m mypy
