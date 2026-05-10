@@ -49,3 +49,21 @@ jobs:
 
       - name: Run ruff
         run: python -m ruff check aevum_pkg/
+
+  typecheck:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install mypy
+        run: pip install mypy
+
+      - name: Run mypy
+        run: python -m mypy --ignore-missing-imports aevum_pkg/_models.py aevum_pkg/_cache.py aevum_pkg/_config.py aevum_pkg/_scan.py aevum_pkg/_apikey.py aevum_pkg/_export.py aevum_pkg/_youtube.py aevum_pkg/_cli_json.py aevum_pkg/_cli_helpers.py

@@ -15,7 +15,7 @@ try:
     KEYRING_AVAILABLE = True
 except ImportError:
     KEYRING_AVAILABLE = False
-    keyring = None
+    keyring = None  # type: ignore[assignment]
 
 from ._paths import YT_KEY_FILE
 

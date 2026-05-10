@@ -25,7 +25,7 @@ class _RateLimiter:
     def __init__(self, max_calls: int, time_window: int):
         self.max_calls   = max_calls
         self.time_window = time_window
-        self.calls       = _deque()
+        self.calls: _deque[float] = _deque()
         self.lock        = _Lock()
         self._state_file = None   # set lazily after _paths is importable
 

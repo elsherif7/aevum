@@ -4,6 +4,8 @@ JSON serialisation helpers for the Aevum CLI.
 All functions that convert internal scan/dupe/compare data into
 JSON-serialisable dicts live here so _cli.py stays thin.
 """
+from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path
@@ -16,7 +18,7 @@ def _json_out(data: dict):
     print(json.dumps(data, ensure_ascii=False, indent=2), flush=True)
 
 
-def _json_error(msg: str, code: int, extra: dict = None):
+def _json_error(msg: str, code: int, extra: dict | None = None) -> None:
     d = {"status": "error", "code": code, "error": msg}
     if extra:
         d.update(extra)

@@ -34,6 +34,7 @@ secure = [
 dev = [
     "pytest>=9.0",
     "ruff>=0.4",
+    "mypy>=1.10",
 ]
 
 [project.scripts]
@@ -53,5 +54,19 @@ ignore = [
     "E501",   # line too long — long f-strings with ANSI codes are intentional
 ]
 
-[tool.ruff.lint.per-file-ignores]
-"tests/*" = ["F401"]
+[tool.mypy]
+python_version = "3.8"
+ignore_missing_imports = true
+# Only check annotated modules — unannotated modules are skipped until
+# they receive annotations in a future pass.
+files = [
+    "aevum_pkg/_models.py",
+    "aevum_pkg/_cache.py",
+    "aevum_pkg/_config.py",
+    "aevum_pkg/_scan.py",
+    "aevum_pkg/_apikey.py",
+    "aevum_pkg/_export.py",
+    "aevum_pkg/_youtube.py",
+    "aevum_pkg/_cli_json.py",
+    "aevum_pkg/_cli_helpers.py",
+]

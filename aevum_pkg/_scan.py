@@ -437,12 +437,12 @@ def scan_parallel(
 
         if root_inode in _visited_inodes:
             print(f"  Warning: Symlink loop detected: {root}", file=sys.stderr)
-            return 0.0, 0, ([], [], 0), {}, {}, 0
+            return 0.0, 0, ScanTree([], [], 0), {}, {}, 0
 
         _visited_inodes.add(root_inode)
     except OSError as e:
         print(f"  Warning: Cannot access {root}: {e}", file=sys.stderr)
-        return 0.0, 0, ([], [], 0), {}, {}, 0
+        return 0.0, 0, ScanTree([], [], 0), {}, {}, 0
 
     durations = {}
     sizes     = {}
@@ -617,10 +617,10 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None) -> ScanTree:
     root     = Path(root)
     sizes    = sizes or {}
 
-    folder_secs   = {}
-    folder_bytes  = {}
-    folder_count  = {}
-    folder_direct = {}
+    folder_secs:   dict[Path, float] = {}
+    folder_bytes:  dict[Path, int]   = {}
+    folder_count:  dict[Path, int]   = {}
+    folder_direct: dict[Path, list]  = {}
 
     for path, sec in durations.items():
         file_bytes = sizes.get(path, 0)

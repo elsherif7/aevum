@@ -82,12 +82,17 @@ def _use_cache(args, cfg):
     return cfg.get('cache_enabled', True)
 
 
-def _resolve_alias(raw, cfg):
+def _resolve_alias(raw: str, cfg) -> str:
     """
-    If raw matches a known alias (case-insensitive), return the expansion.
-    Otherwise return raw unchanged.
+    If raw matches a known alias (case-insensitive), return the expansion
+    as a single string.  Always returns str — never a list.
 
     Issue 17 fix: empty string is returned immediately.
+
+    Audit fix: previously returned either str or list depending on token
+    count, which caused silent failures when callers did Path(result).
+    Now always returns str; multi-token expansions are joined with a space
+    so paths-with-spaces round-trip correctly.
     """
     if not raw:
         return raw
@@ -100,7 +105,10 @@ def _resolve_alias(raw, cfg):
         tokens = shlex.split(expanded)
     except ValueError:
         tokens = expanded.split()
-    return tokens if len(tokens) > 1 else (tokens[0] if tokens else raw)
+    # Always return a single string — join multi-token expansions.
+    # Callers that need argv-style splitting (e.g. _expand_aliases_in_argv)
+    # do their own shlex.split on the result.
+    return tokens[0] if len(tokens) == 1 else expanded
 
 
 def _expand_aliases_in_argv(argv, cfg):

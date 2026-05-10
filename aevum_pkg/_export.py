@@ -22,12 +22,12 @@ def _is_relative_to(path, root):
         except ValueError:
             return False
 
-def validate_export_path(out_path: str, scan_folder) -> "Path":
+def validate_export_path(out_path: str, scan_folder) -> Path:
     """Validate export destination — blocks system dirs, checks extension."""
     import os as _os
-    out_path = Path(out_path).resolve()
-    if not out_path.parent.exists():
-        raise ValueError(f"Output directory does not exist: {out_path.parent}")
+    resolved = Path(out_path).resolve()
+    if not resolved.parent.exists():
+        raise ValueError(f"Output directory does not exist: {resolved.parent}")
     system_roots = []
     if _os.name == "nt":
         win_dir = Path(_os.environ.get("SystemRoot", r"C:\Windows"))
@@ -36,14 +36,14 @@ def validate_export_path(out_path: str, scan_folder) -> "Path":
         system_roots = [Path("/etc"), Path("/usr"), Path("/bin"), Path("/sbin"),
                         Path("/lib"), Path("/lib64"), Path("/boot"), Path("/sys"), Path("/proc")]
     for sysroot in system_roots:
-        if _is_relative_to(out_path, sysroot):
-            raise PermissionError(f"Cannot write to system directory: {out_path}")
+        if _is_relative_to(resolved, sysroot):
+            raise PermissionError(f"Cannot write to system directory: {resolved}")
     allowed_extensions = {".txt", ".csv", ".json", ".html"}
-    if out_path.suffix.lower() not in allowed_extensions:
+    if resolved.suffix.lower() not in allowed_extensions:
         raise ValueError(
-            f"Invalid extension {out_path.suffix}. Allowed: {', '.join(sorted(allowed_extensions))}"
+            f"Invalid extension {resolved.suffix}. Allowed: {', '.join(sorted(allowed_extensions))}"
         )
-    return out_path
+    return resolved
 
 
 def sanitize_csv_field(value: str) -> str:
