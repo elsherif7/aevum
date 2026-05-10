@@ -2,15 +2,12 @@
 aevum_pkg — Media Library Scanner
 Public API surface.
 
-Issue 31 fix: only genuinely public symbols are re-exported here.
-Private helpers (prefixed with _) are no longer imported into __init__.py;
-they remain accessible via their own modules for internal use but are not
-part of the package's declared public API.  This makes it safe to rename
-or remove internals without accidentally breaking external callers who
-relied on the accidental __init__.py exposure.
+Only genuinely public symbols are re-exported here. Private helpers
+(prefixed with _) remain accessible via their own modules for internal
+use but are not part of the declared public API.
 
-Intended public API
--------------------
+Public API
+----------
 From _scan:
     check_ffprobe       — verify ffprobe is on PATH
     get_duration        — return duration in seconds for a single file
@@ -21,19 +18,22 @@ From _scan:
 
 From _youtube:
     scan_url            — fetch duration data for a YouTube URL
+    get_quota_status    — return today's quota usage figures
+
+From _apikey:
     load_api_key        — read the stored YouTube API key
     save_api_key        — persist a YouTube API key
-    get_quota_status    — return today's quota usage figures
 
 From _display:
     print_results       — print a human-readable scan result
     print_url_results   — print a human-readable YouTube result
+
 From _dupes:
     find_duplicates     — detect duplicate files by size + hash
     print_duplicates    — print duplicate groups to stdout
 
 From _export:
-    export_results      — write scan results to TXT/CSV/JSON
+    export_results      — write scan results to TXT/CSV/JSON/HTML
     export_url_results  — write YouTube scan results to TXT/CSV/JSON
 
 From _config:
@@ -45,7 +45,7 @@ From _cache:
     load_cache          — read the duration cache for a folder
     save_cache          — write the duration cache for a folder
 
-From _config (also owns path constants):
+From _paths:
     APPDATA             — platform-correct Aevum data directory (Path)
     CACHE_DIR           — cache subdirectory (Path)
     CONFIG_FILE         — config file path (Path)
@@ -54,6 +54,10 @@ From _color:
     clr                 — ANSI color singleton
     LINE                — separator line string
     clear               — clear-screen helper
+
+From _models:
+    FolderNode          — named type for one node in the scan tree
+    ScanTree            — named type for the top-level scan result
 """
 
 __version__ = "2.2.3"

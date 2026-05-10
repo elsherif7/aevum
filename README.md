@@ -511,10 +511,19 @@ aevum/
   aevum.py           — entry point
   pyproject.toml     — pip install config
   README.md
+  CHANGELOG.md
+  SECURITY.md
+  LICENSE
   .gitignore
   aevum_pkg/
     __init__.py      — public API surface
-    _cli.py          — main(), arg parsing, subcommand dispatch
+    _models.py       — FolderNode and ScanTree data types
+    _cli.py          — main(), subcommand dispatch
+    _cli_args.py     — argparse definitions for every subcommand
+    _cli_cmds.py     — one cmd_* function per subcommand
+    _cli_helpers.py  — shared CLI helpers (progress bar, filters, etc.)
+    _cli_json.py     — JSON serialisers for machine-readable output
+    _cli_update.py   — self-update logic
     _scan.py         — ffprobe, native parsers, tree builder, filters
     _youtube.py      — YouTube Data API v3 + per-video cache + quota tracking
     _display.py      — all print/display functions (tree, bar chart, stats)
@@ -522,7 +531,7 @@ aevum/
     _dupes.py        — duplicate detection (BLAKE2b)
     _export.py       — TXT/CSV/JSON/HTML export + path validation
     _history.py      — scan history snapshots and diff
-    _config.py       — config, cache commands, doctor
+    _config.py       — load_config, save_config, CONFIG_DEFAULTS
     _cache.py        — duration cache read/write
     _paths.py        — platform-aware AppData/XDG path resolution
     _color.py        — ANSI color singleton (clr)
