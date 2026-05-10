@@ -7,14 +7,14 @@ Q-01 fix: extracted from _cli.py where it was inlined with a comment
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Tuple
 
 from ._color import LINE, clr
 from ._scan import _run_scan, format_duration
 
 # Type alias for the data returned per folder by run_compare.
-_FolderData = Tuple[float, int, dict]
+_FolderData = tuple[float, int, dict]
 
 
 def run_compare(

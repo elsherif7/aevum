@@ -11,15 +11,14 @@ license = { file = "LICENSE" }
 authors = [
     { name = "Abdulrahman Elsherif" }
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Environment :: Console",
     "Topic :: Multimedia :: Video",
     "Topic :: Utilities",
@@ -47,7 +46,7 @@ include = ["aevum_pkg*"]
 # ── Ruff ─────────────────────────────────────────────────────────────────────
 [tool.ruff]
 line-length = 120
-target-version = "py38"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]
@@ -57,14 +56,10 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["F401"]
-# _models.py intentionally uses typing.List/Tuple for Python 3.8 compatibility.
-# NamedTuple field annotations are evaluated at class definition time on 3.8,
-# so built-in list[...]/tuple[...] syntax would raise TypeError at import.
-"aevum_pkg/_models.py" = ["UP006", "UP007", "UP035", "UP037"]
 
 # ── Mypy ──────────────────────────────────────────────────────────────────────
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 ignore_missing_imports = true
 # Only check annotated modules — unannotated modules are skipped until
 # they receive annotations in a future pass.

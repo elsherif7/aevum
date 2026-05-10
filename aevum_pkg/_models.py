@@ -9,7 +9,7 @@ means adding a field only requires changing one place.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, NamedTuple, Tuple
+from typing import NamedTuple
 
 # ---------------------------------------------------------------------------
 # FolderNode
@@ -33,8 +33,8 @@ class FolderNode(NamedTuple):
     total_count:  int
     total_bytes:  int
     direct_count: int
-    children:     List["FolderNode"]
-    direct_files: List[Tuple[Path, float]]
+    children:     list[FolderNode]
+    direct_files: list[tuple[Path, float]]
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +48,6 @@ class FolderNode(NamedTuple):
 # ---------------------------------------------------------------------------
 
 class ScanTree(NamedTuple):
-    children:     List[FolderNode]
-    direct_files: List[Tuple[Path, float]]
+    children:     list[FolderNode]
+    direct_files: list[tuple[Path, float]]
     root_bytes:   int
