@@ -513,6 +513,7 @@ aevum/
   pyproject.toml     — pip install config
   README.md
   CHANGELOG.md
+  CONTRIBUTING.md
   SECURITY.md
   LICENSE
   .gitignore
@@ -556,6 +557,13 @@ See [SECURITY.md](SECURITY.md) for the full security design, vulnerability repor
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, code style,
+and the pull request checklist.
 
 ---
 
