@@ -20,9 +20,10 @@ from ._display import (print_results, print_url_results, print_stats,
 from ._dupes   import find_duplicates, print_duplicates, print_dupe_warning
 from ._compare import run_compare, print_comparison
 from ._export  import export_results, export_url_results
-from ._config  import save_config, cmd_doctor as _config_doctor, cmd_cache, cmd_config
-from ._apikey  import load_api_key
-from ._paths   import CACHE_DIR
+from ._config  import save_config, CONFIG_DEFAULTS, _config_key_valid
+from ._apikey  import load_api_key, save_api_key, get_storage_method
+from ._youtube import prompt_api_key, yt_cache_stats, yt_cache_clear, get_quota_status
+from ._paths   import CACHE_DIR, CONFIG_FILE
 from ._exit    import EX
 from ._history import save_snapshot, print_history, print_diff, history_to_json, diff_to_json
 from ._cli_json    import (_json_out, _json_error, _scan_to_json, _url_to_json,
@@ -79,9 +80,9 @@ def cmd_appdata(args, cfg, use_json, quiet):
 
 
 def cmd_doctor(args, cfg, use_json, quiet):
+    import subprocess as _sp
+    from ._scan import check_ffprobe, format_size
     if use_json:
-        import subprocess as _sp
-        from ._scan import check_ffprobe
         ffprobe_ok = check_ffprobe()
         try:
             r = _sp.run(['ffprobe', '-version'], capture_output=True, text=True)
@@ -106,17 +107,242 @@ def cmd_doctor(args, cfg, use_json, quiet):
             "cache_dir":       str(CACHE_DIR),
         })
         sys.exit(EX.OK)
-    _config_doctor(cfg)
+
+    # Human-readable output
+    print()
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print(f"  {clr.C}  Aevum Doctor{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}Environment Check{clr.RST}")
+    print(f"  {clr.C}{LINE}{clr.RST}")
+    print()
+
+    pv = sys.version.split()[0]
+    print(f"  {clr.G}[OK]{clr.RST}   Python {pv}")
+
+    try:
+        r  = _sp.run(["ffprobe", "-version"], capture_output=True, text=True)
+        fv = r.stdout.splitlines()[0] if r.stdout else "unknown"
+        print(f"  {clr.G}[OK]{clr.RST}   {fv}")
+    except FileNotFoundError:
+        print(f"  {clr.R}[FAIL]{clr.RST}  ffprobe not found on PATH")
+        print(f"         Install FFmpeg: {clr.C}https://ffmpeg.org/download.html{clr.RST}")
+
+    api_key = load_api_key()
+    if api_key:
+        storage = get_storage_method()
+        storage_name = {
+            "keyring":        "system keyring (encrypted)",
+            "encrypted_file": "encrypted file",
+            "plaintext_file": "plaintext file",
+        }.get(storage, "secure storage")
+        print(f"  {clr.G}[OK]{clr.RST}   YouTube API key set  {clr.DIM}(stored in {storage_name}){clr.RST}")
+        used, remaining, pct = get_quota_status()
+        quota_col = clr.G if pct < 50 else (clr.Y if pct < 80 else clr.R)
+        print(
+            f"  {clr.G}[OK]{clr.RST}   YouTube quota: "
+            f"{quota_col}{used:,}/10,000 units used{clr.RST}  "
+            f"{clr.DIM}({remaining:,} remaining, {pct:.1f}%){clr.RST}"
+        )
+    else:
+        print(f"  {clr.Y}[WARN]{clr.RST}  YouTube API key not set")
+        print(f"         Set it with: {clr.W}aevum config set yt_api_key <key>{clr.RST}")
+
+    try:
+        files       = list(CACHE_DIR.glob("*.json")) if CACHE_DIR.exists() else []
+        total_bytes = sum(f.stat().st_size for f in files)
+        print(f"  {clr.G}[OK]{clr.RST}   Cache: {len(files)} entries, {format_size(total_bytes)} at {CACHE_DIR}")
+    except Exception:
+        print(f"  {clr.Y}[WARN]{clr.RST}  Could not read cache directory: {CACHE_DIR}")
+
+    if CONFIG_FILE.exists():
+        print(f"  {clr.G}[OK]{clr.RST}   Config: {CONFIG_FILE}")
+    else:
+        print(f"  {clr.DIM}[INFO]{clr.RST}  No config file (using defaults). {clr.DIM}{CONFIG_FILE}{clr.RST}")
+    print()
     sys.exit(EX.OK)
 
 
 def cmd_config_dispatch(args, cfg, use_json, quiet):
-    cmd_config(args, cfg)
-    sys.exit(EX.OK)
+    import json as _json
+    action = args.action
+    YT_KEY = "yt_api_key"
+
+    if action == "list":
+        print()
+        print(f"  {clr.C}{LINE}{clr.RST}")
+        print(f"  {clr.W}  Configuration{clr.RST}  {clr.DIM}|{clr.RST}  {CONFIG_FILE}")
+        print(f"  {clr.C}{LINE}{clr.RST}")
+        print()
+        for k, v in cfg.items():
+            print(f"  {clr.G}{k:<18}{clr.RST}  {clr.W}{v}{clr.RST}")
+        api_key = load_api_key()
+        status  = f"(set - stored in {get_storage_method()})" if api_key else "(not set)"
+        print(f"  {clr.G}{YT_KEY:<18}{clr.RST}  {clr.W}{status}{clr.RST}")
+        print()
+        sys.exit(EX.OK)
+
+    if action == "reset":
+        save_config(dict(CONFIG_DEFAULTS))
+        print(f"  {clr.G}[OK]{clr.RST}  Configuration reset to defaults.")
+        sys.exit(EX.OK)
+
+    key = args.key
+    if not key:
+        print(f"  {clr.R}[ERROR]{clr.RST} Key required. Run 'aevum config list' to see all keys.", file=sys.stderr)
+        sys.exit(EX.ERR_ARGS)
+
+    if action == "get":
+        if key == YT_KEY:
+            api_key = load_api_key()
+            if api_key:
+                print(f"API key is set (stored in {get_storage_method()})")
+                print(f"Use 'aevum doctor' to verify it works")
+            else:
+                print("(not set)")
+        elif _config_key_valid(key):
+            print(cfg.get(key, CONFIG_DEFAULTS.get(key)))
+        else:
+            print(f"  {clr.R}[ERROR]{clr.RST} Unknown key: {key}", file=sys.stderr)
+            sys.exit(EX.ERR_ARGS)
+        sys.exit(EX.OK)
+
+    if action == "set":
+        value = args.value
+        if key == YT_KEY:
+            if not value:
+                prompt_api_key()
+                sys.exit(EX.OK)
+            if save_api_key(value):
+                print(f"  {clr.G}[OK]{clr.RST}  yt_api_key saved to {get_storage_method()}.")
+            else:
+                print(f"  {clr.R}[ERROR]{clr.RST}  Failed to save API key.", file=sys.stderr)
+                sys.exit(EX.ERR_API)
+            sys.exit(EX.OK)
+        if not _config_key_valid(key):
+            print(
+                f"  {clr.R}[ERROR]{clr.RST} Unknown key: {key}. "
+                f"Run 'aevum config list' to see all keys.",
+                file=sys.stderr,
+            )
+            sys.exit(EX.ERR_ARGS)
+        if value is None:
+            print(
+                f"  {clr.R}[ERROR]{clr.RST} Value required: aevum config set {key} <value>",
+                file=sys.stderr,
+            )
+            sys.exit(EX.ERR_ARGS)
+        default = CONFIG_DEFAULTS[key]
+        try:
+            if isinstance(default, bool):
+                _true  = {"1", "true", "yes", "on"}
+                _false = {"0", "false", "no", "off"}
+                if value.lower() in _true:
+                    coerced = True
+                elif value.lower() in _false:
+                    coerced = False
+                else:
+                    print(
+                        f"  {clr.R}[ERROR]{clr.RST} Invalid value for {key}: '{value}'. "
+                        f"Use true/false, yes/no, on/off, or 1/0.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(EX.ERR_ARGS)
+            elif isinstance(default, int):
+                coerced = int(value)
+                if key == "top" and not (0 <= coerced <= 100):
+                    print(f"  {clr.R}[ERROR]{clr.RST} 'top' must be between 0 and 100.", file=sys.stderr)
+                    sys.exit(EX.ERR_ARGS)
+            else:
+                coerced = value
+        except (ValueError, AttributeError):
+            print(f"  {clr.R}[ERROR]{clr.RST} Invalid value for {key}: {value}", file=sys.stderr)
+            sys.exit(EX.ERR_ARGS)
+        cfg[key] = coerced
+        ok = save_config(cfg)
+        if ok:
+            print(f"  {clr.G}[OK]{clr.RST}  {key} = {coerced}")
+        else:
+            print(
+                f"  {clr.Y}[WARN]{clr.RST}  Setting applied for this session but "
+                f"could not be saved to disk.",
+                file=sys.stderr,
+            )
+        sys.exit(EX.OK)
 
 
 def cmd_cache_dispatch(args, cfg, use_json, quiet):
-    cmd_cache(args)
+    import json as _json
+    from ._scan import format_size
+    from ._cache import _cache_key
+    action = args.action or "list"
+
+    if action == "path":
+        print(f"  {clr.W}{CACHE_DIR}{clr.RST}")
+        sys.exit(EX.OK)
+
+    if action == "list":
+        files = sorted(CACHE_DIR.glob("*.json")) if CACHE_DIR.exists() else []
+        if not files:
+            print(f"  {clr.DIM}Cache is empty.{clr.RST}  {clr.W}{CACHE_DIR}{clr.RST}")
+            sys.exit(EX.OK)
+        print()
+        print(f"  {clr.C}{LINE}{clr.RST}")
+        print(f"  {clr.W}  Cache  {clr.DIM}|{clr.RST}  {CACHE_DIR}{clr.RST}")
+        print(f"  {clr.C}{LINE}{clr.RST}")
+        print()
+        total = 0
+        for f in files:
+            sz     = f.stat().st_size
+            total += sz
+            try:
+                data        = _json.loads(f.read_text(encoding="utf-8"))
+                folder_path = str(Path(data[0]["path"]).parent) if data else "?"
+                count       = len(data)
+            except Exception:
+                folder_path = "?"
+                count       = 0
+            print(
+                f"  {clr.DIM}{f.name[:16]}{clr.RST}  "
+                f"{clr.W}{folder_path}{clr.RST}  "
+                f"{clr.DIM}({count} files, {format_size(sz)}){clr.RST}"
+            )
+        yt_count, yt_size = yt_cache_stats()
+        if yt_count:
+            print(
+                f"  {clr.DIM}yt_video_cache  {clr.RST}  "
+                f"{clr.W}YouTube videos{clr.RST}  "
+                f"{clr.DIM}({yt_count} videos, {format_size(yt_size)}){clr.RST}"
+            )
+            total += yt_size
+        yt_note = " + YouTube cache" if yt_count else ""
+        print()
+        print(f"  {clr.DIM}Total: {len(files)} local cache files{yt_note}, {format_size(total)}{clr.RST}")
+        print()
+        sys.exit(EX.OK)
+
+    if action == "clear":
+        target_folder = getattr(args, "folder", None)
+        if target_folder:
+            key = _cache_key(target_folder)
+            if key.exists():
+                key.unlink()
+                print(f"  {clr.G}[OK]{clr.RST}  Cleared cache for {target_folder}")
+            else:
+                print(f"  {clr.DIM}[SKIP]{clr.RST}  No cache found for {target_folder}")
+        else:
+            if not CACHE_DIR.exists():
+                print(f"  {clr.DIM}Cache is already empty.{clr.RST}")
+                sys.exit(EX.OK)
+            files  = list(CACHE_DIR.glob("*.json"))
+            failed = 0
+            for f in files:
+                try:
+                    f.unlink()
+                except OSError:
+                    failed += 1
+            yt_cleared = yt_cache_clear()
+            yt_note    = "  +  YouTube video cache" if yt_cleared else ""
+            fail_note  = f"  ({failed} failed)" if failed else ""
+            print(f"  {clr.G}[OK]{clr.RST}  Cleared {len(files) - failed} local cache files from {CACHE_DIR}{yt_note}{fail_note}")
     sys.exit(EX.OK)
 
 
