@@ -6,11 +6,14 @@ Every time a folder is scanned, a snapshot is saved to the history store.
 `aevum diff <path>` compares the latest scan to the previous one.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 from ._color import LINE, clr
 from ._display import _safe
@@ -18,6 +21,9 @@ from ._paths import APPDATA
 from ._scan import format_duration, format_size
 
 HISTORY_DIR = APPDATA / "history"
+
+# Type alias for a single history snapshot dict.
+_Snapshot = dict[str, Any]
 
 
 def _history_key(folder: Path) -> str:
@@ -32,7 +38,7 @@ def _history_file(folder: Path) -> Path:
     return HISTORY_DIR / f"{_history_key(folder)}.json"
 
 
-def load_history(folder: Path) -> list:
+def load_history(folder: Path) -> list[_Snapshot]:
     """Return list of snapshot dicts, oldest first. Empty list on error or if too large."""
     MAX_HISTORY_SIZE = 20 * 1024 * 1024  # 20 MB hard limit
     f = _history_file(folder)
@@ -44,8 +50,13 @@ def load_history(folder: Path) -> list:
         return []
 
 
-def save_snapshot(folder: Path, total_sec: float, total_count: int,
-                  total_bytes: int, durations: dict):
+def save_snapshot(
+    folder: Path,
+    total_sec: float,
+    total_count: int,
+    total_bytes: int,
+    durations: dict[Path, float],
+) -> None:
     """
     Append a snapshot to the history for this folder.
     Keeps the last 50 snapshots to cap disk usage.
@@ -104,7 +115,7 @@ def save_snapshot(folder: Path, total_sec: float, total_count: int,
                 pass
 
 
-def print_history(folder: Path):
+def print_history(folder: Path) -> None:
     """Print a table of past scans for this folder."""
     history = load_history(folder)
     if not history:
@@ -131,7 +142,7 @@ def print_history(folder: Path):
     print()
 
 
-def print_diff(folder: Path):
+def print_diff(folder: Path) -> None:
     """Compare the two most recent snapshots and show what changed."""
     history = load_history(folder)
     if len(history) < 2:
@@ -207,7 +218,7 @@ def print_diff(folder: Path):
         print(f"  {clr.G}  No file changes between these two scans.{clr.RST}\n")
 
 
-def history_to_json(folder: Path) -> dict:
+def history_to_json(folder: Path) -> dict[str, Any]:
     history = load_history(folder)
     return {
         "status":    "ok",
@@ -217,7 +228,7 @@ def history_to_json(folder: Path) -> dict:
     }
 
 
-def diff_to_json(folder: Path) -> dict:
+def diff_to_json(folder: Path) -> dict[str, Any]:
     history = load_history(folder)
     if len(history) < 2:
         return {"status": "error", "error": "Need at least 2 snapshots to diff"}

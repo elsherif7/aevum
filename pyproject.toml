@@ -64,7 +64,7 @@ ignore = [
 
 # ── Mypy ──────────────────────────────────────────────────────────────────────
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.9"
 ignore_missing_imports = true
 # Only check annotated modules — unannotated modules are skipped until
 # they receive annotations in a future pass.
@@ -78,4 +78,7 @@ files = [
     "aevum_pkg/_youtube.py",
     "aevum_pkg/_cli_json.py",
     "aevum_pkg/_cli_helpers.py",
+    "aevum_pkg/_history.py",
+    "aevum_pkg/_dupes.py",
+    "aevum_pkg/_compare.py",
 ]

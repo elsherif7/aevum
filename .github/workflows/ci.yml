@@ -63,7 +63,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install mypy
-        run: pip install mypy
+        run: pip install "mypy>=1.10,<1.12"
 
       - name: Run mypy
         run: python -m mypy --ignore-missing-imports aevum_pkg/_models.py aevum_pkg/_cache.py aevum_pkg/_config.py aevum_pkg/_scan.py aevum_pkg/_apikey.py aevum_pkg/_export.py aevum_pkg/_youtube.py aevum_pkg/_cli_json.py aevum_pkg/_cli_helpers.py

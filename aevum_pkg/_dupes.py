@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 from pathlib import Path
 
@@ -5,7 +7,7 @@ from ._color import LINE, clr
 from ._scan import format_duration
 
 
-def _file_fingerprint(path, size, chunk=65536):
+def _file_fingerprint(path: Path, size: int, chunk: int = 65536) -> str | None:
     """
     Generate file fingerprint using BLAKE2b (faster and more secure than SHA-1).
 
@@ -30,7 +32,7 @@ def _file_fingerprint(path, size, chunk=65536):
     return h.hexdigest()
 
 
-def _file_first_hash(path, chunk=65536):
+def _file_first_hash(path: Path, chunk: int = 65536) -> str | None:
     """Hash only the first chunk — used for fast pre-filtering."""
     try:
         h = hashlib.blake2b()
@@ -41,7 +43,10 @@ def _file_first_hash(path, chunk=65536):
         return None
 
 
-def find_duplicates(durations, sizes=None):
+def find_duplicates(
+    durations: dict[Path, float],
+    sizes: dict | None = None,
+) -> list[list[Path]]:
     """
     Find duplicate files by size + partial hash.
 
@@ -105,7 +110,7 @@ def find_duplicates(durations, sizes=None):
     return groups
 
 
-def _group_wasted(group, durations):
+def _group_wasted(group: list[Path], durations: dict[Path, float]) -> tuple[float, float]:
     """
     Compute wasted duration for a duplicate group using the median duration
     as the canonical "keeper" so transcoded copies don't skew the figure.
@@ -117,7 +122,7 @@ def _group_wasted(group, durations):
     return median_sec, wasted
 
 
-def print_duplicates(groups, durations):
+def print_duplicates(groups: list[list[Path]], durations: dict[Path, float]) -> None:
     if not groups:
         print(f"  {clr.G}No duplicates found.{clr.RST}\n")
         return
@@ -150,7 +155,7 @@ def print_duplicates(groups, durations):
     print()
 
 
-def print_dupe_warning(groups, folder=None):
+def print_dupe_warning(groups: list[list[Path]], folder: Path | None = None) -> None:
     if not groups:
         return
     total     = sum(len(g) - 1 for g in groups)
@@ -163,7 +168,10 @@ def print_dupe_warning(groups, folder=None):
     )
 
 
-def dupes_to_json(groups, durations):
+def dupes_to_json(
+    groups: list[list[Path]],
+    durations: dict[Path, float],
+) -> list[dict]:
     """
     Serialise duplicate groups to a JSON-friendly structure.
 

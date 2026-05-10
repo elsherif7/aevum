@@ -5,13 +5,26 @@ Q-01 fix: extracted from _cli.py where it was inlined with a comment
 '# ── Compare (inlined from _compare.py) ───'.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
+from typing import Callable, Tuple
 
 from ._color import LINE, clr
 from ._scan import _run_scan, format_duration
 
+# Type alias for the data returned per folder by run_compare.
+_FolderData = Tuple[float, int, dict]
 
-def run_compare(folder_a, folder_b, on_progress, sort_by, use_cache, quiet=False):
+
+def run_compare(
+    folder_a: str | Path,
+    folder_b: str | Path,
+    on_progress: Callable[[int, int], None] | None,
+    sort_by: str,
+    use_cache: bool,
+    quiet: bool = False,
+) -> tuple[_FolderData, _FolderData]:
     """
     Scan both folders and return their summary data.
 
@@ -38,7 +51,12 @@ def run_compare(folder_a, folder_b, on_progress, sort_by, use_cache, quiet=False
     return (sec_a, count_a, dur_a), (sec_b, count_b, dur_b)
 
 
-def print_comparison(folder_a, folder_b, data_a, data_b):
+def print_comparison(
+    folder_a: str | Path,
+    folder_b: str | Path,
+    data_a: _FolderData,
+    data_b: _FolderData,
+) -> None:
     """Print a side-by-side comparison of two folder scans."""
     sec_a, count_a, dur_a = data_a
     sec_b, count_b, dur_b = data_b
