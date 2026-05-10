@@ -44,6 +44,7 @@ aevum = "aevum_pkg._cli:main"
 where = ["."]
 include = ["aevum_pkg*"]
 
+# ── Ruff ─────────────────────────────────────────────────────────────────────
 [tool.ruff]
 line-length = 120
 target-version = "py38"
@@ -54,6 +55,14 @@ ignore = [
     "E501",   # line too long — long f-strings with ANSI codes are intentional
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F401"]
+# _models.py intentionally uses typing.List/Tuple for Python 3.8 compatibility.
+# NamedTuple field annotations are evaluated at class definition time on 3.8,
+# so built-in list[...]/tuple[...] syntax would raise TypeError at import.
+"aevum_pkg/_models.py" = ["UP006", "UP007", "UP035", "UP037"]
+
+# ── Mypy ──────────────────────────────────────────────────────────────────────
 [tool.mypy]
 python_version = "3.8"
 ignore_missing_imports = true
