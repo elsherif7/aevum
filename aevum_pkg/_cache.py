@@ -5,12 +5,11 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Union
 
 from ._paths import CACHE_DIR
 
 # Type alias for a single validated cache entry.
-_CacheEntry = dict[str, Union[float, int]]
+_CacheEntry = dict[str, float | int]
 
 # Validated field schema for cache entries — defined once at module level.
 _CACHE_ENTRY_FIELDS: dict[str, type | tuple[type, ...]] = {

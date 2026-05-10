@@ -7,9 +7,9 @@ import struct
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Callable
 
 from ._cache import load_cache, save_cache
 from ._models import FolderNode, ScanTree
