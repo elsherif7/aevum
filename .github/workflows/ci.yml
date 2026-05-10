@@ -17,10 +17,10 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.6.0
         with:
           python-version: ${{ matrix.python-version }}
           update-environment: false
@@ -39,15 +39,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.6.0
         with:
           python-version: "3.12"
+          update-environment: false
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip --no-cache-dir --quiet
 
       - name: Install ruff
-        run: pip install ruff
+        run: pip install --no-cache-dir ruff
 
       - name: Run ruff
         run: python -m ruff check aevum_pkg/
@@ -57,15 +61,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.6.0
         with:
           python-version: "3.12"
+          update-environment: false
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip --no-cache-dir --quiet
 
       - name: Install mypy
-        run: pip install mypy
+        run: pip install --no-cache-dir mypy
 
       - name: Run mypy
         run: python -m mypy
