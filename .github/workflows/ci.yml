@@ -23,11 +23,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          update-environment: false
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip --no-cache-dir --quiet
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip --no-cache-dir
-          pip install --no-cache-dir ".[dev]"
+        run: pip install --no-cache-dir ".[dev]"
 
       - name: Run tests
         run: python -m pytest tests/ -v
