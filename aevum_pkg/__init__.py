@@ -117,6 +117,9 @@ from ._paths import APPDATA, CACHE_DIR, CONFIG_FILE
 # ── Color ────────────────────────────────────────────────────────────────────
 from ._color import clr, LINE, clear
 
+# ── Models ───────────────────────────────────────────────────────────────────
+from ._models import FolderNode, ScanTree
+
 __all__ = [
     # scan
     "check_ffprobe", "get_duration", "format_duration", "format_size",
@@ -137,6 +140,8 @@ __all__ = [
     "APPDATA", "CACHE_DIR", "CONFIG_FILE",
     # color
     "clr", "LINE", "clear",
+    # models
+    "FolderNode", "ScanTree",
     # version
     "__version__",
 ]

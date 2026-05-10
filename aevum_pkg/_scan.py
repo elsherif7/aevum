@@ -9,6 +9,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ._cache import load_cache, save_cache
+from ._models import FolderNode, ScanTree
 
 # How many ffprobe processes to run at once.
 # ffprobe is both CPU and disk-bound; scaling beyond 2× cores gives no gain
@@ -564,8 +565,8 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
         collector.join()
 
         if stop_event and stop_event.is_set():
-            subfolders, direct, root_bytes = _build_tree(root, {}, sort_by)
-            return 0.0, 0, (subfolders, direct, root_bytes), {}, {}, 0
+            tree = _build_tree(root, {}, sort_by)
+            return 0.0, 0, tree, {}, {}, 0
 
         try:
             for future in as_completed(futures):
@@ -582,17 +583,17 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
             raise
 
     if not durations:
-        subfolders, direct, root_bytes = _build_tree(root, {}, sort_by)
-        return 0.0, 0, (subfolders, direct, root_bytes), {}, {}, 0
+        tree = _build_tree(root, {}, sort_by)
+        return 0.0, 0, tree, {}, {}, 0
 
     total_sec   = sum(durations.values())
     total_count = len(durations)
-    subfolders, direct, root_bytes = _build_tree(root, durations, sort_by, sizes)
-    return total_sec, total_count, (subfolders, direct, root_bytes), durations, sizes, hits
+    tree = _build_tree(root, durations, sort_by, sizes)
+    return total_sec, total_count, tree, durations, sizes, hits
 
 
-def _build_tree(root, durations, sort_by="name:asc", sizes=None):
-    """O(n) tree builder.
+def _build_tree(root, durations, sort_by="name:asc", sizes=None) -> ScanTree:
+    """O(n) tree builder.  Returns a ScanTree of FolderNode objects.
 
     Issue 5 fix: ancestor walk is capped at MAX_DEPTH to prevent an
     infinite loop on symlink cycles.
@@ -638,7 +639,7 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None):
             children_of.setdefault(parent, set()).add(folder)
 
     def build(node):
-        subfolders  = []
+        child_nodes = []
         child_paths = sorted(
             children_of.get(node, set()),
             key=lambda p: (
@@ -655,10 +656,21 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None):
             direct_files = folder_direct.get(child, [])
             direct_count = len(direct_files)
             if count == 0:
-                subfolders.append((child.name, 0.0, 0, 0, 0, [], []))
+                child_nodes.append(FolderNode(
+                    name=child.name, total_sec=0.0, total_count=0,
+                    total_bytes=0, direct_count=0, children=[], direct_files=[],
+                ))
                 continue
-            child_subs, child_direct = build(child)
-            subfolders.append((child.name, secs, count, fbytes, direct_count, child_subs, child_direct))
+            child_children, child_direct = build(child)
+            child_nodes.append(FolderNode(
+                name=child.name,
+                total_sec=secs,
+                total_count=count,
+                total_bytes=fbytes,
+                direct_count=direct_count,
+                children=child_children,
+                direct_files=child_direct,
+            ))
         direct = sorted(
             folder_direct.get(node, []),
             key=lambda x: (
@@ -667,11 +679,11 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None):
             ),
             reverse=sort_rev,
         )
-        return subfolders, direct
+        return child_nodes, direct
 
-    subfolders, direct = build(root)
+    children, direct_files = build(root)
     root_bytes = folder_bytes.get(root, 0)
-    return subfolders, direct, root_bytes
+    return ScanTree(children=children, direct_files=direct_files, root_bytes=root_bytes)
 
 
 def _run_scan(folder, on_progress, sort_by="name", use_cache=True):
@@ -807,9 +819,9 @@ def apply_filters(durations, sizes, filters):
 def rebuild_after_filter(root, durations, sizes, sort_by="name:asc"):
     """Re-run tree builder and totals after filters have been applied."""
     if not durations:
-        subfolders, direct, root_bytes = _build_tree(root, {}, sort_by)
-        return 0.0, 0, (subfolders, direct, root_bytes), durations, sizes
+        tree = _build_tree(root, {}, sort_by)
+        return 0.0, 0, tree, durations, sizes
     total_sec   = sum(durations.values())
     total_count = len(durations)
-    subfolders, direct, root_bytes = _build_tree(root, durations, sort_by, sizes)
-    return total_sec, total_count, (subfolders, direct, root_bytes), durations, sizes
+    tree = _build_tree(root, durations, sort_by, sizes)
+    return total_sec, total_count, tree, durations, sizes

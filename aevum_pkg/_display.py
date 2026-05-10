@@ -1,7 +1,8 @@
 from pathlib import Path
 
-from ._color import clr, LINE
-from ._scan  import format_duration, format_size
+from ._color  import clr, LINE
+from ._scan   import format_duration, format_size
+from ._models import FolderNode, ScanTree
 
 import re as _re
 
@@ -42,7 +43,7 @@ def _bar(seconds, total_sec, width=BAR_WIDTH):
     return f"{col}{bar}{clr.RST}  {clr.DIM}{pct:5.1f}%{clr.RST}"
 
 
-def print_bar_chart(subfolders, total_sec, direct=None):
+def print_bar_chart(children: list, total_sec: float, direct_files=None):
     """
     Print a compact bar-chart section showing each top-level subfolder's
     share of the total duration.  Files sitting directly in the root folder
@@ -53,13 +54,13 @@ def print_bar_chart(subfolders, total_sec, direct=None):
 
     # Build rows: (label, seconds)
     rows = []
-    for name, sec, count, _fb, _dc, _sub, _dir in subfolders:
-        if count > 0:
-            rows.append((name, sec))
+    for node in children:
+        if node.total_count > 0:
+            rows.append((node.name, node.total_sec))
 
     # Direct root files grouped together
-    if direct:
-        direct_sec = sum(s for _, s in direct)
+    if direct_files:
+        direct_sec = sum(s for _, s in direct_files)
         if direct_sec > 0:
             rows.append(("(root files)", direct_sec))
 
@@ -89,16 +90,14 @@ def _dc(depth: int) -> str:
     return getattr(clr, _DEPTH_ATTRS[depth % len(_DEPTH_ATTRS)])
 
 
-def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number="",
-               max_depth=50, show_files=False, direct_count=None, fbytes=0):
+def print_tree(name, seconds, count, children: list, direct_files=None, depth=0,
+               number="", max_depth=50, show_files=False, direct_count=None,
+               fbytes=0):
     """
     Recursively print the folder tree.
 
     Issue 26 fix: max_depth is now threaded through every recursive call so
-    that --depth N actually limits the displayed tree depth.  Previously
-    max_depth was always 50 regardless of the CLI flag because _cli.py never
-    forwarded it.  Callers (print_results) pass max_depth through, and _cli.py
-    now forwards args.depth there.
+    that --depth N actually limits the displayed tree depth.
     """
     if depth > max_depth:
         return
@@ -118,15 +117,15 @@ def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number=""
 
     print()
 
-    if direct and subfolders:
-        direct_sec   = sum(sec for _, sec in direct)
-        direct_count = len(direct)
+    if direct_files and children:
+        direct_sec   = sum(sec for _, sec in direct_files)
+        direct_count = len(direct_files)
         dir_fmt      = format_duration(direct_sec)
         child_col    = _dc(depth + 1)
         virt_num     = f"{number}.0" if number else "0"
         print(f"{indent}    {child_col}{virt_num}.  (no folder){clr.RST}")
         dir_bytes = 0
-        for p, _ in direct:
+        for p, _ in direct_files:
             try:
                 dir_bytes += p.stat().st_size
             except OSError:
@@ -135,28 +134,29 @@ def print_tree(name, seconds, count, subfolders, direct=None, depth=0, number=""
         print(f"{indent}        {clr.DIM}+--{clr.RST}  {clr.W}{dir_fmt['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{direct_count} {'video' if direct_count == 1 else 'videos'}{clr.RST}{dir_size_label}")
         if show_files:
             print()
-            for path, sec in direct:
+            for path, sec in direct_files:
                 fd = format_duration(sec)
                 print(f"{indent}        {clr.DIM}|  {fd['hours_fmt']}  {path.name}{clr.RST}")
         print()
-    elif direct and show_files:
-        for path, sec in direct:
+    elif direct_files and show_files:
+        for path, sec in direct_files:
             fd = format_duration(sec)
             print(f"{indent}    {clr.DIM}|  {fd['hours_fmt']}  {path.name}{clr.RST}")
         print()
 
-    for i, (sub_name, sub_sec, sub_count, sub_fbytes, sub_direct_count, sub_sub, sub_direct) in enumerate(subfolders, start=1):
+    for i, node in enumerate(children, start=1):
         sub_number = f"{number}.{i}" if number else str(i)
         # Issue 26: pass max_depth through every recursive call
         print_tree(
-            sub_name, sub_sec, sub_count, sub_sub, sub_direct,
+            node.name, node.total_sec, node.total_count,
+            node.children, node.direct_files,
             depth + 1, sub_number,
             max_depth=max_depth,
             show_files=show_files,
-            direct_count=sub_direct_count,
-            fbytes=sub_fbytes,
+            direct_count=node.direct_count,
+            fbytes=node.total_bytes,
         )
-    if subfolders:
+    if children:
         print()
 
 
@@ -178,8 +178,8 @@ def print_top_files(durations, n=10):
 _DEFAULT_SPEEDS = (1.0, 1.25, 1.5, 1.75, 2.0)
 
 
-def print_results(folder, total_sec, total_count, tree, durations=None, sizes=None,
-                  top_n=10, show_files=False, max_depth=50, speeds=None):
+def print_results(folder, total_sec, total_count, tree: ScanTree, durations=None,
+                  sizes=None, top_n=10, show_files=False, max_depth=50, speeds=None):
     """
     Issue 26 fix: max_depth parameter added so --depth N from the CLI is
     correctly forwarded all the way into print_tree.
@@ -187,7 +187,6 @@ def print_results(folder, total_sec, total_count, tree, durations=None, sizes=No
     """
     fmt        = format_duration(total_sec)
     sizes      = sizes or {}
-    subfolders, direct, root_bytes = tree
     print()
     print(f"  {clr.C}{LINE}{clr.RST}")
     _folder_p     = Path(folder)
@@ -196,12 +195,13 @@ def print_results(folder, total_sec, total_count, tree, durations=None, sizes=No
     print(f"  {clr.C}{LINE}{clr.RST}")
     print()
     print_tree(
-        Path(folder).name, total_sec, total_count, subfolders, direct,
-        show_files=show_files, fbytes=root_bytes, max_depth=max_depth,
+        Path(folder).name, total_sec, total_count,
+        tree.children, tree.direct_files,
+        show_files=show_files, fbytes=tree.root_bytes, max_depth=max_depth,
     )
     # ASCII bar chart — only shown when there is more than one folder to compare
-    if subfolders or direct:
-        print_bar_chart(subfolders, total_sec, direct)
+    if tree.children or tree.direct_files:
+        print_bar_chart(tree.children, total_sec, tree.direct_files)
     print(f"  {clr.C}{LINE}{clr.RST}")
     print(f"  {clr.W}  Grand Total{clr.RST}")
     print(f"  {clr.C}{LINE}{clr.RST}")

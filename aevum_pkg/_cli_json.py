@@ -28,7 +28,6 @@ def _json_error(msg: str, code: int, extra: dict = None):
 def _scan_to_json(folder, total_sec, total_count, tree, durations, sizes, hits):
     """Convert a completed local scan to a JSON-serialisable dict."""
     from ._export import _tree_to_dict
-    subfolders, direct, root_bytes = tree
     fmt = format_duration(total_sec)
     return {
         "status":      "ok",
@@ -39,7 +38,8 @@ def _scan_to_json(folder, total_sec, total_count, tree, durations, sizes, hits):
         "total_sec":   round(total_sec, 2),
         "duration":    fmt,
         "cache_hits":  hits,
-        "tree":        _tree_to_dict(Path(folder).name, total_sec, total_count, subfolders, direct),
+        "tree":        _tree_to_dict(Path(folder).name, total_sec, total_count,
+                                     tree.children, tree.direct_files),
         "files": [
             {
                 "path":     str(p),

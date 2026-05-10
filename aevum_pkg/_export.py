@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ._scan import format_duration, format_size
+from ._models import FolderNode, ScanTree
 # ── Path validation (inlined from _security.py) ──────────────────────
 def _is_relative_to(path, root):
     try:
@@ -70,14 +71,15 @@ def sanitize_csv_field(value: str) -> str:
     return value
 
 
-def _tree_to_dict(name, seconds, count, subfolders, direct=None):
+def _tree_to_dict(name, seconds, count, children: list, direct_files=None):
     return {
         "name":      name,
         "seconds":   round(seconds, 2),
         "count":     count,
         "hours_fmt": format_duration(seconds)["hours_fmt"],
-        "direct":    [{"file": p.name, "seconds": round(s, 2)} for p, s in (direct or [])],
-        "children":  [_tree_to_dict(n, s, c, sub, d) for n, s, c, _fb, _dc, sub, d in subfolders],
+        "direct":    [{"file": p.name, "seconds": round(s, 2)} for p, s in (direct_files or [])],
+        "children":  [_tree_to_dict(n.name, n.total_sec, n.total_count, n.children, n.direct_files)
+                      for n in children],
     }
 
 
@@ -174,7 +176,7 @@ def _write_content_atomic(dest, content, fmt):
         raise
 
 
-def _build_html(folder, total_sec, total_count, tree, durations, sizes):
+def _build_html(folder, total_sec, total_count, tree: ScanTree, durations, sizes):
     """Build a self-contained HTML report with collapsible tree and sortable table."""
     from html import escape
     folder   = Path(folder)
@@ -182,8 +184,8 @@ def _build_html(folder, total_sec, total_count, tree, durations, sizes):
     fd       = format_duration(total_sec)
     total_bytes = sum(sizes.values()) if sizes else 0
 
-    # Build tree rows recursively
-    def tree_rows(name, seconds, count, subfolders, direct, depth=0):
+    # Build tree rows recursively using FolderNode objects
+    def tree_rows(name, seconds, count, children: list, direct_files, depth=0):
         rows = []
         indent = "&nbsp;" * (depth * 4)
         fd_ = format_duration(seconds)
@@ -192,12 +194,13 @@ def _build_html(folder, total_sec, total_count, tree, durations, sizes):
             f'<td>{escape(fd_["hours_fmt"])}</td>'
             f'<td>{count}</td></tr>'
         )
-        for sub_name, sub_sec, sub_count, _fb, _dc, sub_sub, sub_direct in subfolders:
-            rows.extend(tree_rows(sub_name, sub_sec, sub_count, sub_sub, sub_direct, depth + 1))
+        for node in children:
+            rows.extend(tree_rows(node.name, node.total_sec, node.total_count,
+                                  node.children, node.direct_files, depth + 1))
         return rows
 
-    subfolders, direct, root_bytes = tree
-    tree_html = "\n".join(tree_rows(folder.name, total_sec, total_count, subfolders, direct))
+    tree_html = "\n".join(tree_rows(folder.name, total_sec, total_count,
+                                    tree.children, tree.direct_files))
 
     # Top files table
     ranked = sorted(durations.items(), key=lambda x: x[1], reverse=True)
@@ -298,7 +301,7 @@ function filterTable() {{
 </html>"""
 
 
-def _build_content(folder, total_sec, total_count, tree, durations, fmt, sizes=None):
+def _build_content(folder, total_sec, total_count, tree: ScanTree, durations, fmt, sizes=None):
     """Build export content string (or row list for CSV) without touching disk."""
     folder = Path(folder)
 
@@ -307,14 +310,14 @@ def _build_content(folder, total_sec, total_count, tree, durations, fmt, sizes=N
 
     if fmt == "json":
         root_name  = folder.name
-        subfolders, direct, _root_bytes = tree
         payload = {
             "scanned":     str(folder),
             "timestamp":   datetime.now().isoformat(),
             "total_count": total_count,
             "total_sec":   round(total_sec, 2),
             "totals":      format_duration(total_sec),
-            "tree":        _tree_to_dict(root_name, total_sec, total_count, subfolders, direct),
+            "tree":        _tree_to_dict(root_name, total_sec, total_count,
+                                         tree.children, tree.direct_files),
             "files":       {str(p): round(s, 2) for p, s in
                             sorted(durations.items(), key=lambda x: x[1], reverse=True)},
         }
@@ -328,10 +331,10 @@ def _build_content(folder, total_sec, total_count, tree, durations, fmt, sizes=N
                 sanitize_csv_field(str(path)),
                 sanitize_csv_field(path.name),
                 sanitize_csv_field(path.parent.name),
-                round(sec, 2),  # Numbers are safe
+                round(sec, 2),
                 sanitize_csv_field(format_duration(sec)["hours_fmt"]),
             ])
-        return rows  # returned as list; _write_content_atomic handles csv.writer
+        return rows
 
     # fmt == "txt"
     buf = io.StringIO()
@@ -341,7 +344,7 @@ def _build_content(folder, total_sec, total_count, tree, durations, fmt, sizes=N
     buf.write(f"Date    : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     buf.write("=" * 64 + "\n\n")
 
-    def write_tree(name, seconds, count, subfolders, direct=None, depth=0, number=""):
+    def write_tree(name, seconds, count, children: list, direct_files=None, depth=0, number=""):
         indent = "    " * depth
         label  = f"{number}.  {name}" if number else name
         fd_    = format_duration(seconds)
@@ -351,18 +354,18 @@ def _build_content(folder, total_sec, total_count, tree, durations, fmt, sizes=N
         else:
             buf.write(f"{indent}{label}\n")
             buf.write(f"{indent}    +--  {fd_['hours_fmt']}  |  {count} files\n")
-        for path, sec in (direct or []):
+        for path, sec in (direct_files or []):
             buf.write(f"{indent}    |  {format_duration(sec)['hours_fmt']}  {path.name}\n")
-        if subfolders:
+        if children:
             buf.write("\n")
-        for i, (sn, ss, sc, _fb, _dc, ssub, sd) in enumerate(subfolders, start=1):
+        for i, node in enumerate(children, start=1):
             sub_number = f"{number}.{i}" if number else str(i)
-            write_tree(sn, ss, sc, ssub, sd, depth + 1, sub_number)
-        if subfolders:
+            write_tree(node.name, node.total_sec, node.total_count,
+                       node.children, node.direct_files, depth + 1, sub_number)
+        if children:
             buf.write("\n")
 
-    subfolders, direct, _root_bytes = tree
-    write_tree(folder.name, total_sec, total_count, subfolders, direct)
+    write_tree(folder.name, total_sec, total_count, tree.children, tree.direct_files)
     buf.write("=" * 64 + "\n")
     buf.write("GRAND TOTAL\n")
     buf.write("=" * 64 + "\n")
