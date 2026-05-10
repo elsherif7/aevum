@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [2.3.0] — Engineering & quality release
+
 ### Added
 - `FolderNode` and `ScanTree` named types in `_models.py` — the scan tree is
   now self-documenting instead of an anonymous 7-tuple
@@ -20,6 +24,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   metadata: author, license reference, readme, and PyPI classifiers
 - Test suite expanded from 63 to 135 tests covering `_display`, `_youtube`,
   `_export`, `_dupes`, and native MP4/MKV binary parsers
+- `clean.py` — removes all build/cache directories with `python clean.py`
+- `CHANGELOG.md` and `SECURITY.md`
 
 ### Changed
 - **Minimum Python version raised to 3.10** (dropped 3.8 and 3.9)
@@ -34,8 +40,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - `scan_parallel` early-return paths returned raw `([], [], 0)` tuples instead
   of `ScanTree(...)` — caught by mypy
-- `validate_export_path` in `_export.py` reassigned a `str` parameter to a
-  `Path`, causing 6 downstream type errors — caught by mypy
+- `validate_export_path` on macOS: `/etc` is a symlink to `/private/etc` so
+  `Path.resolve()` bypassed the system-directory block — now resolves each
+  system root before comparing
+- `ctypes.windll` in `_color.py` caused mypy errors on Linux/macOS — suppressed
+  with `type: ignore[attr-defined]` (code is already guarded by `os.name == "nt"`)
 - `_json_error` in `_cli_json.py` used implicit `Optional` on the `extra`
   parameter — caught by mypy
 

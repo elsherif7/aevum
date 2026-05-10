@@ -60,7 +60,7 @@ From _models:
     ScanTree            — named type for the top-level scan result
 """
 
-__version__ = "2.2.3"
+__version__ = "2.3.0"
 
 # ── Scan ────────────────────────────────────────────────────────────────────
 # ── API Key (Secure Storage) ─────────────────────────────────────────────────

@@ -6,8 +6,8 @@ Only the latest release receives security fixes.
 
 | Version | Supported |
 |---------|-----------|
-| 2.2.x   | Yes       |
-| < 2.2   | No        |
+| 2.3.x   | Yes       |
+| < 2.3   | No        |
 
 ---
 
