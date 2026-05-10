@@ -509,6 +509,7 @@ Aevum supports **247 file extensions** covering virtually every known video and 
 ```
 aevum/
   aevum.py           — entry point
+  clean.py           — remove all build/cache directories (python clean.py)
   pyproject.toml     — pip install config
   README.md
   CHANGELOG.md

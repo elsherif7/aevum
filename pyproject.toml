@@ -38,6 +38,7 @@ dev = [
 
 [project.scripts]
 aevum = "aevum_pkg._cli:main"
+aevum-clean = "clean:clean"
 
 [tool.setuptools.packages.find]
 where = ["."]
