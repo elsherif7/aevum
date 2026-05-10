@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import re as _re
 from pathlib import Path
 
 from ._color import LINE, clr
-from ._models import ScanTree
+from ._models import FolderNode, ScanTree
 from ._scan import format_duration, format_size
 
 _ANSI_ESCAPE = _re.compile(r'\x1b(?:\[[0-9;]*[mGKHFJA-Za-z]|\][^\x07]*\x07|[^[])')
@@ -20,7 +22,7 @@ _DEPTH_ATTRS = ("R", "G", "B", "M", "C")
 BAR_WIDTH = 28  # character width of the filled bar
 
 
-def _bar(seconds, total_sec, width=BAR_WIDTH):
+def _bar(seconds: float, total_sec: float, width: int = BAR_WIDTH) -> str:
     """
     Return a colored ASCII bar representing seconds / total_sec.
     The bar uses block characters and shows the percentage at the end.
@@ -42,7 +44,11 @@ def _bar(seconds, total_sec, width=BAR_WIDTH):
     return f"{col}{bar}{clr.RST}  {clr.DIM}{pct:5.1f}%{clr.RST}"
 
 
-def print_bar_chart(children: list, total_sec: float, direct_files=None):
+def print_bar_chart(
+    children: list[FolderNode],
+    total_sec: float,
+    direct_files: list[tuple[Path, float]] | None = None,
+) -> None:
     """
     Print a compact bar-chart section showing each top-level subfolder's
     share of the total duration.  Files sitting directly in the root folder
@@ -89,9 +95,19 @@ def _dc(depth: int) -> str:
     return getattr(clr, _DEPTH_ATTRS[depth % len(_DEPTH_ATTRS)])
 
 
-def print_tree(name, seconds, count, children: list, direct_files=None, depth=0,
-               number="", max_depth=50, show_files=False, direct_count=None,
-               fbytes=0):
+def print_tree(
+    name: str,
+    seconds: float,
+    count: int,
+    children: list[FolderNode],
+    direct_files: list[tuple[Path, float]] | None = None,
+    depth: int = 0,
+    number: str = "",
+    max_depth: int = 50,
+    show_files: bool = False,
+    direct_count: int | None = None,
+    fbytes: int = 0,
+) -> None:
     """
     Recursively print the folder tree.
 
@@ -159,7 +175,7 @@ def print_tree(name, seconds, count, children: list, direct_files=None, depth=0,
         print()
 
 
-def print_top_files(durations, n=10):
+def print_top_files(durations: dict[Path, float], n: int = 10) -> None:
     if not durations:
         return
     ranked = sorted(durations.items(), key=lambda x: x[1], reverse=True)[:n]
@@ -177,8 +193,18 @@ def print_top_files(durations, n=10):
 _DEFAULT_SPEEDS = (1.0, 1.25, 1.5, 1.75, 2.0)
 
 
-def print_results(folder, total_sec, total_count, tree: ScanTree, durations=None,
-                  sizes=None, top_n=10, show_files=False, max_depth=50, speeds=None):
+def print_results(
+    folder: str | Path,
+    total_sec: float,
+    total_count: int,
+    tree: ScanTree,
+    durations: dict[Path, float] | None = None,
+    sizes: dict[Path, int] | None = None,
+    top_n: int = 10,
+    show_files: bool = False,
+    max_depth: int = 50,
+    speeds: list[float] | None = None,
+) -> None:
     """
     Issue 26 fix: max_depth parameter added so --depth N from the CLI is
     correctly forwarded all the way into print_tree.
@@ -234,7 +260,16 @@ def print_results(folder, total_sec, total_count, tree: ScanTree, durations=None
         print_top_files(durations, top_n)
 
 
-def print_url_results(url, label, total_sec, total_count, entries, top_n=10, unavailable_count=0, speeds=None):
+def print_url_results(
+    url: str,
+    label: str,
+    total_sec: float,
+    total_count: int,
+    entries: list[dict],
+    top_n: int = 10,
+    unavailable_count: int = 0,
+    speeds: list[float] | None = None,
+) -> None:
     fmt = format_duration(total_sec)
     print()
     print(f"  {clr.C}{LINE}{clr.RST}")
@@ -297,7 +332,11 @@ def print_url_results(url, label, total_sec, total_count, entries, top_n=10, una
             print()
 
 
-def print_stats(folder, durations, sizes):
+def print_stats(
+    folder: str | Path,
+    durations: dict[Path, float],
+    sizes: dict[Path, int],
+) -> None:
     """
     Print deep library statistics:
     - total / average / median / shortest / longest duration
@@ -396,7 +435,13 @@ def print_stats(folder, durations, sizes):
         print()
 
 
-def print_top(folder, durations, sizes, n=20, by="duration"):
+def print_top(
+    folder: str | Path,
+    durations: dict[Path, float],
+    sizes: dict[Path, int],
+    n: int = 20,
+    by: str = "duration",
+) -> None:
     """
     Print top N files sorted by duration or size.
     by: 'duration' | 'size'
@@ -405,12 +450,13 @@ def print_top(folder, durations, sizes, n=20, by="duration"):
         print(f"\n  {clr.Y}No media files found.{clr.RST}\n")
         return
 
+    ranked: list[tuple[Path, int, float]]
     if by == "size":
-        ranked = sorted(sizes.items(), key=lambda x: x[1], reverse=True)
-        ranked = [(p, s, durations.get(p, 0.0)) for p, s in ranked if p in durations]
+        by_size = sorted(sizes.items(), key=lambda x: x[1], reverse=True)
+        ranked = [(p, s, durations.get(p, 0.0)) for p, s in by_size if p in durations]
     else:
-        ranked = sorted(durations.items(), key=lambda x: x[1], reverse=True)
-        ranked = [(p, sizes.get(p, 0), s) for p, s in ranked]
+        by_dur = sorted(durations.items(), key=lambda x: x[1], reverse=True)
+        ranked = [(p, sizes.get(p, 0), s) for p, s in by_dur]
 
     shown = ranked[:n]
 
@@ -430,7 +476,13 @@ def print_top(folder, durations, sizes, n=20, by="duration"):
     print()
 
 
-def print_recent(folder, durations, sizes, since_ts, limit=50):
+def print_recent(
+    folder: str | Path,
+    durations: dict[Path, float],
+    sizes: dict[Path, int],
+    since_ts: float,
+    limit: int = 50,
+) -> None:
     """
     Print files modified after since_ts, sorted newest first.
     """
@@ -489,7 +541,7 @@ def print_recent(folder, durations, sizes, since_ts, limit=50):
     print()
 
 
-def _fuzzy_suggest(word, candidates):
+def _fuzzy_suggest(word: str, candidates: list[str]) -> str | None:
     """
     Return the closest candidate to word within edit-distance 2, or None.
 

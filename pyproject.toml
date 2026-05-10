@@ -77,4 +77,5 @@ files = [
     "aevum_pkg/_history.py",
     "aevum_pkg/_dupes.py",
     "aevum_pkg/_compare.py",
+    "aevum_pkg/_display.py",
 ]
