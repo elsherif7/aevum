@@ -78,4 +78,7 @@ files = [
     "aevum_pkg/_dupes.py",
     "aevum_pkg/_compare.py",
     "aevum_pkg/_display.py",
+    "aevum_pkg/_cli_update.py",
+    "aevum_pkg/_cli_args.py",
+    "aevum_pkg/_cli_cmds.py",
 ]

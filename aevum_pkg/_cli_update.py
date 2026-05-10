@@ -1,16 +1,19 @@
 """
 Self-update logic for Aevum: pip install --upgrade with an animated progress bar.
 """
+from __future__ import annotations
+
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from ._color import clr
 from ._config import save_config
 from ._exit import EX
 
 
-def _run_pip_upgrade(src_dir, quiet=False):
+def _run_pip_upgrade(src_dir: str | Path, quiet: bool = False) -> int:
     """
     Run pip install --upgrade in a background thread with an animated bar.
 
@@ -62,7 +65,7 @@ def _run_pip_upgrade(src_dir, quiet=False):
     return _rc[0]
 
 
-def _open_appdata():
+def _open_appdata() -> Path:
     import subprocess as _sp
 
     from ._paths import APPDATA
@@ -76,7 +79,7 @@ def _open_appdata():
     return appdata
 
 
-def _do_update(cfg, dry_run=False, quiet=False):
+def _do_update(cfg: dict[str, Any], dry_run: bool = False, quiet: bool = False) -> int:
     """
     Core update flow.  Returns the pip exit code, or 0 on early exit.
     Mutates cfg['project_dir'] if the user enters a new path.

@@ -4,12 +4,15 @@ Command handler functions for every Aevum CLI subcommand.
 Each cmd_* function receives (args, cfg, use_json, quiet) and is responsible
 for one subcommand only. main() in _cli.py dispatches to these.
 """
+from __future__ import annotations
+
 import io
 import json
 import os
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from ._apikey import get_storage_method, load_api_key, save_api_key
 from ._cli_helpers import (
@@ -47,7 +50,7 @@ from ._youtube import (
 # Simple / utility commands
 # ---------------------------------------------------------------------------
 
-def cmd_version(args, cfg, use_json, quiet, version):
+def cmd_version(args, cfg, use_json, quiet, version: str) -> None:
     if use_json:
         _json_out({"status": "ok", "version": version})
     else:
@@ -55,14 +58,14 @@ def cmd_version(args, cfg, use_json, quiet, version):
     sys.exit(EX.OK)
 
 
-def cmd_update(args, cfg, use_json, quiet):
+def cmd_update(args, cfg, use_json, quiet) -> None:
     rc = _do_update(cfg,
                     dry_run=getattr(args, 'dry_run', False),
                     quiet=quiet)
     sys.exit(rc)
 
 
-def cmd_clearpath(args, cfg, use_json, quiet):
+def cmd_clearpath(args, cfg, use_json, quiet) -> None:
     if 'project_dir' in cfg:
         cleared = cfg['project_dir']
         del cfg['project_dir']
@@ -79,7 +82,7 @@ def cmd_clearpath(args, cfg, use_json, quiet):
     sys.exit(EX.OK)
 
 
-def cmd_appdata(args, cfg, use_json, quiet):
+def cmd_appdata(args, cfg, use_json, quiet) -> None:
     folder = _open_appdata()
     if use_json:
         _json_out({"status": "ok", "path": str(folder)})
@@ -88,7 +91,7 @@ def cmd_appdata(args, cfg, use_json, quiet):
     sys.exit(EX.OK)
 
 
-def cmd_doctor(args, cfg, use_json, quiet):
+def cmd_doctor(args, cfg, use_json, quiet) -> None:
     import subprocess as _sp
 
     from ._scan import check_ffprobe, format_size
@@ -172,7 +175,7 @@ def cmd_doctor(args, cfg, use_json, quiet):
     sys.exit(EX.OK)
 
 
-def cmd_config_dispatch(args, cfg, use_json, quiet):
+def cmd_config_dispatch(args, cfg, use_json, quiet) -> None:
     action = args.action
     YT_KEY = "yt_api_key"
 
@@ -241,6 +244,7 @@ def cmd_config_dispatch(args, cfg, use_json, quiet):
             )
             sys.exit(EX.ERR_ARGS)
         default = CONFIG_DEFAULTS[key]
+        coerced: bool | int | str
         try:
             if isinstance(default, bool):
                 _true  = {"1", "true", "yes", "on"}
@@ -279,7 +283,7 @@ def cmd_config_dispatch(args, cfg, use_json, quiet):
         sys.exit(EX.OK)
 
 
-def cmd_cache_dispatch(args, cfg, use_json, quiet):
+def cmd_cache_dispatch(args, cfg, use_json, quiet) -> None:
     import json as _json
 
     from ._cache import _cache_key
@@ -357,7 +361,7 @@ def cmd_cache_dispatch(args, cfg, use_json, quiet):
     sys.exit(EX.OK)
 
 
-def cmd_quota(args, cfg, use_json, quiet):
+def cmd_quota(args, cfg, use_json, quiet) -> None:
     api_key = load_api_key()
     if not api_key:
         if use_json:
@@ -398,7 +402,7 @@ def cmd_quota(args, cfg, use_json, quiet):
 # alias
 # ---------------------------------------------------------------------------
 
-def cmd_alias(args, cfg, use_json, quiet):
+def cmd_alias(args, cfg, use_json, quiet) -> None:
     aliases  = cfg.setdefault("aliases", {})
     action   = getattr(args, 'action', 'list') or 'list'
     name     = getattr(args, 'name', None)
@@ -438,7 +442,7 @@ def cmd_alias(args, cfg, use_json, quiet):
                 return 'flag', None
             return 'unknown', None
 
-        grouped = {'command': [], 'flag': [], 'path': [], 'unknown': []}
+        grouped: dict[str, list] = {'command': [], 'flag': [], 'path': [], 'unknown': []}
         for k, v in sorted(aliases.items()):
             kind, extra = _alias_type(v)
             grouped[kind].append((k, v, extra))
@@ -517,7 +521,7 @@ def cmd_alias(args, cfg, use_json, quiet):
 # top / recent / history / diff / stats / summary
 # ---------------------------------------------------------------------------
 
-def cmd_top(args, cfg, use_json, quiet):
+def cmd_top(args, cfg, use_json, quiet) -> None:
     folder = Path(_resolve_alias(args.folder.strip().strip("'\""), cfg))
     if not folder.exists() or not folder.is_dir():
         if use_json:
@@ -562,7 +566,7 @@ def cmd_top(args, cfg, use_json, quiet):
     sys.exit(EX.OK)
 
 
-def cmd_recent(args, cfg, use_json, quiet):
+def cmd_recent(args, cfg, use_json, quiet) -> None:
     from ._scan import parse_since_arg
     folder = Path(_resolve_alias(args.folder.strip().strip("'\""), cfg))
     if not folder.exists() or not folder.is_dir():
@@ -616,7 +620,7 @@ def cmd_recent(args, cfg, use_json, quiet):
     sys.exit(EX.OK)
 
 
-def cmd_history(args, cfg, use_json, quiet):
+def cmd_history(args, cfg, use_json, quiet) -> None:
     folder = Path(_resolve_alias(args.folder.strip().strip("'\""), cfg))
     if not folder.exists() or not folder.is_dir():
         if use_json:
@@ -630,7 +634,7 @@ def cmd_history(args, cfg, use_json, quiet):
     sys.exit(EX.OK)
 
 
-def cmd_diff(args, cfg, use_json, quiet):
+def cmd_diff(args, cfg, use_json, quiet) -> None:
     folder = Path(_resolve_alias(args.folder.strip().strip("'\""), cfg))
     if not folder.exists() or not folder.is_dir():
         if use_json:
@@ -644,7 +648,7 @@ def cmd_diff(args, cfg, use_json, quiet):
     sys.exit(EX.OK)
 
 
-def cmd_stats(args, cfg, use_json, quiet):
+def cmd_stats(args, cfg, use_json, quiet) -> None:
     folder = Path(_resolve_alias(args.folder.strip().strip("'\""), cfg))
     if not folder.exists() or not folder.is_dir():
         if use_json:
@@ -688,7 +692,7 @@ def cmd_stats(args, cfg, use_json, quiet):
     sys.exit(EX.OK)
 
 
-def cmd_summary(args, cfg, use_json, quiet):
+def cmd_summary(args, cfg, use_json, quiet) -> None:
     folder = Path(_resolve_alias(args.folder.strip().strip("'\""), cfg))
     if not folder.exists() or not folder.is_dir():
         if use_json:
@@ -733,7 +737,7 @@ def cmd_summary(args, cfg, use_json, quiet):
 # watch
 # ---------------------------------------------------------------------------
 
-def cmd_watch(args, cfg, use_json, quiet):
+def cmd_watch(args, cfg, use_json, quiet) -> None:
     import time as _time
     folder = Path(_resolve_alias(args.folder.strip().strip("'\""), cfg))
     if not folder.exists() or not folder.is_dir():
@@ -778,8 +782,8 @@ def cmd_watch(args, cfg, use_json, quiet):
               f"{clr.DIM}(interval: {interval}s \u2014 Ctrl+C to stop){clr.RST}\n")
 
     update_n  = 0
-    last_snap = {}
-    last_sec  = None
+    last_snap: dict[str, float] = {}
+    last_sec: float | None = None
 
     while True:
         try:
@@ -850,7 +854,7 @@ def cmd_watch(args, cfg, use_json, quiet):
 # compare / dupes / export / files
 # ---------------------------------------------------------------------------
 
-def cmd_compare(args, cfg, use_json, quiet):
+def cmd_compare(args, cfg, use_json, quiet) -> None:
     folder_a = Path(_resolve_alias(args.folder_a.strip().strip("'\""), cfg))
     folder_b = Path(_resolve_alias(args.folder_b.strip().strip("'\""), cfg))
     for f in (folder_a, folder_b):
@@ -877,7 +881,7 @@ def cmd_compare(args, cfg, use_json, quiet):
     sys.exit(EX.OK)
 
 
-def cmd_dupes(args, cfg, use_json, quiet):
+def cmd_dupes(args, cfg, use_json, quiet) -> None:
     folder = Path(_resolve_alias(args.folder.strip().strip("'\""), cfg))
     if not folder.exists() or not folder.is_dir():
         if use_json:
@@ -927,7 +931,7 @@ def cmd_dupes(args, cfg, use_json, quiet):
     sys.exit(EX.OK)
 
 
-def cmd_export(args, cfg, use_json, quiet):
+def cmd_export(args, cfg, use_json, quiet) -> None:
     raw      = _resolve_alias(args.target.strip().strip("'\""), cfg)
     sort     = _resolve_sort(args, cfg)
     uc       = _use_cache(args, cfg)
@@ -999,7 +1003,7 @@ def cmd_export(args, cfg, use_json, quiet):
     sys.exit(EX.OK)
 
 
-def cmd_files(args, cfg, use_json, quiet):
+def cmd_files(args, cfg, use_json, quiet) -> None:
     folder_raw = _resolve_alias(args.folder.strip().strip("'\""), cfg)
     folder     = Path(folder_raw)
     if not folder.exists() or not folder.is_dir():
@@ -1032,7 +1036,7 @@ def cmd_files(args, cfg, use_json, quiet):
 # scan  (single target + multi-target batch)
 # ---------------------------------------------------------------------------
 
-def cmd_scan(args, cfg, use_json, quiet):
+def cmd_scan(args, cfg, use_json, quiet) -> None:
     targets = [t.strip().strip("'\"") for t in args.targets]
 
     if not targets:
@@ -1069,8 +1073,10 @@ def cmd_scan(args, cfg, use_json, quiet):
                         targets, sort, top, uc, fmt, out_path, do_merge, max_d, custom_speeds)
 
 
-def _cmd_scan_single(args, cfg, use_json, quiet,
-                     raw_target, sort, top, uc, out_path, fmt, max_d, custom_speeds):
+def _cmd_scan_single(args: Any, cfg: dict[str, Any], use_json: bool, quiet: bool,
+                     raw_target: str, sort: str, top: int, uc: bool,
+                     out_path: str | None, fmt: str | None,
+                     max_d: int, custom_speeds: list[float] | None) -> None:
     raw     = _resolve_alias(raw_target, cfg)
     filters = _build_filters(args, use_json)
 
@@ -1180,8 +1186,10 @@ def _cmd_scan_single(args, cfg, use_json, quiet,
     sys.exit(EX.OK)
 
 
-def _cmd_scan_batch(args, cfg, use_json, quiet,
-                    targets, sort, top, uc, fmt, out_path, do_merge, max_d, custom_speeds):
+def _cmd_scan_batch(args: Any, cfg: dict[str, Any], use_json: bool, quiet: bool,
+                    targets: list[str], sort: str, top: int, uc: bool,
+                    fmt: str | None, out_path: str | None, do_merge: bool,
+                    max_d: int, custom_speeds: list[float] | None) -> None:
     _require_ffprobe("scan", use_json)
     filters = _build_filters(args, use_json)
 
@@ -1232,7 +1240,8 @@ def _cmd_scan_batch(args, cfg, use_json, quiet,
         _print_batch_separate(results, use_json, quiet, top, max_d, custom_speeds)
 
 
-def _print_merged(results, folders, use_json, quiet, custom_speeds):
+def _print_merged(results: list, folders: list[Path], use_json: bool, quiet: bool,
+                  custom_speeds: list[float] | None) -> None:
     merged_sec   = sum(r[1] for r in results)
     merged_count = sum(r[2] for r in results)
     merged_dur   = {}
@@ -1298,7 +1307,9 @@ def _print_merged(results, folders, use_json, quiet, custom_speeds):
     sys.exit(EX.OK)
 
 
-def _print_batch_separate(results, use_json, quiet, top, max_d, custom_speeds):
+def _print_batch_separate(results: list, use_json: bool, quiet: bool,
+                          top: int, max_d: int,
+                          custom_speeds: list[float] | None) -> None:
     if use_json:
         _json_out({
             "status":  "ok",

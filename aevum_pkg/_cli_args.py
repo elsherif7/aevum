@@ -1,10 +1,13 @@
 """
 Argument parsing and subcommand dispatch for the Aevum CLI.
 """
+from __future__ import annotations
+
 import argparse
 import sys
 import types
 from pathlib import Path
+from typing import Any
 
 from ._cli_helpers import _expand_aliases_in_argv
 from ._color import clr
@@ -13,7 +16,7 @@ from ._display import _fuzzy_suggest
 from ._exit import EX
 
 
-def _split_two_paths(parts):
+def _split_two_paths(parts: list[str]) -> tuple[str, str]:
     """
     Given a list of tokens that represent two paths (possibly with spaces),
     find the best split point by trying each position and checking which
@@ -30,7 +33,7 @@ def _split_two_paths(parts):
     return ' '.join(parts[:mid]), ' '.join(parts[mid:])
 
 
-def _join_path_tokens(parts):
+def _join_path_tokens(parts: list[str]) -> str:
     """
     Given a list of tokens that may represent a single path with spaces,
     find the longest prefix that exists on disk. Falls back to joining all.
@@ -52,7 +55,7 @@ def _join_path_tokens(parts):
 # __version__ is imported in _cli.py and passed through _print_global_help.
 
 
-def _print_global_help(version):
+def _print_global_help(version: str) -> None:
     print(f"""
   {clr.C}aevum {version}{clr.RST}  {clr.DIM}--{clr.RST}  {clr.W}Media Library Scanner{clr.RST}
 
@@ -147,7 +150,7 @@ def _print_global_help(version):
 """)
 
 
-def _add_common_flags(p):
+def _add_common_flags(p: argparse.ArgumentParser) -> None:
     """Attach --no-color / --json / --quiet to any subcommand parser."""
     p.add_argument("--no-color", action="store_true", help="Disable ANSI colors")
     p.add_argument("--json",     action="store_true", help="Output JSON to stdout")
@@ -169,7 +172,7 @@ SUBCOMMANDS = (
 )
 
 
-def _parse_args(version):
+def _parse_args(version: str) -> Any:
     argv = sys.argv[1:]
 
     # On Windows, "D:\" can arrive as two tokens: ["D:", "\"] — rejoin them.
@@ -276,7 +279,7 @@ def _parse_args(version):
     return _dispatch_subcommand(subcommand, argv[1:])
 
 
-def _dispatch_subcommand(sub, argv):
+def _dispatch_subcommand(sub: str, argv: list[str]) -> Any:
     if sub == 'files':
         p = argparse.ArgumentParser(prog="aevum files",
             formatter_class=argparse.RawDescriptionHelpFormatter,
