@@ -548,3 +548,15 @@ aevum/
 - Quota tracker validated on load — negative values cannot bypass the daily quota guard
 - `LOCALAPPDATA` / `XDG_DATA_HOME` environment variables validated as absolute paths before use
 - No telemetry — nothing is sent anywhere except the YouTube API when scanning URLs
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full version history.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE)
