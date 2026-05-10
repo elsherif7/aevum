@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import fnmatch
 import os
 import re
@@ -7,6 +9,7 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Callable
 
 from ._cache import load_cache, save_cache
 from ._models import FolderNode, ScanTree
@@ -159,7 +162,7 @@ video_extensions = (
 _VIDEO_EXT_SET = frozenset(video_extensions)
 
 
-def check_ffprobe():
+def check_ffprobe() -> bool:
     try:
         subprocess.run(['ffprobe', '-version'], capture_output=True)
         return True
@@ -338,7 +341,7 @@ def _read_mkv_duration(path):
         return None
 
 
-def get_duration(path):
+def get_duration(path: str | Path) -> float:
     """
     Try fast native parse first; fall back to ffprobe if needed.
 
@@ -373,7 +376,7 @@ def get_duration(path):
         return 0.0
 
 
-def format_size(b):
+def format_size(b: int) -> str:
     """Return human-readable file size."""
     if b >= 1_073_741_824:
         return f"{b / 1_073_741_824:.2f} GB"
@@ -384,7 +387,7 @@ def format_size(b):
     return f"{b} B"
 
 
-def format_duration(seconds):
+def format_duration(seconds: float) -> dict[str, str]:
     # Issue 6: clamp negatives so delta formatting never produces garbage output
     # H-07: clamp to reasonable max (100 years) to prevent integer overflow
     seconds = max(0.0, min(float(seconds), 100 * 365 * 86400))
@@ -399,7 +402,14 @@ def format_duration(seconds):
     }
 
 
-def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache=None, _visited_inodes=None):
+def scan_parallel(
+    root: str | Path,
+    on_progress: Callable[[int, int], None] | None = None,
+    stop_event: threading.Event | None = None,
+    sort_by: str = "name",
+    cache: dict | None = None,
+    _visited_inodes: set | None = None,
+) -> tuple[float, int, ScanTree, dict[Path, float], dict[Path, int], int]:
     """
     Parallel scan: collector thread discovers files and submits them to the
     thread pool.  Returns (total_sec, total_count, tree_tuple, durations,
@@ -707,7 +717,7 @@ def _run_scan(folder, on_progress, sort_by="name", use_cache=True):
     return result
 
 
-def parse_since_arg(s):
+def parse_since_arg(s: str) -> float:
     """
     Parse a --since / --until argument into a UTC timestamp (float).
     Accepts:
@@ -736,7 +746,7 @@ def parse_since_arg(s):
     raise ValueError(f"Cannot parse date: '{s}'  (try: 7d, 30d, 2w, 2025-01-15)")
 
 
-def parse_duration_arg(s):
+def parse_duration_arg(s: str) -> float:
     """
     Parse a human duration string into seconds (float).
     Accepts: 30s, 5m, 1h, 1h30m, 90m, 1:30:00, 5400, 1.5h
@@ -768,7 +778,11 @@ def parse_duration_arg(s):
     raise ValueError(f"Cannot parse duration: '{s}'  (try: 30s, 5m, 1h, 1h30m, 1:30:00)")
 
 
-def apply_filters(durations, sizes, filters):
+def apply_filters(
+    durations: dict[Path, float],
+    sizes: dict[Path, int],
+    filters: dict,
+) -> tuple[dict[Path, float], dict[Path, int]]:
     """
     Filter a durations dict by the given filter dict.
     filters keys (all optional):
@@ -819,7 +833,12 @@ def apply_filters(durations, sizes, filters):
     return out_dur, out_size
 
 
-def rebuild_after_filter(root, durations, sizes, sort_by="name:asc"):
+def rebuild_after_filter(
+    root: str | Path,
+    durations: dict[Path, float],
+    sizes: dict[Path, int],
+    sort_by: str = "name:asc",
+) -> tuple[float, int, ScanTree, dict[Path, float], dict[Path, int]]:
     """Re-run tree builder and totals after filters have been applied."""
     if not durations:
         tree = _build_tree(root, {}, sort_by)

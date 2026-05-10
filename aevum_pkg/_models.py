@@ -9,12 +9,7 @@ means adding a field only requires changing one place.
 from __future__ import annotations
 
 from pathlib import Path
-
-try:
-    from typing import NamedTuple
-except ImportError:  # pragma: no cover
-    from typing import NamedTuple  # type: ignore
-
+from typing import NamedTuple
 
 # ---------------------------------------------------------------------------
 # FolderNode

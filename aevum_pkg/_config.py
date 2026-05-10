@@ -1,12 +1,19 @@
+from __future__ import annotations
+
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
+from typing import Any
 
 from ._color import clr
 from ._paths import CONFIG_FILE
 
-CONFIG_DEFAULTS = {
+# Type alias — keys are always str, values are mixed.
+Config = dict[str, Any]
+
+CONFIG_DEFAULTS: Config = {
     "sort":          "name:asc",
     "top":           10,
     "no_color":      False,
@@ -17,7 +24,7 @@ CONFIG_DEFAULTS = {
 }
 
 
-def load_config():
+def load_config() -> Config:
     """
     Load configuration from disk with validation.
 
@@ -88,7 +95,7 @@ def load_config():
         return dict(CONFIG_DEFAULTS)
 
 
-def save_config(cfg):
+def save_config(cfg: Config) -> bool:
     """
     Persist config to disk atomically (temp file + rename).
 
@@ -96,7 +103,6 @@ def save_config(cfg):
     Issue 25 note: returns False on failure so callers can react.
     """
     try:
-        import tempfile
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
         tmp_fd, tmp_path = tempfile.mkstemp(
             dir=CONFIG_FILE.parent, suffix=".tmp", prefix=".config_"
@@ -118,6 +124,6 @@ def save_config(cfg):
         return False
 
 
-def _config_key_valid(key):
+def _config_key_valid(key: str) -> bool:
     return key in CONFIG_DEFAULTS
 
