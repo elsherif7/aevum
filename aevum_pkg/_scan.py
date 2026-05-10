@@ -5,8 +5,8 @@ import struct
 import subprocess
 import sys
 import threading
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 from ._cache import load_cache, save_cache
 from ._models import FolderNode, ScanTree
@@ -239,7 +239,7 @@ def _read_mkv_duration(path):
     Issue 3 fix: increased read size from 2 MB to 8 MB so that Info blocks
     placed after large Tracks/SeekHead structures are still found without
     falling back to ffprobe.
-    
+
     P-01 fix: use a two-pass strategy — try 2 MB first (covers most files),
     then retry with 8 MB only if the Info block was not found.  This reduces
     average memory usage from 8 MB/file to ~2 MB/file for typical MKVs.
@@ -341,7 +341,7 @@ def _read_mkv_duration(path):
 def get_duration(path):
     """
     Try fast native parse first; fall back to ffprobe if needed.
-    
+
     Security: Uses subprocess with list form (never shell=True) to prevent
     command injection attacks. Path is converted to string safely.
     """
@@ -353,7 +353,7 @@ def get_duration(path):
         result = _read_mkv_duration(path)
     if result is not None and result > 0:
         return result
-    
+
     # Security: ALWAYS use list form with shell=False to prevent command injection
     # str(path) safely converts Path to string without shell interpretation
     try:
@@ -442,7 +442,7 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
     lock      = threading.Lock()
     if cache is None:
         cache = {}
-    
+
     # Security: Maximum recursion depth to prevent DoS
     MAX_DEPTH = 30
     root_depth = len(root.parts)
@@ -493,35 +493,35 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
             # Security: Track (path, depth) to prevent excessive recursion
             stack = [(str(root), root_depth)]
             visited_dirs = set()
-            
+
             while stack:
                 if stop_event and stop_event.is_set():
                     break
-                
+
                 current, depth = stack.pop()
-                
+
                 # Security: Limit recursion depth
                 if depth - root_depth > MAX_DEPTH:
                     continue
-                
+
                 # Security: Detect directory loops via inode
                 try:
                     current_stat = Path(current).stat()
                     current_inode = (current_stat.st_dev, current_stat.st_ino)
-                    
+
                     if current_inode in visited_dirs:
                         continue  # Skip already visited directory
-                    
+
                     visited_dirs.add(current_inode)
                 except OSError:
                     continue  # Skip inaccessible directories
-                
+
                 try:
                     with os.scandir(current) as it:
                         for entry in it:
                             if stop_event and stop_event.is_set():
                                 return
-                            
+
                             # Security: Skip symlinks or resolve and check for loops
                             try:
                                 if entry.is_symlink():
@@ -529,10 +529,10 @@ def scan_parallel(root, on_progress=None, stop_event=None, sort_by="name", cache
                                     resolved = Path(entry.path).resolve(strict=True)
                                     resolved_stat = resolved.stat()
                                     resolved_inode = (resolved_stat.st_dev, resolved_stat.st_ino)
-                                    
+
                                     if resolved_inode in _visited_inodes or resolved_inode in visited_dirs:
                                         continue  # Skip symlink loop
-                                    
+
                                     if entry.is_dir(follow_symlinks=True):
                                         stack.append((entry.path, depth + 1))
                                     elif entry.is_file(follow_symlinks=True):
@@ -716,8 +716,8 @@ def parse_since_arg(s):
       2025-01-15T10:30       — absolute datetime
     Raises ValueError on bad input.
     """
-    import time as _time
     import re as _re
+    import time as _time
     s = s.strip()
     # Relative: Nd or Nw
     m = _re.fullmatch(r'(\d+)([dDwW])', s)
@@ -757,9 +757,12 @@ def parse_duration_arg(s):
     for value, unit in re.findall(r'(\d+(?:\.\d+)?)([hms])', s):
         found = True
         v = float(value)
-        if unit == 'h':   total += v * 3600
-        elif unit == 'm': total += v * 60
-        elif unit == 's': total += v
+        if unit == 'h':
+            total += v * 3600
+        elif unit == 'm':
+            total += v * 60
+        elif unit == 's':
+            total += v
     if found:
         return min(total, 365 * 24 * 3600)  # cap at 1 year
     raise ValueError(f"Cannot parse duration: '{s}'  (try: 30s, 5m, 1h, 1h30m, 1:30:00)")

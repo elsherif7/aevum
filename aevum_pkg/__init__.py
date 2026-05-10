@@ -59,25 +59,26 @@ From _color:
 __version__ = "2.2.3"
 
 # ── Scan ────────────────────────────────────────────────────────────────────
-from ._scan import (
-    check_ffprobe,
-    get_duration,
-    format_duration,
-    format_size,
-    scan_parallel,
-    video_extensions,
-)
-
-# ── YouTube ─────────────────────────────────────────────────────────────────
-from ._youtube import (
-    scan_url,
-    get_quota_status,
-)
-
 # ── API Key (Secure Storage) ─────────────────────────────────────────────────
 from ._apikey import (
     load_api_key,
     save_api_key,
+)
+
+# ── Cache ────────────────────────────────────────────────────────────────────
+from ._cache import (
+    load_cache,
+    save_cache,
+)
+
+# ── Color ────────────────────────────────────────────────────────────────────
+from ._color import LINE, clear, clr
+
+# ── Config ───────────────────────────────────────────────────────────────────
+from ._config import (
+    CONFIG_DEFAULTS,
+    load_config,
+    save_config,
 )
 
 # ── Display ─────────────────────────────────────────────────────────────────
@@ -98,27 +99,25 @@ from ._export import (
     export_url_results,
 )
 
-# ── Config ───────────────────────────────────────────────────────────────────
-from ._config import (
-    load_config,
-    save_config,
-    CONFIG_DEFAULTS,
-)
-
-# ── Cache ────────────────────────────────────────────────────────────────────
-from ._cache import (
-    load_cache,
-    save_cache,
-)
+# ── Models ───────────────────────────────────────────────────────────────────
+from ._models import FolderNode, ScanTree
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 from ._paths import APPDATA, CACHE_DIR, CONFIG_FILE
+from ._scan import (
+    check_ffprobe,
+    format_duration,
+    format_size,
+    get_duration,
+    scan_parallel,
+    video_extensions,
+)
 
-# ── Color ────────────────────────────────────────────────────────────────────
-from ._color import clr, LINE, clear
-
-# ── Models ───────────────────────────────────────────────────────────────────
-from ._models import FolderNode, ScanTree
+# ── YouTube ─────────────────────────────────────────────────────────────────
+from ._youtube import (
+    get_quota_status,
+    scan_url,
+)
 
 __all__ = [
     # scan

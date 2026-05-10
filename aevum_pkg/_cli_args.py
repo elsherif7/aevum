@@ -6,11 +6,11 @@ import sys
 import types
 from pathlib import Path
 
-from ._color   import clr
-from ._config  import load_config
-from ._exit    import EX
-from ._display import _fuzzy_suggest
 from ._cli_helpers import _expand_aliases_in_argv
+from ._color import clr
+from ._config import load_config
+from ._display import _fuzzy_suggest
+from ._exit import EX
 
 
 def _split_two_paths(parts):

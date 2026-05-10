@@ -8,8 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-from ._scan  import format_duration, format_size
-from ._exit  import EX
+from ._scan import format_duration
 
 
 def _json_out(data: dict):

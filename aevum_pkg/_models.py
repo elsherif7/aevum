@@ -8,7 +8,6 @@ means adding a field only requires changing one place.
 
 from __future__ import annotations
 
-from typing import List, Tuple
 from pathlib import Path
 
 try:
@@ -39,8 +38,8 @@ class FolderNode(NamedTuple):
     total_count:  int
     total_bytes:  int
     direct_count: int
-    children:     List["FolderNode"]
-    direct_files: List[Tuple[Path, float]]
+    children:     list[FolderNode]
+    direct_files: list[tuple[Path, float]]
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +53,6 @@ class FolderNode(NamedTuple):
 # ---------------------------------------------------------------------------
 
 class ScanTree(NamedTuple):
-    children:     List[FolderNode]
-    direct_files: List[Tuple[Path, float]]
+    children:     list[FolderNode]
+    direct_files: list[tuple[Path, float]]
     root_bytes:   int

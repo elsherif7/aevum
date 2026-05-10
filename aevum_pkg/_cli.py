@@ -12,19 +12,35 @@ Split from the original monolithic 2100-line file into:
 """
 import sys
 
-from ._color   import _disable_color
-from ._config  import load_config
-from ._exit    import EX
+from aevum_pkg import __version__
+
 from ._cli_args import _parse_args
 from ._cli_cmds import (
-    cmd_version, cmd_update, cmd_clearpath, cmd_appdata,
-    cmd_alias, cmd_doctor, cmd_config_dispatch, cmd_cache_dispatch,
-    cmd_quota, cmd_top, cmd_recent, cmd_history, cmd_diff,
-    cmd_stats, cmd_summary, cmd_watch, cmd_compare, cmd_dupes,
-    cmd_export, cmd_files, cmd_scan,
+    cmd_alias,
+    cmd_appdata,
+    cmd_cache_dispatch,
+    cmd_clearpath,
+    cmd_compare,
+    cmd_config_dispatch,
+    cmd_diff,
+    cmd_doctor,
+    cmd_dupes,
+    cmd_export,
+    cmd_files,
+    cmd_history,
+    cmd_quota,
+    cmd_recent,
+    cmd_scan,
+    cmd_stats,
+    cmd_summary,
+    cmd_top,
+    cmd_update,
+    cmd_version,
+    cmd_watch,
 )
-
-from aevum_pkg import __version__
+from ._color import _disable_color
+from ._config import load_config
+from ._exit import EX
 
 
 def main():

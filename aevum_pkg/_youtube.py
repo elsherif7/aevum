@@ -2,15 +2,16 @@ import json
 import os
 import sys
 import time
-from pathlib import Path
 
-from ._color import clr
-from ._paths import YT_KEY_FILE, YT_QUOTA_FILE, YT_VCACHE_FILE
-from ._apikey import save_api_key, load_api_key, delete_api_key, get_storage_method
 # ── Rate limiting (inlined from _ratelimit.py) ───────────────────────
 import time as _time_mod
 from collections import deque as _deque
 from threading import Lock as _Lock
+
+from ._apikey import get_storage_method, load_api_key, save_api_key
+from ._color import clr
+from ._paths import YT_QUOTA_FILE, YT_VCACHE_FILE
+
 
 class _RateLimiter:
     """
@@ -49,7 +50,9 @@ class _RateLimiter:
     def _save(self):
         """Persist current timestamps atomically."""
         try:
-            import json as _json, tempfile, os as _os
+            import json as _json
+            import os as _os
+            import tempfile
             p = self._state_path()
             p.parent.mkdir(parents=True, exist_ok=True)
             tmp_fd, tmp_path = tempfile.mkstemp(dir=p.parent, suffix=".tmp")
@@ -58,8 +61,10 @@ class _RateLimiter:
                     f.write(_json.dumps(list(self.calls)))
                 _os.replace(tmp_path, p)
             except Exception:
-                try: _os.unlink(tmp_path)
-                except OSError: pass
+                try:
+                    _os.unlink(tmp_path)
+                except OSError:
+                    pass
         except Exception:
             pass
 
@@ -119,7 +124,7 @@ def _load_yt_video_cache():
     MAX_YT_CACHE_SIZE = 100 * 1024 * 1024  # 100 MB hard limit
     try:
         if YT_VCACHE_FILE.exists() and YT_VCACHE_FILE.stat().st_size > MAX_YT_CACHE_SIZE:
-            print(f"  [WARN] YouTube cache too large, ignoring.", file=sys.stderr)
+            print("  [WARN] YouTube cache too large, ignoring.", file=sys.stderr)
             return {}
         return json.loads(YT_VCACHE_FILE.read_text(encoding="utf-8"))
     except Exception:
@@ -175,7 +180,7 @@ def _get_current_date_pt():
 
 def _load_quota_tracker():
     """Load quota tracker. Returns (date_str, units_used).
-    
+
     H-09: validate units_used is a non-negative integer to prevent
     a corrupted file from bypassing the quota guard.
     """
@@ -192,7 +197,7 @@ def _load_quota_tracker():
 
 def _save_quota_tracker(date, units_used):
     """Persist quota tracker atomically. Failures are silently ignored.
-    
+
     S-04 fix: use temp-file + rename (atomic) instead of write_text which
     could corrupt the tracker on a mid-write crash and silently reset the
     quota counter to 0.
@@ -306,13 +311,13 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
 
     Issue 10 fix: HTTPError is caught and re-raised with a human-readable
     message that includes the API error description (e.g. "quota exceeded").
-    
+
     B-07 fix: rate limiter check moved here so it fires per API call, not
     once per scan_url invocation.
     """
-    import urllib.request
-    import urllib.parse
     import urllib.error
+    import urllib.parse
+    import urllib.request
 
     if quota_cost is None:
         quota_cost = YT_QUOTA_COST.get(endpoint, 1)
@@ -357,7 +362,7 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
 def prompt_api_key():
     """
     Prompt user for YouTube API key and save it securely.
-    
+
     Security: Now uses secure storage (_apikey.py) instead of plaintext file.
     """
     print()
@@ -374,7 +379,7 @@ def prompt_api_key():
         return None
     if not key:
         return None
-    
+
     if save_api_key(key):
         storage = get_storage_method()
         storage_name = {
@@ -386,7 +391,7 @@ def prompt_api_key():
     else:
         print(f"  {clr.R}Failed to save API key{clr.RST}")
         return None
-    
+
     print()
     return key
 
@@ -397,7 +402,7 @@ def _parse_yt_url(url):
 
     Issue 12 fix: music.youtube.com URLs are now accepted.
     """
-    from urllib.parse import urlparse, parse_qs
+    from urllib.parse import parse_qs, urlparse
     p          = urlparse(url)
     qs         = parse_qs(p.query)
     path_parts = [x for x in p.path.split('/') if x]
@@ -561,7 +566,7 @@ def _fetch_with_cache(video_ids, api_key, cache, on_progress=None):
 def scan_url(url, on_progress=None, use_cache=True):
     """
     Fetch durations for a YouTube URL via the Data API v3.
-    
+
     Security: Implements rate limiting and quota checking to prevent abuse.
 
     Returns (total_sec, total_count, entries, label, cache_hits, unavailable_count).
@@ -571,7 +576,7 @@ def scan_url(url, on_progress=None, use_cache=True):
         api_key = prompt_api_key()
         if not api_key:
             return 0, 0, [], 'cancelled', 0, 0
-    
+
     # Check quota before making requests
     try:
         used, remaining, pct = get_quota_status()

@@ -33,6 +33,7 @@ secure = [
 ]
 dev = [
     "pytest>=9.0",
+    "ruff>=0.4",
 ]
 
 [project.scripts]
@@ -41,3 +42,16 @@ aevum = "aevum_pkg._cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["aevum_pkg*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = [
+    "E501",   # line too long — long f-strings with ANSI codes are intentional
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F401"]

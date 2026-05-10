@@ -12,10 +12,10 @@ import tempfile
 import time
 from pathlib import Path
 
-from ._color import clr, LINE
-from ._scan  import format_duration, format_size
-from ._paths import APPDATA
+from ._color import LINE, clr
 from ._display import _safe
+from ._paths import APPDATA
+from ._scan import format_duration, format_size
 
 HISTORY_DIR = APPDATA / "history"
 

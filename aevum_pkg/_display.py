@@ -1,10 +1,9 @@
+import re as _re
 from pathlib import Path
 
-from ._color  import clr, LINE
-from ._scan   import format_duration, format_size
-from ._models import FolderNode, ScanTree
-
-import re as _re
+from ._color import LINE, clr
+from ._models import ScanTree
+from ._scan import format_duration, format_size
 
 _ANSI_ESCAPE = _re.compile(r'\x1b(?:\[[0-9;]*[mGKHFJA-Za-z]|\][^\x07]*\x07|[^[])')
 _CTRL_CHARS  = _re.compile(r'[\x00-\x1f\x7f]')
@@ -436,7 +435,6 @@ def print_recent(folder, durations, sizes, since_ts, limit=50):
     Print files modified after since_ts, sorted newest first.
     """
     import datetime
-    import os
 
     if not durations:
         print(f"\n  {clr.Y}No media files found.{clr.RST}\n")

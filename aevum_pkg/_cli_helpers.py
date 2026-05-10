@@ -4,10 +4,10 @@ Small stateless helpers shared across CLI command handlers.
 import sys
 from pathlib import Path
 
-from ._color import clr
-from ._scan  import check_ffprobe, parse_duration_arg, parse_since_arg
-from ._exit  import EX
 from ._cli_json import _json_error
+from ._color import clr
+from ._exit import EX
+from ._scan import check_ffprobe, parse_duration_arg, parse_since_arg
 
 
 def _make_progress_bar(quiet=False, use_json=False):

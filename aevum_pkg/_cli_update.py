@@ -5,9 +5,9 @@ import os
 import sys
 from pathlib import Path
 
-from ._color  import clr
+from ._color import clr
 from ._config import save_config
-from ._exit   import EX
+from ._exit import EX
 
 
 def _run_pip_upgrade(src_dir, quiet=False):
@@ -64,6 +64,7 @@ def _run_pip_upgrade(src_dir, quiet=False):
 
 def _open_appdata():
     import subprocess as _sp
+
     from ._paths import APPDATA
     # S-07: resolve and validate the path before passing to shell opener
     appdata = APPDATA.resolve()
@@ -102,7 +103,7 @@ def _do_update(cfg, dry_run=False, quiet=False):
     saved = cfg.get('project_dir', '')
     if saved and not (Path(saved) / "pyproject.toml").exists():
         print(f"\n  {clr.Y}[WARN]{clr.RST}  Saved project path no longer exists: {clr.W}{saved}{clr.RST}")
-        print(f"  The project folder may have moved or been renamed.")
+        print("  The project folder may have moved or been renamed.")
 
     if src_dir is None:
         print(f"\n  {clr.Y}Aevum project folder not found.{clr.RST}")

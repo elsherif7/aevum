@@ -7,8 +7,8 @@ Q-01 fix: extracted from _cli.py where it was inlined with a comment
 
 from pathlib import Path
 
-from ._color import clr, LINE
-from ._scan  import _run_scan, format_duration
+from ._color import LINE, clr
+from ._scan import _run_scan, format_duration
 
 
 def run_compare(folder_a, folder_b, on_progress, sort_by, use_cache, quiet=False):

@@ -8,7 +8,6 @@ Falls back to encrypted file storage if keyring is unavailable.
 import os
 import re
 import sys
-from pathlib import Path
 
 # Try to import keyring (optional dependency)
 try:
@@ -43,7 +42,6 @@ def _get_cipher():
     """
     try:
         from cryptography.fernet import Fernet
-        import secrets as _secrets
 
         key_file = YT_KEY_FILE.with_suffix(".key")
 
@@ -73,66 +71,66 @@ def _get_cipher():
 def save_api_key(api_key: str) -> bool:
     """
     Store API key securely.
-    
+
     Security: Tries to use system keyring (encrypted), falls back to
     encrypted file if keyring unavailable, warns if storing plaintext.
-    
+
     Args:
         api_key: YouTube API key to store
-        
+
     Returns:
         True if saved successfully, False otherwise
     """
     # S-02: Validate API key format (YouTube keys start with AIza)
     # H-01: use pre-compiled regex (module-level constant)
     if not api_key or not _YT_KEY_PATTERN.match(api_key):
-        print(f"  Error: Invalid API key format (expected AIza...)", file=sys.stderr)
+        print("  Error: Invalid API key format (expected AIza...)", file=sys.stderr)
         return False
-    
+
     # Method 1: System keyring (best - OS-encrypted storage)
     if KEYRING_AVAILABLE:
         try:
             keyring.set_password(SERVICE_NAME, KEY_NAME, api_key)
-            
+
             # Remove old plaintext file if exists
             if YT_KEY_FILE.exists():
                 try:
                     YT_KEY_FILE.unlink()
-                    print(f"  [MIGRATED] Moved API key to secure system keyring")
+                    print("  [MIGRATED] Moved API key to secure system keyring")
                 except OSError:
                     pass
-            
+
             return True
         except Exception as e:
-            print(f"  Warning: Keyring failed ({e}), trying fallback...", 
+            print(f"  Warning: Keyring failed ({e}), trying fallback...",
                   file=sys.stderr)
-    
+
     # Method 2: Encrypted file (fallback)
     cipher = _get_cipher()
     if cipher:
         try:
             YT_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
-            
+
             encrypted = cipher.encrypt(api_key.encode('utf-8'))
-            
+
             # Write with restrictive permissions
             YT_KEY_FILE.write_bytes(encrypted)
             os.chmod(YT_KEY_FILE, 0o600)
-            
-            print(f"  [ENCRYPTED] API key stored in encrypted file")
+
+            print("  [ENCRYPTED] API key stored in encrypted file")
             return True
         except Exception as e:
-            print(f"  Warning: Encryption failed ({e}), trying plaintext...", 
+            print(f"  Warning: Encryption failed ({e}), trying plaintext...",
                   file=sys.stderr)
-    
+
     # Method 3: Plaintext (worst case - warn user)
     try:
         YT_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
         YT_KEY_FILE.write_text(api_key, encoding='utf-8')
         os.chmod(YT_KEY_FILE, 0o600)
-        
-        print(f"  [WARN] API key stored in PLAINTEXT", file=sys.stderr)
-        print(f"  Install 'keyring' for secure storage: pip install keyring", 
+
+        print("  [WARN] API key stored in PLAINTEXT", file=sys.stderr)
+        print("  Install 'keyring' for secure storage: pip install keyring",
               file=sys.stderr)
         return True
     except Exception as e:
@@ -143,9 +141,9 @@ def save_api_key(api_key: str) -> bool:
 def load_api_key() -> str:
     """
     Load API key from secure storage.
-    
+
     Security: Tries keyring first, then encrypted file, then plaintext fallback.
-    
+
     Returns:
         API key string, or empty string if not found
     """
@@ -157,7 +155,7 @@ def load_api_key() -> str:
                 return key
         except Exception:
             pass
-    
+
     # Method 2: Encrypted file
     if YT_KEY_FILE.exists():
         try:
@@ -187,33 +185,33 @@ def load_api_key() -> str:
             return YT_KEY_FILE.read_text(encoding='utf-8').strip()
         except Exception:
             pass
-    
+
     return ""
 
 
 def delete_api_key() -> bool:
     """
     Remove API key from all storage locations.
-    
+
     Returns:
         True if deleted successfully
     """
     success = True
-    
+
     # Remove from keyring
     if KEYRING_AVAILABLE:
         try:
             keyring.delete_password(SERVICE_NAME, KEY_NAME)
         except Exception:
             pass
-    
+
     # Remove file
     if YT_KEY_FILE.exists():
         try:
             YT_KEY_FILE.unlink()
         except OSError:
             success = False
-    
+
     return success
 
 

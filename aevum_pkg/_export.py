@@ -1,4 +1,3 @@
-import csv
 import io
 import json
 import os
@@ -8,8 +7,10 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+from ._models import ScanTree
 from ._scan import format_duration, format_size
-from ._models import FolderNode, ScanTree
+
+
 # ── Path validation (inlined from _security.py) ──────────────────────
 def _is_relative_to(path, root):
     try:
@@ -48,26 +49,26 @@ def validate_export_path(out_path: str, scan_folder) -> "Path":
 def sanitize_csv_field(value: str) -> str:
     """
     Sanitize CSV field to prevent formula injection attacks.
-    
+
     Security: Escapes formula characters that could execute in Excel/Google Sheets.
     Formulas starting with =, +, -, @, |, or tab could execute commands.
     """
     if not value:
         return value
-    
+
     # Characters that start formulas in spreadsheets
     dangerous_chars = {'=', '+', '-', '@', '\t', '\r', '\n', '|'}
-    
+
     # If starts with dangerous char, prefix with single quote
     if value[0] in dangerous_chars:
         value = "'" + value
-    
+
     # Remove any embedded nulls
     value = value.replace('\x00', '')
-    
+
     # Remove control characters except common whitespace
     value = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', value)
-    
+
     return value
 
 
@@ -86,17 +87,17 @@ def _tree_to_dict(name, seconds, count, children: list, direct_files=None):
 def _resolve_dest(folder, fmt, out_path):
     """
     Resolve the destination path for an export with security validation.
-    
+
     Security: Validates output path to prevent path traversal and arbitrary
     file writes. Uses unpredictable names to prevent symlink attacks.
     """
     folder = Path(folder).resolve()
-    
+
     # Add random suffix for unpredictability (prevents symlink timing attacks)
     random_suffix = secrets.token_hex(4)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"aevum_{folder.name}_{stamp}_{random_suffix}.{fmt}"
-    
+
     if out_path:
         # Security: validate output path
         try:
@@ -104,15 +105,15 @@ def _resolve_dest(folder, fmt, out_path):
             return validated_path
         except (PermissionError, ValueError) as e:
             print(f"  Warning: {e}", file=__import__('sys').stderr)
-            print(f"  Falling back to safe location...", file=__import__('sys').stderr)
+            print("  Falling back to safe location...", file=__import__('sys').stderr)
             # Fall through to auto-generate safe path
-    
+
     # Auto-generate safe path
     if folder.parent.is_dir():
         preferred = folder.parent / filename
         if preferred.parent.is_dir():
             return preferred
-    
+
     desktop = Path.home() / "Desktop"
     desktop.mkdir(parents=True, exist_ok=True)
     return desktop / filename
@@ -128,7 +129,7 @@ def export_results(folder, total_sec, total_count, tree, durations, fmt, out_pat
         content = _build_html(folder, total_sec, total_count, tree, durations, sizes or {})
     else:
         content = _build_content(folder, total_sec, total_count, tree, durations, fmt)
-    
+
     try:
         _write_content_atomic(dest, content, fmt)
     except OSError:
@@ -139,14 +140,14 @@ def export_results(folder, total_sec, total_count, tree, durations, fmt, out_pat
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         dest = desktop / f"aevum_{Path(folder).name}_{stamp}_{random_suffix}.{fmt}"
         _write_content_atomic(dest, content, fmt)
-    
+
     return dest
 
 
 def _write_content_atomic(dest, content, fmt):
     """
     Write content atomically using temp file + rename.
-    
+
     Security: Prevents TOCTOU races and sets restrictive permissions (user-only).
     H-11: removed the Windows-specific dest.unlink() before os.replace() which
     created a TOCTOU window. os.replace() on modern Windows (Vista+) is atomic.
@@ -390,7 +391,7 @@ def export_url_results(url, label, total_sec, total_count, entries, fmt, out_pat
     regardless of the requested format.  Now txt, csv, and json are all
     properly implemented to match the behaviour of export_results() for
     local folder scans.
-    
+
     S-06 fix: validate output path to prevent arbitrary file writes.
     """
     stamp    = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -404,7 +405,7 @@ def export_url_results(url, label, total_sec, total_count, entries, fmt, out_pat
             dest = validate_export_path(out_path, Path.home())
         except (PermissionError, ValueError) as e:
             print(f"  Warning: {e}", file=__import__('sys').stderr)
-            print(f"  Falling back to safe location...", file=__import__('sys').stderr)
+            print("  Falling back to safe location...", file=__import__('sys').stderr)
             desktop = Path.home() / "Desktop"
             desktop.mkdir(parents=True, exist_ok=True)
             dest = desktop / filename

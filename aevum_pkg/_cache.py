@@ -18,16 +18,16 @@ _CACHE_ENTRY_FIELDS = {
 def _normalise_path(p):
     """
     Return a normalised absolute path with symlinks resolved.
-    
+
     Security: Always resolve symlinks to prevent cache poisoning
     and TOCTOU attacks.
-    
+
     S-05/S-10 fix: removed overly restrictive path validation that rejected
     valid media paths (network shares, removable drives, non-home directories).
     Path access control should happen at the scan entry point, not in the
     cache key function.  The cache accepts any path the OS allows the process
     to read.
-    
+
     Issue 22 fix: on Windows, paths are lowercased so that a file cached as
     'C:\\Movies\\File.MKV' is still found when looked up as
     'c:\\movies\\file.mkv'. Case is significant on Linux/macOS, so we leave
@@ -45,7 +45,7 @@ def _normalise_path(p):
 def _cache_key(root):
     """
     Stable filename for the cache of a given root folder.
-    
+
     Security: Uses SHA-256 instead of SHA-1 (cryptographically broken).
     The hex digest is [0-9a-f] only, so the resulting filename can never
     escape CACHE_DIR via path traversal.
@@ -68,17 +68,17 @@ def load_cache(root):
             return {}
         with path.open('r', encoding='utf-8') as f:
             data = json.load(f)
-        
+
         # Security: validate JSON structure
         if not isinstance(data, list):
             return {}
-        
+
         validated = {}
         for entry in data:
             # Validate each entry is a dict with required fields
             if not isinstance(entry, dict):
                 continue
-            
+
             # Check all required fields exist and have correct types
             valid = True
             for field, expected_type in _CACHE_ENTRY_FIELDS.items():
@@ -88,10 +88,10 @@ def load_cache(root):
                 if not isinstance(entry[field], expected_type):
                     valid = False
                     break
-            
+
             if not valid:
                 continue
-            
+
             # Normalize path and store validated entry
             try:
                 normalized = _normalise_path(entry["path"])
@@ -103,7 +103,7 @@ def load_cache(root):
             except (PermissionError, ValueError, OSError):
                 # Skip entries with invalid paths
                 continue
-        
+
         return validated
     except (json.JSONDecodeError, OSError, PermissionError):
         return {}
@@ -138,16 +138,16 @@ def save_cache(root, durations):
     """
     Persist durations to the cache file for this root folder.
     durations: dict mapping Path -> seconds (float).
-    
+
     Security: Uses atomic write (temp file + rename) to prevent race conditions.
     Sets restrictive permissions (user read/write only).
-    
+
     Issue 22 fix: the 'path' field stored in JSON is also normalised so
     future loads produce consistent keys.
     """
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        
+
         entries = []
         for p, sec in durations.items():
             try:
@@ -160,20 +160,20 @@ def save_cache(root, durations):
                 })
             except (OSError, PermissionError):
                 pass
-        
+
         cache_path = _cache_key(root)
-        
+
         # Security: Atomic write using temp file + rename
         temp_fd, temp_path = tempfile.mkstemp(
             dir=CACHE_DIR,
             prefix=".tmp_cache_",
             suffix=".json"
         )
-        
+
         try:
             with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
                 json.dump(entries, f, indent=None, separators=(',', ':'))
-            
+
             # Set restrictive permissions (user read/write only)
             os.chmod(temp_path, 0o600)
 
@@ -188,6 +188,6 @@ def save_cache(root, durations):
             except OSError:
                 pass
             raise
-            
+
     except Exception:
         pass  # cache write failure is never fatal

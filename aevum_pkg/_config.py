@@ -77,7 +77,7 @@ def load_config():
                         if not value or Path(value).is_absolute():
                             validated[key] = value
                         else:
-                            print(f"  [CONFIG] Warning: 'project_dir' must be an absolute path, using default.", file=sys.stderr)
+                            print("  [CONFIG] Warning: 'project_dir' must be an absolute path, using default.", file=sys.stderr)
                     else:
                         validated[key] = value
                 else:

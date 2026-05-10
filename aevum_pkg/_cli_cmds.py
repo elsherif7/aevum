@@ -11,28 +11,37 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from ._color   import clr, LINE, clear
-from ._scan    import (format_duration, format_size, _run_scan,
-                       apply_filters, rebuild_after_filter)
-from ._youtube import _is_url, scan_url, _make_url_progress, get_quota_status
-from ._display import (print_results, print_url_results, print_stats,
-                       print_recent, print_top, _fuzzy_suggest)
-from ._dupes   import find_duplicates, print_duplicates, print_dupe_warning
-from ._compare import run_compare, print_comparison
-from ._export  import export_results, export_url_results
-from ._config  import save_config, CONFIG_DEFAULTS, _config_key_valid
-from ._apikey  import load_api_key, save_api_key, get_storage_method
-from ._youtube import prompt_api_key, yt_cache_stats, yt_cache_clear, get_quota_status
-from ._paths   import CACHE_DIR, CONFIG_FILE
-from ._exit    import EX
-from ._history import save_snapshot, print_history, print_diff, history_to_json, diff_to_json
-from ._cli_json    import (_json_out, _json_error, _scan_to_json, _url_to_json,
-                            _dupes_to_json, _compare_to_json)
-from ._cli_helpers import (_make_progress_bar, _require_ffprobe, _resolve_sort,
-                            _resolve_top, _resolve_out_format, _use_cache,
-                            _resolve_alias, _build_filters)
-from ._cli_update  import _do_update, _open_appdata
-
+from ._apikey import get_storage_method, load_api_key, save_api_key
+from ._cli_helpers import (
+    _build_filters,
+    _make_progress_bar,
+    _require_ffprobe,
+    _resolve_alias,
+    _resolve_out_format,
+    _resolve_sort,
+    _resolve_top,
+    _use_cache,
+)
+from ._cli_json import _compare_to_json, _dupes_to_json, _json_error, _json_out, _scan_to_json, _url_to_json
+from ._cli_update import _do_update, _open_appdata
+from ._color import LINE, clear, clr
+from ._compare import print_comparison, run_compare
+from ._config import CONFIG_DEFAULTS, _config_key_valid, save_config
+from ._display import _fuzzy_suggest, print_recent, print_results, print_stats, print_top, print_url_results
+from ._dupes import find_duplicates, print_dupe_warning, print_duplicates
+from ._exit import EX
+from ._export import export_results, export_url_results
+from ._history import diff_to_json, history_to_json, print_diff, print_history, save_snapshot
+from ._paths import CACHE_DIR, CONFIG_FILE
+from ._scan import _run_scan, apply_filters, format_duration, format_size, rebuild_after_filter
+from ._youtube import (
+    _is_url,
+    get_quota_status,
+    prompt_api_key,
+    scan_url,
+    yt_cache_clear,
+    yt_cache_stats,
+)
 
 # ---------------------------------------------------------------------------
 # Simple / utility commands
@@ -81,6 +90,7 @@ def cmd_appdata(args, cfg, use_json, quiet):
 
 def cmd_doctor(args, cfg, use_json, quiet):
     import subprocess as _sp
+
     from ._scan import check_ffprobe, format_size
     if use_json:
         ffprobe_ok = check_ffprobe()
@@ -94,7 +104,8 @@ def cmd_doctor(args, cfg, use_json, quiet):
             files       = list(CACHE_DIR.glob("*.json")) if CACHE_DIR.exists() else []
             cache_bytes = sum(f.stat().st_size for f in files)
         except Exception:
-            files = []; cache_bytes = 0
+            files = []
+            cache_bytes = 0
         _json_out({
             "status":          "ok",
             "command":         "doctor",
@@ -162,7 +173,6 @@ def cmd_doctor(args, cfg, use_json, quiet):
 
 
 def cmd_config_dispatch(args, cfg, use_json, quiet):
-    import json as _json
     action = args.action
     YT_KEY = "yt_api_key"
 
@@ -195,7 +205,7 @@ def cmd_config_dispatch(args, cfg, use_json, quiet):
             api_key = load_api_key()
             if api_key:
                 print(f"API key is set (stored in {get_storage_method()})")
-                print(f"Use 'aevum doctor' to verify it works")
+                print("Use 'aevum doctor' to verify it works")
             else:
                 print("(not set)")
         elif _config_key_valid(key):
@@ -271,8 +281,9 @@ def cmd_config_dispatch(args, cfg, use_json, quiet):
 
 def cmd_cache_dispatch(args, cfg, use_json, quiet):
     import json as _json
-    from ._scan import format_size
+
     from ._cache import _cache_key
+    from ._scan import format_size
     action = args.action or "list"
 
     if action == "path":

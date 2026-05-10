@@ -1,16 +1,16 @@
 import hashlib
 from pathlib import Path
 
-from ._color import clr, LINE
-from ._scan  import format_duration, format_size
+from ._color import LINE, clr
+from ._scan import format_duration
 
 
 def _file_fingerprint(path, size, chunk=65536):
     """
     Generate file fingerprint using BLAKE2b (faster and more secure than SHA-1).
-    
+
     Security: Uses BLAKE2b instead of SHA-1 which is cryptographically broken.
-    
+
     P-05 fix: two-phase hashing — only hash the last chunk if the first chunk
     matches another file, avoiding unnecessary I/O for files that differ early.
     Returns a tuple (first_hash, full_hash) where full_hash is None until
@@ -55,7 +55,7 @@ def find_duplicates(durations, sizes=None):
     callers passing a {str: int} dict (e.g. after deserialisation) still
     work correctly instead of silently degrading to the slow stat() fallback
     for every file.
-    
+
     Security: Uses BLAKE2b instead of SHA-1 for cryptographic integrity.
     """
     # Normalise sizes keys to Path so lookups always hit regardless of whether
