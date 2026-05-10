@@ -47,7 +47,7 @@ Point it at any folder or YouTube URL and instantly see the total duration — b
 
 ## Requirements
 
-- **Python 3.8+** — https://python.org
+- **Python 3.10+** — https://python.org
 - **FFmpeg** (includes `ffprobe`) — https://ffmpeg.org/download.html  
   After downloading, make sure FFmpeg is on your system PATH.
 - **Optional**: `keyring` and `cryptography` for encrypted API key storage
@@ -534,20 +534,7 @@ aevum/
 
 ## Security
 
-- All subprocess calls use safe list form — no shell injection possible
-- Output paths validated before writing — system directories are blocked
-- API keys stored in OS keyring (Windows Credential Manager / macOS Keychain / Linux Secret Service) when `keyring` is installed; falls back to a randomly-keyed Fernet-encrypted file, then plaintext with a warning
-- API key format validated (`AIza...`) before storage to prevent accidental credential writes
-- CSV exports escape formula characters to prevent spreadsheet injection
-- HTML exports use `html.escape()` on all user-controlled content
-- Symlink loop detection (inode tracking) and max recursion depth (30 levels)
-- YouTube API rate-limited to 100 requests/hour via persistent token bucket (enforced across process invocations)
-- YouTube playlist pagination capped at 100,000 videos to prevent infinite loops
-- Atomic file writes (temp → rename) on all persistent state — cache, config, quota tracker, rate limiter, history
-- Duration values clamped to prevent integer overflow from corrupted cache or malformed API responses
-- Quota tracker validated on load — negative values cannot bypass the daily quota guard
-- `LOCALAPPDATA` / `XDG_DATA_HOME` environment variables validated as absolute paths before use
-- No telemetry — nothing is sent anywhere except the YouTube API when scanning URLs
+See [SECURITY.md](SECURITY.md) for the full security design, vulnerability reporting process, and known limitations.
 
 ---
 

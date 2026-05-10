@@ -10,17 +10,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - `FolderNode` and `ScanTree` named types in `_models.py` — the scan tree is
   now self-documenting instead of an anonymous 7-tuple
-- GitHub Actions CI: pytest on Ubuntu / Windows / macOS × Python 3.8–3.12,
+- GitHub Actions CI: pytest on Ubuntu / Windows / macOS × Python 3.10–3.13,
   ruff lint, and mypy type checking on every push and pull request
 - Type annotations on `_models.py`, `_cache.py`, `_config.py`, `_scan.py`,
-  `_apikey.py`, `_export.py`, `_youtube.py`, `_cli_json.py`, `_cli_helpers.py`
-- `mypy>=1.10` and `ruff>=0.4` added to `[dev]` optional dependencies
-- MIT license (`LICENSE` file) and full `pyproject.toml` metadata: author,
-  license reference, readme, and PyPI classifiers
+  `_apikey.py`, `_export.py`, `_youtube.py`, `_cli_json.py`, `_cli_helpers.py`,
+  `_history.py`, `_dupes.py`, `_compare.py`
+- `mypy>=1.10`, `ruff>=0.4` added to `[dev]` optional dependencies
+- MIT license (`LICENSE` file), `SECURITY.md`, and full `pyproject.toml`
+  metadata: author, license reference, readme, and PyPI classifiers
 - Test suite expanded from 63 to 135 tests covering `_display`, `_youtube`,
   `_export`, `_dupes`, and native MP4/MKV binary parsers
 
 ### Changed
+- **Minimum Python version raised to 3.10** (dropped 3.8 and 3.9)
 - `_config.py` is now a pure data-layer module (`load_config`, `save_config`,
   `CONFIG_DEFAULTS`). The three command implementations (`cmd_doctor`,
   `cmd_cache`, `cmd_config`) moved to `_cli_cmds.py` where all other `cmd_*`
