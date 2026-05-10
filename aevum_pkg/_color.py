@@ -22,7 +22,7 @@ import os
 # ---------------------------------------------------------------------------
 if os.name == "nt":
     import ctypes
-    _kernel32 = ctypes.windll.kernel32
+    _kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
     _handle   = _kernel32.GetStdHandle(-11)   # STD_OUTPUT_HANDLE
     # INVALID_HANDLE_VALUE is -1 as a signed pointer; compare via c_void_p
     _INVALID  = ctypes.c_void_p(-1).value

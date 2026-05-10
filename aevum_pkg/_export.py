@@ -33,8 +33,19 @@ def validate_export_path(out_path: str, scan_folder) -> Path:
         win_dir = Path(_os.environ.get("SystemRoot", r"C:\Windows"))
         system_roots = [win_dir, Path(r"C:\Program Files"), Path(r"C:\Program Files (x86)")]
     else:
-        system_roots = [Path("/etc"), Path("/usr"), Path("/bin"), Path("/sbin"),
-                        Path("/lib"), Path("/lib64"), Path("/boot"), Path("/sys"), Path("/proc")]
+        raw_roots = [Path("/etc"), Path("/usr"), Path("/bin"), Path("/sbin"),
+                     Path("/lib"), Path("/lib64"), Path("/boot"), Path("/sys"), Path("/proc")]
+        # On macOS, /etc /tmp /var are symlinks to /private/etc etc.
+        # Resolve each root so the comparison works after Path.resolve().
+        system_roots = []
+        for r in raw_roots:
+            system_roots.append(r)
+            try:
+                resolved_root = r.resolve()
+                if resolved_root != r:
+                    system_roots.append(resolved_root)
+            except OSError:
+                pass
     for sysroot in system_roots:
         if _is_relative_to(resolved, sysroot):
             raise PermissionError(f"Cannot write to system directory: {resolved}")
