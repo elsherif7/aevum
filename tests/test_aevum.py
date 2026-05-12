@@ -1208,3 +1208,476 @@ class TestRebuildAfterFilter:
             tmp_path, durations, sizes, "name:asc"
         )
         assert isinstance(tree, ScanTree)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# _apikey — API key validation  (Wave 1)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestApiKeyValidation:
+    """
+    save_api_key rejects bad formats and accepts valid ones.
+    We patch YT_KEY_FILE and disable keyring so the test stays on disk only.
+    """
+
+    @pytest.fixture(autouse=True)
+    def patch_apikey(self, tmp_path, monkeypatch):
+        import aevum_pkg._apikey as _ak
+        monkeypatch.setattr(_ak, "KEYRING_AVAILABLE", False)
+        monkeypatch.setattr(_ak, "YT_KEY_FILE", tmp_path / "yt_api_key.txt")
+        # Disable encryption so we get plain text writes (no cryptography dep needed)
+        monkeypatch.setattr(_ak, "_get_cipher", lambda: None)
+
+    def test_valid_key_saved(self, tmp_path):
+        from aevum_pkg._apikey import save_api_key, load_api_key
+        valid_key = "AIza" + "A" * 35
+        result = save_api_key(valid_key)
+        assert result is True
+        assert load_api_key() == valid_key
+
+    def test_invalid_format_rejected(self):
+        from aevum_pkg._apikey import save_api_key
+        assert save_api_key("not-a-real-key") is False
+
+    def test_empty_string_rejected(self):
+        from aevum_pkg._apikey import save_api_key
+        assert save_api_key("") is False
+
+    def test_key_too_short_rejected(self):
+        from aevum_pkg._apikey import save_api_key
+        # Valid prefix but too short
+        assert save_api_key("AIzaABC") is False
+
+    def test_key_wrong_prefix_rejected(self):
+        from aevum_pkg._apikey import save_api_key
+        # Correct length but wrong prefix
+        assert save_api_key("XXXX" + "A" * 35) is False
+
+    def test_load_missing_key_returns_empty(self, tmp_path):
+        from aevum_pkg._apikey import load_api_key
+        assert load_api_key() == ""
+
+    def test_get_storage_method_none_when_no_key(self):
+        from aevum_pkg._apikey import get_storage_method
+        assert get_storage_method() == "none"
+
+    def test_get_storage_method_plaintext_after_save(self, tmp_path):
+        from aevum_pkg._apikey import save_api_key, get_storage_method
+        valid_key = "AIza" + "B" * 35
+        save_api_key(valid_key)
+        assert get_storage_method() == "plaintext_file"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# _cache — get_cached_duration hit / miss / stale  (Wave 2)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestGetCachedDuration:
+    """
+    get_cached_duration returns (duration, True) on a hit and (0.0, False)
+    on a miss or when the file has changed since it was cached.
+    """
+
+    def _make_file(self, path: Path, content: bytes = b"x") -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        return path
+
+    def _cache_entry(self, path: Path, duration: float) -> dict:
+        """Build a cache dict entry matching the real file's mtime/size."""
+        st = path.stat()
+        from aevum_pkg._cache import _normalise_path
+        return {
+            _normalise_path(path): {
+                "mtime":    st.st_mtime,
+                "size":     st.st_size,
+                "duration": duration,
+            }
+        }
+
+    def test_cache_hit_returns_duration(self, tmp_path):
+        from aevum_pkg._cache import get_cached_duration
+        p = self._make_file(tmp_path / "a.mkv")
+        cache = self._cache_entry(p, 120.0)
+        dur, hit = get_cached_duration(p, cache)
+        assert hit is True
+        assert dur == pytest.approx(120.0)
+
+    def test_cache_miss_returns_zero_false(self, tmp_path):
+        from aevum_pkg._cache import get_cached_duration
+        p = self._make_file(tmp_path / "b.mkv")
+        dur, hit = get_cached_duration(p, {})
+        assert hit is False
+        assert dur == 0.0
+
+    def test_stale_size_returns_miss(self, tmp_path):
+        from aevum_pkg._cache import get_cached_duration, _normalise_path
+        p = self._make_file(tmp_path / "c.mkv", b"original")
+        st = p.stat()
+        # Build entry with wrong size
+        cache = {
+            _normalise_path(p): {
+                "mtime":    st.st_mtime,
+                "size":     st.st_size + 999,   # size mismatch
+                "duration": 60.0,
+            }
+        }
+        dur, hit = get_cached_duration(p, cache)
+        assert hit is False
+        assert dur == 0.0
+
+    def test_stale_mtime_beyond_tolerance_returns_miss(self, tmp_path):
+        from aevum_pkg._cache import get_cached_duration, _normalise_path
+        p = self._make_file(tmp_path / "d.mkv")
+        st = p.stat()
+        # mtime differs by 5 seconds — beyond the 2s FAT tolerance
+        cache = {
+            _normalise_path(p): {
+                "mtime":    st.st_mtime - 5.0,
+                "size":     st.st_size,
+                "duration": 60.0,
+            }
+        }
+        dur, hit = get_cached_duration(p, cache)
+        assert hit is False
+
+    def test_mtime_within_tolerance_is_hit(self, tmp_path):
+        from aevum_pkg._cache import get_cached_duration, _normalise_path
+        p = self._make_file(tmp_path / "e.mkv")
+        st = p.stat()
+        # mtime differs by 1.5s — within the 2s FAT tolerance
+        cache = {
+            _normalise_path(p): {
+                "mtime":    st.st_mtime + 1.5,
+                "size":     st.st_size,
+                "duration": 75.0,
+            }
+        }
+        dur, hit = get_cached_duration(p, cache)
+        assert hit is True
+        assert dur == pytest.approx(75.0)
+
+    def test_nonexistent_file_returns_miss(self, tmp_path):
+        from aevum_pkg._cache import get_cached_duration, _normalise_path
+        p = tmp_path / "ghost.mkv"   # does not exist
+        cache = {
+            _normalise_path(p): {
+                "mtime":    0.0,
+                "size":     0,
+                "duration": 30.0,
+            }
+        }
+        dur, hit = get_cached_duration(p, cache)
+        assert hit is False
+        assert dur == 0.0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# _export — _build_content and _build_url_content  (Wave 3)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestBuildContent:
+    """
+    _build_content produces correct output for txt / csv / json formats.
+    No filesystem writes — pure in-memory logic.
+    """
+
+    @pytest.fixture
+    def scan_data(self, tmp_path):
+        """Minimal scan data: two files in one subfolder."""
+        from aevum_pkg._models import ScanTree, FolderNode
+        a = tmp_path / "Action" / "film.mkv"
+        b = tmp_path / "Action" / "short.mp4"
+        a.parent.mkdir(parents=True, exist_ok=True)
+        a.write_bytes(b"")
+        b.write_bytes(b"")
+
+        durations = {a: 7200.0, b: 1800.0}
+        node = FolderNode(
+            name="Action",
+            total_sec=9000.0,
+            total_count=2,
+            total_bytes=0,
+            direct_count=2,
+            children=[],
+            direct_files=[(a, 7200.0), (b, 1800.0)],
+        )
+        tree = ScanTree(children=[node], direct_files=[], root_bytes=0)
+        return tmp_path, 9000.0, 2, tree, durations
+
+    def test_txt_contains_grand_total(self, scan_data):
+        from aevum_pkg._export import _build_content
+        folder, total_sec, total_count, tree, durations = scan_data
+        result = _build_content(folder, total_sec, total_count, tree, durations, "txt")
+        assert "GRAND TOTAL" in result
+        assert "2" in result          # total_count
+
+    def test_txt_contains_folder_name(self, scan_data):
+        from aevum_pkg._export import _build_content
+        folder, total_sec, total_count, tree, durations = scan_data
+        result = _build_content(folder, total_sec, total_count, tree, durations, "txt")
+        assert folder.name in result
+
+    def test_json_is_valid_and_has_keys(self, scan_data):
+        from aevum_pkg._export import _build_content
+        folder, total_sec, total_count, tree, durations = scan_data
+        result = _build_content(folder, total_sec, total_count, tree, durations, "json")
+        data = json.loads(result)
+        assert data["total_count"] == 2
+        assert data["total_sec"]   == pytest.approx(9000.0)
+        assert "tree" in data
+        assert "files" in data
+
+    def test_json_files_sorted_by_duration_desc(self, scan_data):
+        from aevum_pkg._export import _build_content
+        folder, total_sec, total_count, tree, durations = scan_data
+        result = _build_content(folder, total_sec, total_count, tree, durations, "json")
+        data = json.loads(result)
+        # files is a dict {path_str: seconds} — values should be descending
+        secs = list(data["files"].values())
+        assert secs == sorted(secs, reverse=True)
+
+    def test_csv_returns_list_of_rows(self, scan_data):
+        from aevum_pkg._export import _build_content
+        folder, total_sec, total_count, tree, durations = scan_data
+        result = _build_content(folder, total_sec, total_count, tree, durations, "csv")
+        assert isinstance(result, list)
+        # Header row + 2 data rows
+        assert len(result) == 3
+        assert result[0] == ["path", "filename", "folder", "seconds", "duration"]
+
+    def test_csv_data_rows_have_correct_columns(self, scan_data):
+        from aevum_pkg._export import _build_content
+        folder, total_sec, total_count, tree, durations = scan_data
+        result = _build_content(folder, total_sec, total_count, tree, durations, "csv")
+        for row in result[1:]:
+            assert len(row) == 5
+
+
+class TestBuildUrlContent:
+    """_build_url_content produces correct output for YouTube scan results."""
+
+    @pytest.fixture
+    def url_data(self):
+        entries = [
+            {"title": "Video A", "duration": 3600.0, "url": "https://youtu.be/aaa", "channel": "Chan1"},
+            {"title": "Video B", "duration": 1800.0, "url": "https://youtu.be/bbb", "channel": "Chan1"},
+        ]
+        return "https://youtube.com/@test", "Test Channel", 5400.0, 2, entries
+
+    def test_txt_contains_label(self, url_data):
+        from aevum_pkg._export import _build_url_content
+        url, label, total_sec, total_count, entries = url_data
+        result = _build_url_content(url, label, total_sec, total_count, entries, "txt")
+        assert label in result
+
+    def test_json_structure(self, url_data):
+        from aevum_pkg._export import _build_url_content
+        url, label, total_sec, total_count, entries = url_data
+        result = _build_url_content(url, label, total_sec, total_count, entries, "json")
+        data = json.loads(result)
+        assert data["total_count"] == 2
+        assert data["total_sec"]   == pytest.approx(5400.0)
+        assert len(data["videos"]) == 2
+
+    def test_json_videos_sorted_desc(self, url_data):
+        from aevum_pkg._export import _build_url_content
+        url, label, total_sec, total_count, entries = url_data
+        result = _build_url_content(url, label, total_sec, total_count, entries, "json")
+        data = json.loads(result)
+        secs = [v["duration_sec"] for v in data["videos"]]
+        assert secs == sorted(secs, reverse=True)
+
+    def test_csv_returns_rows_with_header(self, url_data):
+        from aevum_pkg._export import _build_url_content
+        url, label, total_sec, total_count, entries = url_data
+        result = _build_url_content(url, label, total_sec, total_count, entries, "csv")
+        assert isinstance(result, list)
+        assert result[0] == ["title", "channel", "seconds", "duration", "url"]
+        assert len(result) == 3   # header + 2 videos
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# _cli_helpers — resolve / expand utilities  (Wave 4)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestResolveAlias:
+    """_resolve_alias expands known aliases and passes unknown tokens through."""
+
+    def _cfg(self, aliases: dict) -> dict:
+        return {"aliases": aliases}
+
+    def test_known_alias_expanded(self):
+        from aevum_pkg._cli_helpers import _resolve_alias
+        cfg = self._cfg({"M": "/data/movies"})
+        assert _resolve_alias("M", cfg) == "/data/movies"
+
+    def test_unknown_token_returned_unchanged(self):
+        from aevum_pkg._cli_helpers import _resolve_alias
+        cfg = self._cfg({"M": "D:\\Movies"})
+        assert _resolve_alias("D:\\Other", cfg) == "D:\\Other"
+
+    def test_empty_string_returned_unchanged(self):
+        from aevum_pkg._cli_helpers import _resolve_alias
+        assert _resolve_alias("", {}) == ""
+
+    def test_case_insensitive_lookup(self):
+        from aevum_pkg._cli_helpers import _resolve_alias
+        cfg = self._cfg({"movies": "/data/movies"})
+        assert _resolve_alias("MOVIES", cfg) == "/data/movies"
+
+    def test_no_aliases_key_in_cfg(self):
+        from aevum_pkg._cli_helpers import _resolve_alias
+        assert _resolve_alias("M", {}) == "M"
+
+    def test_multi_token_expansion_joined(self):
+        from aevum_pkg._cli_helpers import _resolve_alias
+        # Multi-token alias values are returned as a single string
+        cfg = self._cfg({"spd": "--speed 1.5"})
+        result = _resolve_alias("spd", cfg)
+        assert isinstance(result, str)
+        assert "1.5" in result
+
+
+class TestExpandAliasesInArgv:
+    """_expand_aliases_in_argv replaces alias tokens in argv."""
+
+    def _cfg(self, aliases: dict) -> dict:
+        return {"aliases": aliases}
+
+    def test_alias_token_replaced(self):
+        from aevum_pkg._cli_helpers import _expand_aliases_in_argv
+        cfg = self._cfg({"M": "/data/movies"})
+        result = _expand_aliases_in_argv(["scan", "M"], cfg)
+        assert "/data/movies" in result
+
+    def test_flag_tokens_not_expanded(self):
+        from aevum_pkg._cli_helpers import _expand_aliases_in_argv
+        cfg = self._cfg({"--json": "something"})
+        result = _expand_aliases_in_argv(["scan", "--json"], cfg)
+        # Flags starting with - are never expanded
+        assert "--json" in result
+
+    def test_no_aliases_argv_unchanged(self):
+        from aevum_pkg._cli_helpers import _expand_aliases_in_argv
+        argv = ["scan", "D:\\Movies", "--json"]
+        assert _expand_aliases_in_argv(argv, {}) == argv
+
+    def test_multi_token_alias_split_into_argv(self):
+        from aevum_pkg._cli_helpers import _expand_aliases_in_argv
+        cfg = self._cfg({"spd": "--speed 1.5"})
+        result = _expand_aliases_in_argv(["scan", "spd", "D:\\Movies"], cfg)
+        assert "--speed" in result
+        assert "1.5" in result
+
+
+class TestResolveSort:
+    """_resolve_sort normalises sort strings from args and config."""
+
+    def _args(self, sort=None):
+        import types
+        return types.SimpleNamespace(sort=sort)
+
+    def test_explicit_arg_used(self):
+        from aevum_pkg._cli_helpers import _resolve_sort
+        args = self._args("duration:desc")
+        assert _resolve_sort(args, {}) == "duration:desc"
+
+    def test_falls_back_to_config(self):
+        from aevum_pkg._cli_helpers import _resolve_sort
+        args = self._args(None)
+        assert _resolve_sort(args, {"sort": "name:asc"}) == "name:asc"
+
+    def test_default_when_neither_set(self):
+        from aevum_pkg._cli_helpers import _resolve_sort
+        args = self._args(None)
+        assert _resolve_sort(args, {}) == "name:asc"
+
+    def test_bare_sort_name_gets_direction(self):
+        from aevum_pkg._cli_helpers import _resolve_sort
+        args = self._args("duration")
+        result = _resolve_sort(args, {})
+        assert result == "duration:desc"
+
+
+class TestResolveTop:
+    """_resolve_top picks the right top-N value from args or config."""
+
+    def _args(self, top=None):
+        import types
+        return types.SimpleNamespace(top=top)
+
+    def test_explicit_arg_used(self):
+        from aevum_pkg._cli_helpers import _resolve_top
+        assert _resolve_top(self._args(20), {}) == 20
+
+    def test_falls_back_to_config(self):
+        from aevum_pkg._cli_helpers import _resolve_top
+        assert _resolve_top(self._args(None), {"top": 5}) == 5
+
+    def test_default_is_10(self):
+        from aevum_pkg._cli_helpers import _resolve_top
+        assert _resolve_top(self._args(None), {}) == 10
+
+    def test_zero_allowed(self):
+        from aevum_pkg._cli_helpers import _resolve_top
+        assert _resolve_top(self._args(0), {}) == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# _color — clr singleton and disable()  (Wave 5)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestColorSingleton:
+    """
+    _Colors singleton starts enabled and disable() empties all escape codes.
+    We create a fresh instance per test so we never mutate the global clr.
+    """
+
+    def _fresh(self):
+        from aevum_pkg._color import _Colors
+        return _Colors()
+
+    def test_starts_enabled(self):
+        c = self._fresh()
+        assert c.enabled is True
+
+    def test_color_codes_are_nonempty_when_enabled(self):
+        c = self._fresh()
+        assert c.R   != ""
+        assert c.G   != ""
+        assert c.RST != ""
+
+    def test_disable_sets_enabled_false(self):
+        c = self._fresh()
+        c.disable()
+        assert c.enabled is False
+
+    def test_disable_empties_all_codes(self):
+        c = self._fresh()
+        c.disable()
+        for attr in ("R", "G", "Y", "B", "M", "C", "W", "DIM", "RST"):
+            assert getattr(c, attr) == "", f"{attr} should be empty after disable()"
+
+    def test_disable_is_idempotent(self):
+        c = self._fresh()
+        c.disable()
+        c.disable()   # second call should not raise
+        assert c.enabled is False
+
+    def test_format_string_with_disabled_colors_has_no_ansi(self):
+        c = self._fresh()
+        c.disable()
+        result = f"{c.G}hello{c.RST}"
+        assert result == "hello"
+        assert "\033" not in result
+
+    def test_global_clr_is_singleton(self):
+        from aevum_pkg._color import clr as clr1
+        from aevum_pkg._color import clr as clr2
+        assert clr1 is clr2
+
+    def test_line_constant_is_string(self):
+        from aevum_pkg._color import LINE
+        assert isinstance(LINE, str)
+        assert len(LINE) > 0
