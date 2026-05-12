@@ -32,7 +32,7 @@ immediately without reinstalling.
 python -m pytest tests/ -v
 ```
 
-All 135 tests must pass before submitting a pull request. Tests are pure
+All tests must pass before submitting a pull request. Tests are pure
 (no network calls, no ffprobe) and run in under 2 seconds.
 
 ---
@@ -44,7 +44,7 @@ python -m ruff check aevum_pkg/   # lint
 python -m mypy                    # type check
 ```
 
-Both must report zero errors. The CI workflow enforces this on every push.
+Both must report zero errors.
 
 ---
 

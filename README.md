@@ -517,11 +517,8 @@ aevum/
   SECURITY.md
   LICENSE
   .gitignore
-  .github/
-    workflows/
-      ci.yml         — pytest + ruff + mypy on every push
   tests/
-    test_aevum.py    — 135 tests (pure functions + filesystem round-trips)
+    test_aevum.py    — 185 tests (pure functions + filesystem round-trips)
   aevum_pkg/
     __init__.py      — public API surface
     _models.py       — FolderNode and ScanTree data types
