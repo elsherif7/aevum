@@ -7,6 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- Removed GitHub Actions CI workflow (`.github/workflows/ci.yml`) — will be re-added in a future release
+
+### Tests
+- Added 50 new unit tests across 5 areas: API key validation (`_apikey`),
+  cache hit/miss/stale logic (`_cache`), export content builders (`_export`),
+  CLI helper utilities (`_cli_helpers`), and color singleton (`_color`)
+- Total test count: 185 tests
+
 ---
 
 ## [2.3.0] — Engineering & quality release
