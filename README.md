@@ -512,12 +512,10 @@ aevum/
   clean.py           — remove all build/cache directories (python clean.py)
   pyproject.toml     — pip install config
   README.md
-  CHANGELOG.md
-  CONTRIBUTING.md
   SECURITY.md
-  LICENSE
   .gitignore
   tests/
+    __init__.py
     test_aevum.py    — 185 tests (pure functions + filesystem round-trips)
   aevum_pkg/
     __init__.py      — public API surface
@@ -549,21 +547,4 @@ aevum/
 
 See [SECURITY.md](SECURITY.md) for the full security design, vulnerability reporting process, and known limitations.
 
----
 
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for the full version history.
-
----
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, code style,
-and the pull request checklist.
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE)
