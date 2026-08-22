@@ -5,6 +5,14 @@ total media duration, broken down by subfolder — so you can see how
 large a video or audio library is without opening every folder by
 hand.
 
+> **🐍 Get it on PyPI:** [pypi.org/project/aevum](https://pypi.org/project/aevum/)
+>
+> New updates are published on the 7th of every even month (Feb,
+> Apr, Jun, Aug, Oct, Dec).
+>
+> Security issues or broken/critical bugs are fixed and released
+> immediately, outside that schedule.
+
 ---
 
 ## Structure
@@ -14,6 +22,7 @@ aevum/
 ├── aevum.py              # Entry point — delegates to aevum_pkg._cli:main
 ├── clean.py              # Removes pip-install build artifacts (build/, egg-info/, __pycache__)
 ├── pyproject.toml        # Packaging, ruff, mypy config
+├── LICENSE               # GNU General Public License v3.0
 └── aevum_pkg/
     ├── _cli.py           # Argument parsing + main() — the only command is 'scan'
     ├── _cli_cmds.py      # cmd_scan
@@ -122,4 +131,5 @@ python3 clean.py   # remove build artifacts when you're done
 
 ## License
 
-MIT (per `pyproject.toml`).
+GNU General Public License v3.0 — see the [LICENSE](./LICENSE) file
+for details.
