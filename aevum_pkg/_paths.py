@@ -35,7 +35,6 @@ def _appdata_dir() -> Path:
 
 
 APPDATA        = _appdata_dir()
-CACHE_DIR      = APPDATA / "cache"
 YT_KEY_FILE    = APPDATA / "yt_api_key.txt"
 YT_QUOTA_FILE  = APPDATA / "yt_quota_tracker.json"
 YT_VCACHE_FILE = APPDATA / "yt_video_cache.json"

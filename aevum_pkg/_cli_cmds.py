@@ -5,6 +5,11 @@ Only 'scan' remains — all other subcommands (compare, dupes, export,
 watch, history/diff, alias, cache, config, doctor, quota, update,
 clearpath, appdata, files, stats, summary, top, recent, version) were
 removed to keep this a minimal folder/YouTube duration scanner.
+
+The local on-disk duration cache (_cache.py) was also removed, so every
+folder scan always re-probes every file with ffprobe/native parsing.
+YouTube's own per-video API-response cache in _youtube.py is a separate
+mechanism and is untouched by that removal.
 """
 from __future__ import annotations
 
@@ -12,7 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ._cli_helpers import _build_filters, _make_progress_bar, _require_ffprobe, _resolve_sort, _resolve_top, _use_cache
+from ._cli_helpers import _build_filters, _make_progress_bar, _require_ffprobe, _resolve_sort, _resolve_top
 from ._cli_json import _json_error, _json_out, _scan_to_json, _url_to_json
 from ._color import LINE, clr
 from ._display import _fuzzy_suggest, print_results, print_url_results
@@ -43,21 +48,20 @@ def cmd_scan(args, cfg, use_json, quiet) -> None:
 
     sort          = _resolve_sort(args, cfg)
     top           = _resolve_top(args, cfg)
-    uc            = _use_cache(args, cfg)
     do_merge      = getattr(args, 'merge', False)
     max_d         = getattr(args, 'depth', None) or 50
     custom_speeds = getattr(args, 'speeds', None) or None
 
     if len(targets) == 1:
         _cmd_scan_single(args, cfg, use_json, quiet,
-                         targets[0], sort, top, uc, max_d, custom_speeds)
+                         targets[0], sort, top, max_d, custom_speeds)
     else:
         _cmd_scan_batch(args, cfg, use_json, quiet,
-                        targets, sort, top, uc, do_merge, max_d, custom_speeds)
+                        targets, sort, top, do_merge, max_d, custom_speeds)
 
 
 def _cmd_scan_single(args: Any, cfg: dict[str, Any], use_json: bool, quiet: bool,
-                     raw_target: str, sort: str, top: int, uc: bool,
+                     raw_target: str, sort: str, top: int,
                      max_d: int, custom_speeds: list[float] | None) -> None:
     raw     = raw_target
     filters = _build_filters(args, use_json)
@@ -66,7 +70,7 @@ def _cmd_scan_single(args: Any, cfg: dict[str, Any], use_json: bool, quiet: bool
         url_prog = None if (quiet or use_json) else _make_progress_bar(quiet, use_json)
         try:
             total_sec, total_count, entries, label, cache_hits, unavailable_count = \
-                scan_url(raw, url_prog, use_cache=uc)
+                scan_url(raw, url_prog, use_cache=True)
         except KeyboardInterrupt:
             if use_json:
                 _json_error("Fetch interrupted", EX.ERR_SCAN)
@@ -117,8 +121,8 @@ def _cmd_scan_single(args: Any, cfg: dict[str, Any], use_json: bool, quiet: bool
     if not quiet:
         print(f"  {clr.DIM}Collecting files...{clr.RST}", end='', flush=True)
     try:
-        total_sec, total_count, tree, durations, sizes, hits = _run_scan(
-            folder, on_progress, sort, uc)
+        total_sec, total_count, tree, durations, sizes = _run_scan(
+            folder, on_progress, sort)
     except KeyboardInterrupt:
         if use_json:
             _json_error("Scan interrupted", EX.ERR_SCAN)
@@ -131,13 +135,11 @@ def _cmd_scan_single(args: Any, cfg: dict[str, Any], use_json: bool, quiet: bool
             folder, durations, sizes, sort)
 
     if use_json:
-        _json_out(_scan_to_json(folder, total_sec, total_count, tree, durations, sizes, hits))
+        _json_out(_scan_to_json(folder, total_sec, total_count, tree, durations, sizes))
         sys.exit(EX.OK)
 
     if not quiet:
-        probed     = total_count - hits
-        cache_info = f"  {clr.DIM}({hits} cached, {probed} probed){clr.RST}" if hits > 0 else ""
-        print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} files found.{cache_info}".ljust(100))
+        print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} files found.".ljust(100))
 
     print_results(folder, total_sec, total_count, tree, durations, sizes, top,
                   show_files=getattr(args, 'files', False), max_depth=max_d,
@@ -146,7 +148,7 @@ def _cmd_scan_single(args: Any, cfg: dict[str, Any], use_json: bool, quiet: bool
 
 
 def _cmd_scan_batch(args: Any, cfg: dict[str, Any], use_json: bool, quiet: bool,
-                    targets: list[str], sort: str, top: int, uc: bool,
+                    targets: list[str], sort: str, top: int,
                     do_merge: bool, max_d: int, custom_speeds: list[float] | None) -> None:
     _require_ffprobe("scan", use_json)
     filters = _build_filters(args, use_json)
@@ -174,8 +176,8 @@ def _cmd_scan_batch(args: Any, cfg: dict[str, Any], use_json: bool, quiet: bool,
                   f"{clr.DIM}scanning...{clr.RST}", end='', flush=True)
         on_progress = _make_progress_bar(quiet=True)
         try:
-            total_sec, total_count, tree, durations, sizes, hits = _run_scan(
-                folder, on_progress, sort, uc)
+            total_sec, total_count, tree, durations, sizes = _run_scan(
+                folder, on_progress, sort)
         except KeyboardInterrupt:
             if use_json:
                 _json_error("Scan interrupted", EX.ERR_SCAN)
@@ -185,7 +187,7 @@ def _cmd_scan_batch(args: Any, cfg: dict[str, Any], use_json: bool, quiet: bool,
             durations, sizes = apply_filters(durations, sizes, filters)
             total_sec, total_count, tree, durations, sizes = rebuild_after_filter(
                 folder, durations, sizes, sort)
-        results.append((folder, total_sec, total_count, tree, durations, sizes, hits))
+        results.append((folder, total_sec, total_count, tree, durations, sizes))
         if not quiet:
             fmt_dur = format_duration(total_sec)["hours_fmt"]
             print(f"\r  {clr.G}[{i}/{len(folders)}]{clr.RST}  {clr.W}{folder.name:<{label_w}}{clr.RST}  "
@@ -203,8 +205,7 @@ def _print_merged(results: list, folders: list[Path], use_json: bool, quiet: boo
     merged_count = sum(r[2] for r in results)
     merged_dur   = {}
     merged_sizes = {}
-    merged_hits  = sum(r[6] for r in results)
-    for _, _, _, _, dur, sz, _ in results:
+    for _, _, _, _, dur, sz in results:
         merged_dur.update(dur)
         merged_sizes.update(sz)
 
@@ -218,7 +219,6 @@ def _print_merged(results: list, folders: list[Path], use_json: bool, quiet: boo
             "total_bytes": sum(merged_sizes.values()),
             "total_sec":   round(merged_sec, 2),
             "duration":    format_duration(merged_sec),
-            "cache_hits":  merged_hits,
             "per_folder": [
                 {
                     "path":        str(r[0].resolve()),
@@ -286,7 +286,7 @@ def _print_batch_separate(results: list, use_json: bool, quiet: bool,
         })
         sys.exit(EX.OK)
 
-    for folder, total_sec, total_count, tree, durations, sizes, hits in results:
+    for folder, total_sec, total_count, tree, durations, sizes in results:
         print_results(folder, total_sec, total_count, tree, durations, sizes, top,
                       show_files=False, max_depth=max_d, speeds=custom_speeds)
     sys.exit(EX.OK)

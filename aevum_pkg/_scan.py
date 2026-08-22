@@ -11,7 +11,6 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from ._cache import load_cache, save_cache
 from ._models import FolderNode, ScanTree
 
 # How many ffprobe processes to run at once.
@@ -407,13 +406,12 @@ def scan_parallel(
     on_progress: Callable[[int, int], None] | None = None,
     stop_event: threading.Event | None = None,
     sort_by: str = "name",
-    cache: dict | None = None,
     _visited_inodes: set | None = None,
-) -> tuple[float, int, ScanTree, dict[Path, float], dict[Path, int], int]:
+) -> tuple[float, int, ScanTree, dict[Path, float], dict[Path, int]]:
     """
     Parallel scan: collector thread discovers files and submits them to the
     thread pool.  Returns (total_sec, total_count, tree_tuple, durations,
-    sizes, hits).
+    sizes).
 
     Security: Detects symlink loops and limits recursion depth to prevent DoS.
 
@@ -437,50 +435,27 @@ def scan_parallel(
 
         if root_inode in _visited_inodes:
             print(f"  Warning: Symlink loop detected: {root}", file=sys.stderr)
-            return 0.0, 0, ScanTree([], [], 0), {}, {}, 0
+            return 0.0, 0, ScanTree([], [], 0), {}, {}
 
         _visited_inodes.add(root_inode)
     except OSError as e:
         print(f"  Warning: Cannot access {root}: {e}", file=sys.stderr)
-        return 0.0, 0, ScanTree([], [], 0), {}, {}, 0
+        return 0.0, 0, ScanTree([], [], 0), {}, {}
 
     durations = {}
     sizes     = {}
     done      = 0
     total     = 0
-    hits      = 0
     lock      = threading.Lock()
-    if cache is None:
-        cache = {}
 
     # Security: Maximum recursion depth to prevent DoS
     MAX_DEPTH = 30
     root_depth = len(root.parts)
 
     def probe(path):
-        nonlocal done, hits
+        nonlocal done
         if stop_event and stop_event.is_set():
             return path, 0.0, 0
-        key = str(path.resolve())
-        if os.name == "nt":
-            key = key.lower()  # Issue 22: normalise on Windows
-        if key in cache:
-            try:
-                st    = path.stat()
-                entry = cache[key]
-                # H-12: use float comparison with tolerance for mtime
-                # (filesystem timestamps have limited precision on FAT/exFAT)
-                if abs(st.st_mtime - entry["mtime"]) < 2.0 and st.st_size == entry["size"]:
-                    with lock:
-                        done += 1
-                        hits += 1
-                        _snap_done  = done
-                        _snap_total = total
-                    if on_progress and _snap_total > 0:
-                        on_progress(_snap_done, _snap_total)
-                    return path, entry["duration"], int(entry.get("size", 0))
-            except OSError:
-                pass
         sec = get_duration(path)
         try:
             st        = path.stat()
@@ -576,7 +551,7 @@ def scan_parallel(
 
         if stop_event and stop_event.is_set():
             tree = _build_tree(root, {}, sort_by)
-            return 0.0, 0, tree, {}, {}, 0
+            return 0.0, 0, tree, {}, {}
 
         try:
             for future in as_completed(futures):
@@ -594,12 +569,12 @@ def scan_parallel(
 
     if not durations:
         tree = _build_tree(root, {}, sort_by)
-        return 0.0, 0, tree, {}, {}, 0
+        return 0.0, 0, tree, {}, {}
 
     total_sec   = sum(durations.values())
     total_count = len(durations)
     tree = _build_tree(root, durations, sort_by, sizes)
-    return total_sec, total_count, tree, durations, sizes, hits
+    return total_sec, total_count, tree, durations, sizes
 
 
 def _build_tree(root, durations, sort_by="name:asc", sizes=None) -> ScanTree:
@@ -696,24 +671,18 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None) -> ScanTree:
     return ScanTree(children=children, direct_files=direct_files, root_bytes=root_bytes)
 
 
-def _run_scan(folder, on_progress, sort_by="name", use_cache=True):
+def _run_scan(folder, on_progress, sort_by="name"):
     """
-    Run scan_parallel with optional cache.
-    Returns (total_sec, total_count, tree, durations, sizes, hits).
+    Run scan_parallel.
+    Returns (total_sec, total_count, tree, durations, sizes).
     """
     folder     = Path(folder)
-    cache      = load_cache(folder) if use_cache else {}
     stop_event = threading.Event()
     try:
-        result = scan_parallel(folder, on_progress, stop_event, sort_by, cache)
+        result = scan_parallel(folder, on_progress, stop_event, sort_by)
     except KeyboardInterrupt:
         stop_event.set()
         raise
-    total_sec, total_count, tree, durations, sizes, hits = result
-    # B-04: save cache only when new files were probed (hits < total files)
-    # This avoids unnecessary disk writes when all results came from cache.
-    if durations and hits < len(durations):
-        save_cache(folder, durations)
     return result
 
 

@@ -59,17 +59,6 @@ def _resolve_top(args, cfg):
     return v if v is not None else cfg.get('top', 10)
 
 
-def _use_cache(args, cfg):
-    """
-    Issue 33 fix: single authoritative helper for the use_cache flag so that
-    all callers derive it the same way. The no_cache arg may not be present
-    on all namespaces, so we use getattr with a default.
-    """
-    if getattr(args, 'no_cache', False):
-        return False
-    return cfg.get('cache_enabled', True)
-
-
 def _build_filters(args, use_json=False):
     """
     Parse filter-related args into a filters dict for apply_filters().

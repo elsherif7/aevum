@@ -7,9 +7,11 @@ Only genuinely public symbols are re-exported here. Private helpers
 use but are not part of the declared public API.
 
 This is the minimal build: only local-folder and YouTube scanning
-remain. The config, cache-management, duplicate-detection, export,
+remain. The config, local duration cache, duplicate-detection, export,
 history, compare, watch, and alias features (and their modules) were
-removed to keep the tool small and single-purpose.
+removed to keep the tool small and single-purpose. Every folder scan
+always re-probes every file. (YouTube's own per-video API-response
+cache in _youtube.py is a separate mechanism and was not removed.)
 
 Public API
 ----------
@@ -33,13 +35,8 @@ From _display:
     print_results       — print a human-readable scan result
     print_url_results   — print a human-readable YouTube result
 
-From _cache:
-    load_cache          — read the duration cache for a folder
-    save_cache          — write the duration cache for a folder
-
 From _paths:
     APPDATA             — platform-correct Aevum data directory (Path)
-    CACHE_DIR           — cache subdirectory (Path)
 
 From _color:
     clr                 — ANSI color singleton
@@ -59,12 +56,6 @@ from ._apikey import (
     save_api_key,
 )
 
-# ── Cache ────────────────────────────────────────────────────────────────────
-from ._cache import (
-    load_cache,
-    save_cache,
-)
-
 # ── Color ────────────────────────────────────────────────────────────────────
 from ._color import LINE, clear, clr
 
@@ -78,7 +69,7 @@ from ._display import (
 from ._models import FolderNode, ScanTree
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-from ._paths import APPDATA, CACHE_DIR
+from ._paths import APPDATA
 
 # ── Scan ─────────────────────────────────────────────────────────────────────
 from ._scan import (
@@ -104,10 +95,8 @@ __all__ = [
     "scan_url", "load_api_key", "save_api_key", "get_quota_status",
     # display
     "print_results", "print_url_results",
-    # cache
-    "load_cache", "save_cache",
     # paths
-    "APPDATA", "CACHE_DIR",
+    "APPDATA",
     # color
     "clr", "LINE", "clear",
     # models

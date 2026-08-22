@@ -134,7 +134,6 @@ def _dispatch_subcommand(sub: str, argv: list[str]) -> Any:
     p.add_argument("-t", "--top",   type=int, default=None, metavar="N")
     p.add_argument("-f", "--files", action="store_true")
     p.add_argument("--depth",  type=int, default=None, metavar="N")
-    p.add_argument("--no-cache", action="store_true")
     p.add_argument("--merge", action="store_true",
                    help="Aggregate all targets into one combined grand total")
     p.add_argument("--min-duration", default=None, metavar="DURATION")

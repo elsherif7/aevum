@@ -40,7 +40,7 @@ def _tree_to_dict(name, seconds, count, children: list, direct_files=None):
     }
 
 
-def _scan_to_json(folder, total_sec, total_count, tree, durations, sizes, hits):
+def _scan_to_json(folder, total_sec, total_count, tree, durations, sizes):
     """Convert a completed local scan to a JSON-serialisable dict."""
     fmt = format_duration(total_sec)
     return {
@@ -51,7 +51,6 @@ def _scan_to_json(folder, total_sec, total_count, tree, durations, sizes, hits):
         "total_bytes": sum(sizes.values()),
         "total_sec":   round(total_sec, 2),
         "duration":    fmt,
-        "cache_hits":  hits,
         "tree":        _tree_to_dict(Path(folder).name, total_sec, total_count,
                                      tree.children, tree.direct_files),
         "files": [
