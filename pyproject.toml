@@ -26,10 +26,6 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-secure = [
-    "keyring>=24.0",
-    "cryptography>=41.0",
-]
 dev = [
     "pytest>=9.0",
     "ruff>=0.4",

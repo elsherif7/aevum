@@ -8,7 +8,7 @@ import time as _time_mod
 from collections import deque as _deque
 from threading import Lock as _Lock
 
-from ._apikey import get_storage_method, load_api_key, save_api_key
+from ._apikey import load_api_key, save_api_key
 from ._color import clr
 from ._paths import YT_QUOTA_FILE, YT_VCACHE_FILE
 
@@ -361,9 +361,7 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
 
 def prompt_api_key():
     """
-    Prompt user for YouTube API key and save it securely.
-
-    Security: Now uses secure storage (_apikey.py) instead of plaintext file.
+    Prompt user for YouTube API key and save it to local storage.
     """
     print()
     print(f"  {clr.Y}YouTube API key required.{clr.RST}")
@@ -381,13 +379,7 @@ def prompt_api_key():
         return None
 
     if save_api_key(key):
-        storage = get_storage_method()
-        storage_name = {
-            "keyring": "system keyring (encrypted)",
-            "encrypted_file": "encrypted file",
-            "plaintext_file": "file",
-        }.get(storage, "storage")
-        print(f"  {clr.G}Key saved to {storage_name}{clr.RST}")
+        print(f"  {clr.G}Key saved{clr.RST}")
     else:
         print(f"  {clr.R}Failed to save API key{clr.RST}")
         return None
