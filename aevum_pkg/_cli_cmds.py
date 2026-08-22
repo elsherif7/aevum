@@ -19,9 +19,7 @@ from ._scan import _run_scan
 from ._youtube import _is_url, scan_url
 
 
-def cmd_scan(args) -> None:
-    raw = args.target
-
+def cmd_scan(raw: str) -> None:
     if _is_url(raw):
         _scan_youtube(raw)
     else:
