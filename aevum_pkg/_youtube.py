@@ -664,7 +664,9 @@ def _make_url_progress():
 
 
 # ---------------------------------------------------------------------------
-# Cache management helpers (called by cmd_cache in _config.py)
+# Cache management helpers (currently unused — no caller since the
+# standalone 'cache' subcommand was removed; kept for the video-cache
+# trim pass planned later).
 # ---------------------------------------------------------------------------
 
 def yt_cache_stats():

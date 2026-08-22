@@ -2,7 +2,6 @@
 Small stateless helpers shared across CLI command handlers.
 """
 import sys
-from pathlib import Path
 
 from ._cli_json import _json_error
 from ._color import clr
@@ -43,8 +42,7 @@ def _require_ffprobe(context="", use_json=False):
             )
         print(f"\n  {clr.R}[ERROR]{clr.RST} ffprobe not found on PATH{ctx}.", file=sys.stderr)
         print(f"  {clr.DIM}ffprobe is required for local folder scanning.{clr.RST}", file=sys.stderr)
-        print(f"  Install FFmpeg: {clr.C}https://ffmpeg.org/download.html{clr.RST}", file=sys.stderr)
-        print(f"  Then re-run:    {clr.W}aevum doctor{clr.RST}\n", file=sys.stderr)
+        print(f"  Install FFmpeg: {clr.C}https://ffmpeg.org/download.html{clr.RST}\n", file=sys.stderr)
         sys.exit(EX.ERR_DEPS)
 
 
@@ -61,16 +59,6 @@ def _resolve_top(args, cfg):
     return v if v is not None else cfg.get('top', 10)
 
 
-def _resolve_out_format(out_path, explicit_fmt):
-    if explicit_fmt:
-        return explicit_fmt
-    if out_path:
-        ext = Path(out_path).suffix.lower().lstrip('.')
-        if ext in ('txt', 'csv', 'json'):
-            return ext
-    return None
-
-
 def _use_cache(args, cfg):
     """
     Issue 33 fix: single authoritative helper for the use_cache flag so that
@@ -80,59 +68,6 @@ def _use_cache(args, cfg):
     if getattr(args, 'no_cache', False):
         return False
     return cfg.get('cache_enabled', True)
-
-
-def _resolve_alias(raw: str, cfg) -> str:
-    """
-    If raw matches a known alias (case-insensitive), return the expansion
-    as a single string.  Always returns str — never a list.
-
-    Issue 17 fix: empty string is returned immediately.
-
-    Audit fix: previously returned either str or list depending on token
-    count, which caused silent failures when callers did Path(result).
-    Now always returns str; multi-token expansions are joined with a space
-    so paths-with-spaces round-trip correctly.
-    """
-    if not raw:
-        return raw
-    aliases = cfg.get("aliases") or {}
-    expanded = aliases.get(raw) or aliases.get(raw.upper()) or aliases.get(raw.lower())
-    if expanded is None:
-        return raw
-    import shlex
-    try:
-        tokens = shlex.split(expanded)
-    except ValueError:
-        tokens = expanded.split()
-    # Always return a single string — join multi-token expansions.
-    # Callers that need argv-style splitting (e.g. _expand_aliases_in_argv)
-    # do their own shlex.split on the result.
-    return tokens[0] if len(tokens) == 1 else expanded
-
-
-def _expand_aliases_in_argv(argv, cfg):
-    """
-    Walk argv and replace any token that matches an alias with its expansion.
-    Tokens that start with '-' are never treated as alias names.
-    This runs before argparse so every subcommand benefits automatically.
-    """
-    aliases = cfg.get("aliases") or {}
-    result = []
-    for tok in argv:
-        if tok.startswith('-'):
-            result.append(tok)
-            continue
-        expanded = aliases.get(tok) or aliases.get(tok.upper()) or aliases.get(tok.lower())
-        if expanded is not None:
-            import shlex
-            try:
-                result.extend(shlex.split(expanded))
-            except ValueError:
-                result.extend(expanded.split())
-        else:
-            result.append(tok)
-    return result
 
 
 def _build_filters(args, use_json=False):

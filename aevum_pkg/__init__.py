@@ -6,6 +6,11 @@ Only genuinely public symbols are re-exported here. Private helpers
 (prefixed with _) remain accessible via their own modules for internal
 use but are not part of the declared public API.
 
+This is the minimal build: only local-folder and YouTube scanning
+remain. The config, cache-management, duplicate-detection, export,
+history, compare, watch, and alias features (and their modules) were
+removed to keep the tool small and single-purpose.
+
 Public API
 ----------
 From _scan:
@@ -28,19 +33,6 @@ From _display:
     print_results       — print a human-readable scan result
     print_url_results   — print a human-readable YouTube result
 
-From _dupes:
-    find_duplicates     — detect duplicate files by size + hash
-    print_duplicates    — print duplicate groups to stdout
-
-From _export:
-    export_results      — write scan results to TXT/CSV/JSON/HTML
-    export_url_results  — write YouTube scan results to TXT/CSV/JSON
-
-From _config:
-    load_config         — read persistent config from disk
-    save_config         — write persistent config to disk
-    CONFIG_DEFAULTS     — dict of default config values
-
 From _cache:
     load_cache          — read the duration cache for a folder
     save_cache          — write the duration cache for a folder
@@ -48,7 +40,6 @@ From _cache:
 From _paths:
     APPDATA             — platform-correct Aevum data directory (Path)
     CACHE_DIR           — cache subdirectory (Path)
-    CONFIG_FILE         — config file path (Path)
 
 From _color:
     clr                 — ANSI color singleton
@@ -62,7 +53,6 @@ From _models:
 
 __version__ = "2.3.0"
 
-# ── Scan ────────────────────────────────────────────────────────────────────
 # ── API Key (Secure Storage) ─────────────────────────────────────────────────
 from ._apikey import (
     load_api_key,
@@ -78,36 +68,19 @@ from ._cache import (
 # ── Color ────────────────────────────────────────────────────────────────────
 from ._color import LINE, clear, clr
 
-# ── Config ───────────────────────────────────────────────────────────────────
-from ._config import (
-    CONFIG_DEFAULTS,
-    load_config,
-    save_config,
-)
-
 # ── Display ─────────────────────────────────────────────────────────────────
 from ._display import (
     print_results,
     print_url_results,
 )
 
-# ── Duplicates ──────────────────────────────────────────────────────────────
-from ._dupes import (
-    find_duplicates,
-    print_duplicates,
-)
-
-# ── Export ───────────────────────────────────────────────────────────────────
-from ._export import (
-    export_results,
-    export_url_results,
-)
-
 # ── Models ───────────────────────────────────────────────────────────────────
 from ._models import FolderNode, ScanTree
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-from ._paths import APPDATA, CACHE_DIR, CONFIG_FILE
+from ._paths import APPDATA, CACHE_DIR
+
+# ── Scan ─────────────────────────────────────────────────────────────────────
 from ._scan import (
     check_ffprobe,
     format_duration,
@@ -131,16 +104,10 @@ __all__ = [
     "scan_url", "load_api_key", "save_api_key", "get_quota_status",
     # display
     "print_results", "print_url_results",
-    # dupes
-    "find_duplicates", "print_duplicates",
-    # export
-    "export_results", "export_url_results",
-    # config
-    "load_config", "save_config", "CONFIG_DEFAULTS",
     # cache
     "load_cache", "save_cache",
     # paths
-    "APPDATA", "CACHE_DIR", "CONFIG_FILE",
+    "APPDATA", "CACHE_DIR",
     # color
     "clr", "LINE", "clear",
     # models
