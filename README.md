@@ -126,7 +126,7 @@ Get a free key in about two minutes:
 3. Credentials → Create API Key → paste it when Aevum asks
 
 The key is saved to `~/.local/share/Aevum/yt_api_key.txt` on
-Linux/macOS or `%APPDATA%\Aevum\yt_api_key.txt` on Windows, with
+Linux/macOS or `%LOCALAPPDATA%\Aevum\yt_api_key.txt` on Windows, with
 owner-only file permissions.
 
 ---
