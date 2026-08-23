@@ -7,8 +7,8 @@ hand.
 
 > **🐍 Get it on PyPI:** [pypi.org/project/aevum](https://pypi.org/project/aevum/)
 >
-> New updates are published on the 7th of every even month (Feb,
-> Apr, Jun, Aug, Oct, Dec).
+> New updates are published on the 7th of even-numbered months
+> (February, April, June, August, October, December).
 >
 > Security issues or broken/critical bugs are fixed and released
 > immediately, outside that schedule.
@@ -39,16 +39,52 @@ aevum/
 
 ---
 
+## Requirements
+
+- Python 3.10+
+- `ffprobe` (part of [FFmpeg](https://ffmpeg.org/download.html)) on
+  your `PATH`, needed for local folder scanning
+- A free YouTube Data API v3 key, needed only for scanning YouTube
+  URLs — see [YouTube API key](#youtube-api-key) below
+
+---
+
 ## Installation
 
-Requires Python 3.10+.
+**1. Install from PyPI (recommended)**
+
+> Install directly from
+> [pypi.org/project/aevum](https://pypi.org/project/aevum/) — the
+> published, permanent version.
 
 ```
-pip install .
+pip install aevum
 ```
 
-Local folder scanning also requires `ffprobe` (part of
-[FFmpeg](https://ffmpeg.org/download.html)) to be on your `PATH`.
+**2. Or install a local copy for development**
+
+1. Clone the repo:
+   ```
+   git clone https://github.com/elsherif7/aevum
+   ```
+2. Install it in editable mode:
+   ```
+   pip install -e ".[dev]"
+   ```
+
+> See the [Development](#development) section below for linting,
+> type-checking, and cleaning up build artifacts.
+
+---
+
+## Development
+
+```
+pip install -e ".[dev]"
+ruff check .
+mypy .
+python3 clean.py   # remove build artifacts when you're done
+```
 
 ---
 
@@ -97,15 +133,6 @@ owner-only file permissions.
 
 ---
 
-## Privacy
-
-Aevum makes no network requests except to the YouTube Data API v3,
-and only when you scan a YouTube URL. It does not collect, store, or
-transmit any personal data — the only thing saved locally is the
-YouTube API key you provide, so it doesn't need to be re-entered.
-
----
-
 ## Exit codes
 
 | Code | Meaning |
@@ -118,14 +145,12 @@ YouTube API key you provide, so it doesn't need to be re-entered.
 
 ---
 
-## Development
+## Privacy
 
-```
-pip install -e ".[dev]"
-ruff check .
-mypy .
-python3 clean.py   # remove build artifacts when you're done
-```
+Aevum makes no network requests except to the YouTube Data API v3,
+and only when you scan a YouTube URL. It does not collect, store, or
+transmit any personal data — the only thing saved locally is the
+YouTube API key you provide, so it doesn't need to be re-entered.
 
 ---
 
