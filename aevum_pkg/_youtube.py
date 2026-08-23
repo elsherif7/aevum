@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 import time
 
@@ -8,9 +9,43 @@ import time as _time_mod
 from collections import deque as _deque
 from threading import Lock as _Lock
 
-from ._apikey import load_api_key, save_api_key
 from ._color import clr
-from ._paths import YT_QUOTA_FILE, YT_VCACHE_FILE
+from ._paths import YT_KEY_FILE, YT_QUOTA_FILE, YT_VCACHE_FILE
+
+# ── API key storage (inlined from _apikey.py) ────────────────────────
+# Simplest practical option: the key is saved once to a single local file
+# with restrictive permissions (0o600, owner read/write only) so it
+# doesn't need to be re-entered on every run.
+# H-01: compile once at module level.
+_YT_KEY_PATTERN = re.compile(r'^AIza[0-9A-Za-z\-_]{35}$')
+
+
+def save_api_key(api_key: str) -> bool:
+    """
+    Store the API key in a local file, owner-only permissions.
+    Returns True if saved successfully, False otherwise.
+    """
+    # S-02: validate API key format (YouTube keys start with AIza).
+    if not api_key or not _YT_KEY_PATTERN.match(api_key):
+        print("  Error: Invalid API key format (expected AIza...)", file=sys.stderr)
+        return False
+
+    try:
+        YT_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        YT_KEY_FILE.write_text(api_key, encoding='utf-8')
+        os.chmod(YT_KEY_FILE, 0o600)
+        return True
+    except Exception as e:
+        print(f"  Error: Could not save API key: {e}", file=sys.stderr)
+        return False
+
+
+def load_api_key() -> str:
+    """Load the API key from local storage. Returns "" if not found."""
+    try:
+        return YT_KEY_FILE.read_text(encoding='utf-8').strip()
+    except Exception:
+        return ""
 
 
 class _RateLimiter:
@@ -292,7 +327,6 @@ def _normalise_url(url):
 
 
 def _parse_iso8601_duration(d):
-    import re
     m = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?', d or '')
     if not m:
         return 0.0

@@ -5,18 +5,49 @@ Command handler for the Aevum CLI.
 folder path or a YouTube URL and it prints the result. No JSON mode,
 no quiet mode, no batch/merge mode, no filters, no sort/top options —
 those all depended on flags that have been removed.
+
+The small progress-bar and ffprobe-check helpers used to live in
+_cli_helpers.py; folded in here since this is their only caller.
 """
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-from ._cli_helpers import _make_progress_bar, _require_ffprobe
 from ._color import clr
 from ._display import _fuzzy_suggest, print_results, print_url_results
 from ._exit import EX
-from ._scan import _run_scan
+from ._scan import _run_scan, check_ffprobe
 from ._youtube import _is_url, scan_url
+
+
+def _make_progress_bar():
+    """
+    Return a progress callback that renders a text progress bar to stdout.
+
+    Issue 15 fix: guard against total == 0 inside the callback itself so
+    that any caller passing total=0 directly gets a no-op instead of a
+    ZeroDivisionError.
+    """
+    def on_progress(done, total):
+        if total <= 0:   # Issue 15
+            return
+        pct    = int((done / total) * 100)
+        filled = int(24 * done / total)
+        bar    = "\u2588" * filled + "\u2591" * (24 - filled)
+        print(f"\r  {clr.C}Scanning...{clr.RST}  {bar}  {clr.Y}{done}/{total}{clr.RST}  {clr.DIM}({pct}%){clr.RST}",
+              end='', flush=True)
+
+    return on_progress
+
+
+def _require_ffprobe(context: str = "") -> None:
+    if not check_ffprobe():
+        ctx = f" ({context})" if context else ""
+        print(f"\n  {clr.R}[ERROR]{clr.RST} ffprobe not found on PATH{ctx}.", file=sys.stderr)
+        print(f"  {clr.DIM}ffprobe is required for local folder scanning.{clr.RST}", file=sys.stderr)
+        print(f"  Install FFmpeg: {clr.C}https://ffmpeg.org/download.html{clr.RST}\n", file=sys.stderr)
+        sys.exit(EX.ERR_DEPS)
 
 
 def cmd_scan(raw: str) -> None:

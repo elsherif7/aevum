@@ -25,11 +25,9 @@ aevum/
 ├── LICENSE               # GNU General Public License v3.0
 └── aevum_pkg/
     ├── _cli.py           # Argument parsing + main() — the only command is 'scan'
-    ├── _cli_cmds.py      # cmd_scan
-    ├── _cli_helpers.py   # Progress bar, ffprobe availability check
+    ├── _cli_cmds.py      # cmd_scan, progress bar, ffprobe availability check
     ├── _scan.py          # Local folder scanning (native MP4/MKV parsing + ffprobe fallback)
-    ├── _youtube.py       # YouTube Data API v3 scanning (channels, playlists, videos)
-    ├── _apikey.py        # YouTube API key storage
+    ├── _youtube.py       # YouTube Data API v3 scanning (channels, playlists, videos) + API key storage
     ├── _display.py       # Human-readable output (tree, bar chart, top files)
     ├── _models.py        # FolderNode / ScanTree data types
     ├── _color.py         # ANSI color handling

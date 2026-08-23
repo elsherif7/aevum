@@ -58,9 +58,7 @@ ignore_missing_imports = true
 files = [
     "aevum_pkg/_models.py",
     "aevum_pkg/_scan.py",
-    "aevum_pkg/_apikey.py",
     "aevum_pkg/_youtube.py",
-    "aevum_pkg/_cli_helpers.py",
     "aevum_pkg/_display.py",
     "aevum_pkg/_cli_cmds.py",
 ]
