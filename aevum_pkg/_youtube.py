@@ -571,7 +571,7 @@ def scan_url(url, on_progress=None, use_cache=True):
 
     # Check quota before making requests
     try:
-        used, remaining, pct = get_quota_status()
+        used, remaining, _ = get_quota_status()
         if remaining < 100:
             raise PermissionError(
                 f"Daily quota nearly exhausted ({used:,}/10,000 units used). "

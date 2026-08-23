@@ -403,7 +403,6 @@ def scan_parallel(
     root: str | Path,
     on_progress: Callable[[int, int], None] | None = None,
     stop_event: threading.Event | None = None,
-    sort_by: str = "name",
     _visited_inodes: set | None = None,
 ) -> tuple[float, int, ScanTree, dict[Path, float], dict[Path, int]]:
     """
@@ -548,7 +547,7 @@ def scan_parallel(
         collector.join()
 
         if stop_event and stop_event.is_set():
-            tree = _build_tree(root, {}, sort_by)
+            tree = _build_tree(root, {})
             return 0.0, 0, tree, {}, {}
 
         try:
@@ -566,29 +565,25 @@ def scan_parallel(
             raise
 
     if not durations:
-        tree = _build_tree(root, {}, sort_by)
+        tree = _build_tree(root, {})
         return 0.0, 0, tree, {}, {}
 
     total_sec   = sum(durations.values())
     total_count = len(durations)
-    tree = _build_tree(root, durations, sort_by, sizes)
+    tree = _build_tree(root, durations, sizes)
     return total_sec, total_count, tree, durations, sizes
 
 
-def _build_tree(root, durations, sort_by="name:asc", sizes=None) -> ScanTree:
-    """O(n) tree builder.  Returns a ScanTree of FolderNode objects.
+def _build_tree(root, durations, sizes=None) -> ScanTree:
+    """O(n) tree builder.  Returns a ScanTree of FolderNode objects, with
+    children and direct files sorted by name (ascending).
 
     Issue 5 fix: ancestor walk is capped at MAX_DEPTH to prevent an
     infinite loop on symlink cycles.
     """
     MAX_DEPTH = 200
-    if ':' not in sort_by:
-        defaults = {'name': 'asc', 'duration': 'desc', 'count': 'desc'}
-        sort_by  = sort_by + ':' + defaults.get(sort_by, 'asc')
-    sort_field, sort_dir = sort_by.split(':', 1)
-    sort_rev = (sort_dir == 'desc')
-    root     = Path(root)
-    sizes    = sizes or {}
+    root      = Path(root)
+    sizes     = sizes or {}
 
     folder_secs:   dict[Path, float] = {}
     folder_bytes:  dict[Path, int]   = {}
@@ -625,23 +620,17 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None) -> ScanTree:
         child_nodes = []
         child_paths = sorted(
             children_of.get(node, set()),
-            key=lambda p: (
-                folder_secs.get(p, 0.0)   if sort_field == "duration" else
-                folder_count.get(p, 0)    if sort_field == "count"    else
-                p.name.lower()
-            ),
-            reverse=sort_rev,
+            key=lambda p: p.name.lower(),
         )
         for child in child_paths:
             secs         = folder_secs.get(child, 0.0)
             count        = folder_count.get(child, 0)
             fbytes       = folder_bytes.get(child, 0)
             direct_files = folder_direct.get(child, [])
-            direct_count = len(direct_files)
             if count == 0:
                 child_nodes.append(FolderNode(
                     name=child.name, total_sec=0.0, total_count=0,
-                    total_bytes=0, direct_count=0, children=[], direct_files=[],
+                    total_bytes=0, children=[], direct_files=[],
                 ))
                 continue
             child_children, child_direct = build(child)
@@ -650,17 +639,12 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None) -> ScanTree:
                 total_sec=secs,
                 total_count=count,
                 total_bytes=fbytes,
-                direct_count=direct_count,
                 children=child_children,
                 direct_files=child_direct,
             ))
         direct = sorted(
             folder_direct.get(node, []),
-            key=lambda x: (
-                x[1]              if sort_field == "duration" else
-                x[0].name.lower()
-            ),
-            reverse=sort_rev,
+            key=lambda x: x[0].name.lower(),
         )
         return child_nodes, direct
 
@@ -669,7 +653,7 @@ def _build_tree(root, durations, sort_by="name:asc", sizes=None) -> ScanTree:
     return ScanTree(children=children, direct_files=direct_files, root_bytes=root_bytes)
 
 
-def _run_scan(folder, on_progress, sort_by="name"):
+def _run_scan(folder, on_progress):
     """
     Run scan_parallel.
     Returns (total_sec, total_count, tree, durations, sizes).
@@ -677,7 +661,7 @@ def _run_scan(folder, on_progress, sort_by="name"):
     folder     = Path(folder)
     stop_event = threading.Event()
     try:
-        result = scan_parallel(folder, on_progress, stop_event, sort_by)
+        result = scan_parallel(folder, on_progress, stop_event)
     except KeyboardInterrupt:
         stop_event.set()
         raise

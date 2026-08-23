@@ -104,15 +104,13 @@ def print_tree(
     depth: int = 0,
     number: str = "",
     max_depth: int = 50,
-    show_files: bool = False,
-    direct_count: int | None = None,
     fbytes: int = 0,
 ) -> None:
     """
     Recursively print the folder tree.
 
     Issue 26 fix: max_depth is now threaded through every recursive call so
-    that --depth N actually limits the displayed tree depth.
+    that runaway-deep folder structures can't cause unbounded recursion.
     """
     if depth > max_depth:
         return
@@ -147,16 +145,6 @@ def print_tree(
                 pass
         dir_size_label = f"  {clr.DIM}|{clr.RST}  {clr.W}{format_size(dir_bytes)}{clr.RST}" if dir_bytes else ""
         print(f"{indent}        {clr.DIM}+--{clr.RST}  {clr.W}{dir_fmt['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{direct_count} {'video' if direct_count == 1 else 'videos'}{clr.RST}{dir_size_label}")
-        if show_files:
-            print()
-            for path, sec in direct_files:
-                fd = format_duration(sec)
-                print(f"{indent}        {clr.DIM}|  {fd['hours_fmt']}  {path.name}{clr.RST}")
-        print()
-    elif direct_files and show_files:
-        for path, sec in direct_files:
-            fd = format_duration(sec)
-            print(f"{indent}    {clr.DIM}|  {fd['hours_fmt']}  {path.name}{clr.RST}")
         print()
 
     for i, node in enumerate(children, start=1):
@@ -167,8 +155,6 @@ def print_tree(
             node.children, node.direct_files,
             depth + 1, sub_number,
             max_depth=max_depth,
-            show_files=show_files,
-            direct_count=node.direct_count,
             fbytes=node.total_bytes,
         )
     if children:
@@ -200,16 +186,7 @@ def print_results(
     tree: ScanTree,
     durations: dict[Path, float] | None = None,
     sizes: dict[Path, int] | None = None,
-    top_n: int = 10,
-    show_files: bool = False,
-    max_depth: int = 50,
-    speeds: list[float] | None = None,
 ) -> None:
-    """
-    Issue 26 fix: max_depth parameter added so --depth N from the CLI is
-    correctly forwarded all the way into print_tree.
-    speeds: extra custom speeds shown after a divider below the defaults.
-    """
     fmt        = format_duration(total_sec)
     sizes      = sizes or {}
     print()
@@ -222,7 +199,7 @@ def print_results(
     print_tree(
         Path(folder).name, total_sec, total_count,
         tree.children, tree.direct_files,
-        show_files=show_files, fbytes=tree.root_bytes, max_depth=max_depth,
+        fbytes=tree.root_bytes,
     )
     # ASCII bar chart — only shown when there is more than one folder to compare
     if tree.children or tree.direct_files:
@@ -240,24 +217,13 @@ def print_results(
     print(f"  {clr.C}{LINE}{clr.RST}")
     print(f"  {clr.W}  Playback Speed{clr.RST}")
     print(f"  {clr.C}{LINE}{clr.RST}")
-    _extras = [s for s in (speeds or []) if s not in _DEFAULT_SPEEDS]
     for speed in _DEFAULT_SPEEDS:
-        if speed <= 0:  # B-01: guard against division by zero
-            continue
         adjusted = format_duration(total_sec / speed)
         label    = f"{speed:.6g}x"
         print(f"  {clr.W}  {label:<10}     {clr.DIM}:{clr.RST}  {clr.W}{adjusted['hours_fmt']}{clr.RST}  {clr.DIM}({adjusted['days_fmt']}){clr.RST}")
-    if _extras:
-        print(f"  {clr.DIM}  {chr(9472) * 40}{clr.RST}")
-        for speed in _extras:
-            if speed <= 0:  # B-01: guard against division by zero
-                continue
-            adjusted = format_duration(total_sec / speed)
-            label    = f"{speed:.6g}x"
-            print(f"  {clr.W}  {label:<10}     {clr.DIM}:{clr.RST}  {clr.W}{adjusted['hours_fmt']}{clr.RST}  {clr.DIM}({adjusted['days_fmt']}){clr.RST}")
     print()
-    if durations and top_n > 0:
-        print_top_files(durations, top_n)
+    if durations:
+        print_top_files(durations, 10)
 
 
 def print_url_results(
@@ -266,9 +232,7 @@ def print_url_results(
     total_sec: float,
     total_count: int,
     entries: list[dict],
-    top_n: int = 10,
     unavailable_count: int = 0,
-    speeds: list[float] | None = None,
 ) -> None:
     fmt = format_duration(total_sec)
     print()
@@ -286,26 +250,15 @@ def print_url_results(
     print(f"  {clr.C}{LINE}{clr.RST}")
     print(f"  {clr.W}  Playback Speed{clr.RST}")
     print(f"  {clr.C}{LINE}{clr.RST}")
-    _extras = [s for s in (speeds or []) if s not in _DEFAULT_SPEEDS]
     for speed in _DEFAULT_SPEEDS:
-        if speed <= 0:  # B-01: guard against division by zero
-            continue
         adjusted = format_duration(total_sec / speed)
         slabel   = f"{speed:.6g}x"
         print(f"  {clr.W}  {slabel:<10}     {clr.DIM}:{clr.RST}  {clr.W}{adjusted['hours_fmt']}{clr.RST}  {clr.DIM}({adjusted['days_fmt']}){clr.RST}")
-    if _extras:
-        print(f"  {clr.DIM}  {chr(9472) * 40}{clr.RST}")
-        for speed in _extras:
-            if speed <= 0:  # B-01: guard against division by zero
-                continue
-            adjusted = format_duration(total_sec / speed)
-            slabel   = f"{speed:.6g}x"
-            print(f"  {clr.W}  {slabel:<10}     {clr.DIM}:{clr.RST}  {clr.W}{adjusted['hours_fmt']}{clr.RST}  {clr.DIM}({adjusted['days_fmt']}){clr.RST}")
     print()
-    if entries and top_n > 0:
-        ranked = sorted(entries, key=lambda e: e["duration"], reverse=True)[:top_n]
+    if entries:
+        ranked = sorted(entries, key=lambda e: e["duration"], reverse=True)[:10]
         print(f"  {clr.C}{LINE}{clr.RST}")
-        print(f"  {clr.W}  Top {top_n} Longest Videos{clr.RST}")
+        print(f"  {clr.W}  Top 10 Longest Videos{clr.RST}")
         print(f"  {clr.C}{LINE}{clr.RST}")
         for i, e in enumerate(ranked, start=1):
             dur_fmt = format_duration(e["duration"])

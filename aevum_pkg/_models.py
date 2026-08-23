@@ -22,7 +22,6 @@ from typing import NamedTuple
 # total_sec     Total duration of all media under this folder (seconds)
 # total_count   Total number of media files under this folder
 # total_bytes   Total size of all media under this folder (bytes)
-# direct_count  Number of media files *directly* in this folder (not in subfolders)
 # children      Recursively nested FolderNode list for subfolders
 # direct_files  List of (Path, seconds) for files directly in this folder
 # ---------------------------------------------------------------------------
@@ -32,7 +31,6 @@ class FolderNode(NamedTuple):
     total_sec:    float
     total_count:  int
     total_bytes:  int
-    direct_count: int
     children:     list[FolderNode]
     direct_files: list[tuple[Path, float]]
 
