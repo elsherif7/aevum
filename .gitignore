@@ -4,6 +4,7 @@ build/
 dist/
 *.egg-info/
 *.egg
+__editable__*.pth
 
 # ── Python bytecode ───────────────────────────────────────────────────────
 __pycache__/
@@ -42,9 +43,7 @@ Thumbs.db
 # ── Aevum runtime data (never commit user data) ───────────────────────────
 # These live in %LOCALAPPDATA%\Aevum\ / ~/.local/share/Aevum/ at runtime,
 # but guard against anyone accidentally running aevum from inside the repo.
-cache/
-history/
+yt_api_key.txt
 yt_video_cache.json
 yt_quota_tracker.json
 yt_ratelimit.json
-config.json
