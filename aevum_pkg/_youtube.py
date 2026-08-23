@@ -647,37 +647,3 @@ def scan_url(url, on_progress=None, use_cache=True):
     total_sec   = sum(e['duration'] for e in entries)
     total_count = len(entries)
     return total_sec, total_count, entries, label, cache_hits, unavailable_count
-
-
-def _make_url_progress():
-    def on_progress(done, _total):
-        print(f"\r  {clr.C}Collecting video IDs...{clr.RST}  {clr.C}{done} found{clr.RST}", end='', flush=True)
-    return on_progress
-
-
-# ---------------------------------------------------------------------------
-# Cache management helpers (currently unused — no caller since the
-# standalone 'cache' subcommand was removed; kept for the video-cache
-# trim pass planned later).
-# ---------------------------------------------------------------------------
-
-def yt_cache_stats():
-    """Return (count, total_bytes) for the YouTube video cache."""
-    try:
-        data  = _load_yt_video_cache()
-        count = len(data)
-        size  = YT_VCACHE_FILE.stat().st_size if YT_VCACHE_FILE.exists() else 0
-        return count, size
-    except Exception:
-        return 0, 0
-
-
-def yt_cache_clear():
-    """Delete the YouTube video cache file."""
-    try:
-        if YT_VCACHE_FILE.exists():
-            YT_VCACHE_FILE.unlink()
-            return True
-    except Exception:
-        pass
-    return False
