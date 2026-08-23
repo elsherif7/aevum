@@ -5,7 +5,7 @@ total media duration, broken down by subfolder — so you can see how
 large a video or audio library is without opening every folder by
 hand.
 
-> **🐍 Get it on PyPI:** [pypi.org/project/aevum](https://pypi.org/project/aevum/)
+> **🐍 Get it on PyPI:** [pypi.org/project/aevum-scan](https://pypi.org/project/aevum-scan/)
 >
 > New updates are published on the 7th of even-numbered months
 > (February, April, June, August, October, December).
@@ -52,12 +52,15 @@ aevum/
 **1. Install from PyPI (recommended)**
 
 > Install directly from
-> [pypi.org/project/aevum](https://pypi.org/project/aevum/) — the
+> [pypi.org/project/aevum-scan](https://pypi.org/project/aevum-scan/) — the
 > published, permanent version.
 
 ```
-pip install aevum
+pip install aevum-scan
 ```
+
+> The PyPI package is named `aevum-scan` (the plain `aevum` name was
+> already taken), but the command you actually run is just `aevum`.
 
 **2. Or install a local copy for development**
 
