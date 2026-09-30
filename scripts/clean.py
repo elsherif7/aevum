@@ -10,12 +10,12 @@ Removes build artifacts created by `pip install .` / `pip install -e .`:
 
 Run from the project root:
 
-    python3 clean.py
+    python3 scripts/clean.py
 """
 import shutil
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def _rm(path: Path) -> None:

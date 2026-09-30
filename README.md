@@ -12,9 +12,10 @@ hand.
 ```
 aevum/
 ├── aevum.py              # Entry point — delegates to aevum_pkg._cli:main
-├── clean.py              # Removes pip-install build artifacts (build/, egg-info/, __pycache__)
 ├── pyproject.toml        # Packaging, ruff, mypy config
 ├── LICENSE               # GNU General Public License v3.0
+├── scripts/
+│   └── clean.py          # Dev tool: removes build artifacts (build/, egg-info/, __pycache__)
 └── aevum_pkg/
     ├── _cli.py           # Argument parsing + main() — the only command is 'scan'
     ├── _cli_cmds.py      # cmd_scan, progress bar, ffprobe availability check
@@ -77,7 +78,7 @@ and clean up when you're done:
 pip install -e ".[dev]"
 ruff check .
 mypy .
-python3 clean.py   # remove build artifacts when you're done
+python3 scripts/clean.py   # remove build artifacts when you're done
 ```
 
 ---
