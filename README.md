@@ -5,14 +5,6 @@ total media duration, broken down by subfolder — so you can see how
 large a video or audio library is without opening every folder by
 hand.
 
-> **🐍 Get it on PyPI:** [pypi.org/project/aevum-scan](https://pypi.org/project/aevum-scan/)
->
-> New updates are published on the 7th of even-numbered months
-> (February, April, June, August, October, December).
->
-> Security issues or broken/critical bugs are fixed and released
-> immediately, outside that schedule.
-
 ---
 
 ## Structure
@@ -49,36 +41,37 @@ aevum/
 
 ## Installation
 
-**1. Install from PyPI (recommended)**
-
-> Install directly from
-> [pypi.org/project/aevum-scan](https://pypi.org/project/aevum-scan/) — the
-> published, permanent version.
-
-```
-pip install aevum-scan
-```
-
-> The PyPI package is named `aevum-scan` (the plain `aevum` name was
-> already taken), but the command you actually run is just `aevum`.
-
-**2. Or install a local copy for development**
+Aevum is installed from source, straight from GitHub.
 
 1. Clone the repo:
    ```
    git clone https://github.com/elsherif7/aevum
+   cd aevum
    ```
-2. Install it in editable mode:
+2. Install it:
    ```
-   pip install -e ".[dev]"
+   pip install .
+   ```
+3. To update later, pull the latest changes and install again:
+   ```
+   git pull
+   pip install .
    ```
 
-> See the [Development](#development) section below for linting,
-> type-checking, and cleaning up build artifacts.
+This gives you the `aevum` command.
+
+**Without cloning:** install (or update) straight from GitHub.
+
+```
+pip install --force-reinstall git+https://github.com/elsherif7/aevum
+```
 
 ---
 
 ## Development
+
+Install in editable mode with the dev tools, then lint, type-check,
+and clean up when you're done:
 
 ```
 pip install -e ".[dev]"
