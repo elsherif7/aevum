@@ -16,6 +16,12 @@ aevum/
 ├── LICENSE               # GNU General Public License v3.0
 ├── scripts/
 │   └── clean.py          # Dev tool: removes build artifacts (build/, egg-info/, __pycache__)
+├── tests/                # pytest suite (needs ffmpeg/ffprobe on PATH; no network or API key)
+│   ├── conftest.py       # Shared fixtures: ffmpeg-generated media, isolated CLI runner
+│   ├── test_cli.py       # Arguments, exit codes, end-to-end scans
+│   ├── test_display.py   # Output sanitizing, fuzzy suggestions, bar
+│   ├── test_scan.py      # Duration parsing (MP4/MKV/ffprobe), folder tree
+│   └── test_youtube.py   # URL/duration parsing, API key, quota, cache
 └── aevum_pkg/
     ├── _cli.py           # Argument parsing + main() — the only command is 'scan'
     ├── _cli_cmds.py      # cmd_scan, progress bar, ffprobe availability check
@@ -72,12 +78,13 @@ pip install --force-reinstall git+https://github.com/elsherif7/aevum
 ## Development
 
 Install in editable mode with the dev tools, then lint, type-check,
-and clean up when you're done:
+test, and clean up when you're done:
 
 ```
 pip install -e ".[dev]"
 ruff check .
 mypy .
+pytest
 python3 scripts/clean.py   # remove build artifacts when you're done
 ```
 

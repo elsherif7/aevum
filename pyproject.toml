@@ -29,6 +29,7 @@ classifiers = [
 dev = [
     "ruff>=0.4",
     "mypy>=1.10",
+    "pytest>=8",
 ]
 
 [project.scripts]
@@ -48,6 +49,11 @@ select = ["E", "F", "W", "I", "UP"]
 ignore = [
     "E501",   # line too long — long f-strings with ANSI codes are intentional
 ]
+
+# ── Pytest ────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
 
 # ── Mypy ──────────────────────────────────────────────────────────────────────
 [tool.mypy]
