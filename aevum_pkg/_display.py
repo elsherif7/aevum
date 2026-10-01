@@ -191,13 +191,13 @@ def print_results(
     sizes      = sizes or {}
     print()
     print(f"  {clr.C}{LINE}{clr.RST}")
-    _folder_p     = Path(folder)
+    _folder_p     = Path(folder).resolve()
     _folder_label = _folder_p.name or _folder_p.drive or str(_folder_p)
     print(f"  {clr.W}  {_folder_label}{clr.RST}  {clr.DIM}({folder}){clr.RST}")
     print(f"  {clr.C}{LINE}{clr.RST}")
     print()
     print_tree(
-        Path(folder).name, total_sec, total_count,
+        _folder_label, total_sec, total_count,
         tree.children, tree.direct_files,
         fbytes=tree.root_bytes,
     )

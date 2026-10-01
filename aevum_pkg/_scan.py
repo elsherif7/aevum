@@ -23,17 +23,16 @@ video_extensions = (
     '.vob', '.ogv', '.divx', '.rmvb', '.asf', '.m2ts',
     # ── Less common video ────────────────────────────────────────────
     '.mts', '.m2v', '.f4v', '.f4p', '.nsv', '.roq',
-    '.yuv', '.mxf', '.drc', '.gifv', '.mng', '.qt',
+    '.yuv', '.mxf', '.drc', '.gifv', '.qt',
     '.rm', '.amv', '.svi', '.3g2', '.mpe', '.mpv',
     '.m1v', '.m2p', '.m4p', '.mpeg1', '.mpeg2',
     '.mpeg4', '.h264', '.h265', '.hevc', '.avchd',
     '.ogm', '.ogx', '.dv', '.dvr', '.dvr-ms', '.rec',
     '.wtv', '.bdmv', '.evo', '.ifo', '.mod',  # '.iso' removed — disc images too large
     '.tod', '.trp', '.tp', '.pva', '.nuv', '.fli',
-    '.flc', '.flic', '.smk', '.bik', '.bik2', '.webp',
+    '.flc', '.flic', '.smk', '.bik', '.bik2',
     # ── Additional video formats ─────────────────────────────────────
     '.av1',                          # AV1 raw bitstream
-    '.avif',                         # AV1 Image File Format (video sequences)
     '.avs', '.avs2', '.avs3',        # AVS / AVS2 / AVS3 (Chinese standards)
     '.cavs',                         # Chinese AVS video
     '.cdg',                          # CD+G karaoke video
@@ -45,8 +44,6 @@ video_extensions = (
     '.dif',                          # DV interchange format
     '.dl',                           # DL animation
     '.dpg',                          # Nintendo DS DPG video
-    '.dv',                           # DV raw video
-    '.dvr',                          # DVR recordings
     '.ea',                           # Electronic Arts video
     '.flh', '.flt',                  # FLIC variants
     '.gxf',                          # General eXchange Format (broadcast)
@@ -62,22 +59,19 @@ video_extensions = (
     '.m4s',                          # MPEG-DASH segment
     '.mjpeg', '.mjpg',               # Motion JPEG
     '.mlv',                          # Magic Lantern Video
-    '.mng',                          # Multiple-image Network Graphics
     '.moflex',                       # MobiClip MOFLEX
     '.mods',                         # MobiClip MODS
     '.mpl',                          # Multiplexed video
-    '.msf',                          # Sony PS3 MSF
     '.mtv',                          # MTV video
     '.mv',                           # Silicon Graphics Movie
     '.mvi',                          # Motion Pixels MVI
     '.mxg',                          # MxPEG clip
     '.pmp',                          # PlayStation Portable PMP
-    '.psxstr', '.str',               # Sony PlayStation STR
+    '.psxstr',                       # Sony PlayStation STR
     '.rpl',                          # RPL / ARMovie
     '.scm',                          # Scala Multimedia
     '.seq',                          # Tiertex SEQ
     '.sfd',                          # Sega Film / CPK
-    '.sol',                          # Sierra SOL
     '.swf',                          # ShockWave Flash (video content)
     '.thp',                          # Nintendo THP video
     '.ty', '.ty+',                   # TiVo TY stream
@@ -87,7 +81,6 @@ video_extensions = (
     '.vqf',                          # TwinVQ video
     '.wve',                          # Psion WVE
     '.y4m',                          # YUV4MPEG2 raw video
-    '.yuv',                          # Raw YUV (already above, kept for clarity)
     # ── Common audio ─────────────────────────────────────────────────
     '.mp3', '.aac', '.flac', '.wav', '.ogg', '.wma',
     '.m4a', '.opus', '.aiff', '.aif', '.aifc', '.ape',
@@ -144,12 +137,9 @@ video_extensions = (
     '.shn',                          # Shorten lossless audio
     '.sln',                          # Asterisk raw signed linear
     '.tak',                          # Tom's lossless Audio Kompressor
-    '.thd',                          # Dolby TrueHD (already above)
-    '.tta',                          # True Audio (already above)
     '.vag',                          # Sony PS VAG audio
     '.voc',                          # Creative Voice File
     '.vpk',                          # Sony PS2 VPK audio
-    '.w64',                          # Sony Wave64 (already above)
     '.wsd',                          # Wideband Single-bit Data
     '.xa',                           # Sony PS XA audio
     '.xwb',                          # Microsoft XWB (Xbox audio bank)
@@ -218,9 +208,11 @@ def _read_mp4_duration(path):
                             min_size = 32 if version == 1 else 20
                             if len(box) < min_size:
                                 break
+                            # box starts at version+flags (4 bytes). v1 has two
+                            # 8-byte timestamps, v0 two 4-byte ones.
                             if version == 1:
-                                ts  = struct.unpack_from('>I', box, 16)[0]
-                                dur = struct.unpack_from('>Q', box, 20)[0]
+                                ts  = struct.unpack_from('>I', box, 20)[0]
+                                dur = struct.unpack_from('>Q', box, 24)[0]
                             else:
                                 ts  = struct.unpack_from('>I', box, 12)[0]
                                 dur = struct.unpack_from('>I', box, 16)[0]
@@ -312,10 +304,12 @@ def _read_mkv_duration(path):
                 if duration is not None:
                     return duration * timescale_ns / 1_000_000_000
                 return None
-            elif 0 < esize < 0x100000:
-                i += esize
+            elif eid == 0x18538067:  # Segment: a container, so step into it
+                continue             # (its children start right after the header)
+            elif eid == 0x1F43B675:  # Cluster: media data starts, Info wasn't before it
+                return None
             else:
-                i += max(1, min(esize, 65536))  # never advance by 1 byte for large elements
+                i += esize           # skip any other element whole
         return None
 
     try:
@@ -626,7 +620,6 @@ def _build_tree(root, durations, sizes=None) -> ScanTree:
             secs         = folder_secs.get(child, 0.0)
             count        = folder_count.get(child, 0)
             fbytes       = folder_bytes.get(child, 0)
-            direct_files = folder_direct.get(child, [])
             if count == 0:
                 child_nodes.append(FolderNode(
                     name=child.name, total_sec=0.0, total_count=0,

@@ -91,3 +91,11 @@ def test_scan_folder_without_media(run_cli, tmp_path):
     r = run_cli("scan", str(tmp_path / "docs"))
     assert r.returncode == EX.OK
     assert "0 files found" in r.stdout
+
+
+@needs_ffmpeg
+def test_scan_dot_shows_the_real_folder_name(run_cli, library):
+    r = run_cli("scan", ".", cwd=library)
+    assert r.returncode == EX.OK, r.stderr
+    assert "4 files found" in r.stdout
+    assert "library" in r.stdout          # not a blank root label

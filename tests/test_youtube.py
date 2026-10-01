@@ -28,9 +28,14 @@ def test_parse_iso8601_duration_bad_input_is_zero(raw):
     assert yt._parse_iso8601_duration(raw) == 0.0
 
 
-@pytest.mark.xfail(strict=True, reason="known bug: durations over 24 h ('P1DT...') parse as 0")
-def test_parse_iso8601_duration_with_days():
-    assert yt._parse_iso8601_duration("P1DT2H") == 26 * 3600
+@pytest.mark.parametrize("raw, seconds", [
+    ("P1DT2H", 26 * 3600),
+    ("P2DT3H4M5S", 2 * 86400 + 3 * 3600 + 4 * 60 + 5),
+    ("P1D", 86400),
+    ("P0D", 0),
+])
+def test_parse_iso8601_duration_with_days(raw, seconds):
+    assert yt._parse_iso8601_duration(raw) == seconds
 
 
 # ---------------------------------------------------------------------------

@@ -327,12 +327,13 @@ def _normalise_url(url):
 
 
 def _parse_iso8601_duration(d):
-    m = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?', d or '')
+    # YouTube uses P<days>DT<h>H<m>M<s>S, with the day part only on videos of 24 h or more
+    m = re.match(r'P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?', d or '')
     if not m:
         return 0.0
-    h, mi, s = m.groups()
+    dd, h, mi, s = m.groups()
     # H-08: clamp to reasonable max and ensure non-negative
-    result = float(h or 0) * 3600 + float(mi or 0) * 60 + float(s or 0)
+    result = float(dd or 0) * 86400 + float(h or 0) * 3600 + float(mi or 0) * 60 + float(s or 0)
     return max(0.0, min(result, 365 * 86400))  # cap at 1 year
 
 

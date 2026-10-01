@@ -15,6 +15,7 @@ from aevum_pkg._scan import (
     format_size,
     get_duration,
     scan_parallel,
+    video_extensions,
 )
 
 TOLERANCE = 0.1  # seconds; container rounding differs a little per format
@@ -50,6 +51,15 @@ def test_extension_set_has_common_formats_and_excludes_disc_images():
     for ext in (".mp4", ".mkv", ".webm", ".mp3", ".flac"):
         assert ext in _VIDEO_EXT_SET
     assert ".iso" not in _VIDEO_EXT_SET
+
+
+def test_extension_list_has_no_duplicates():
+    assert len(video_extensions) == len(set(video_extensions))
+
+
+@pytest.mark.parametrize("ext", [".webp", ".avif", ".mng", ".sol", ".str", ".txt", ".jpg"])
+def test_extension_set_excludes_images_and_source_code(ext):
+    assert ext not in _VIDEO_EXT_SET
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +112,6 @@ def test_native_mp4_version0_header(tmp_path):
     assert _read_mp4_duration(_synthetic_mp4(tmp_path / "v0.mp4", body)) == 90.0
 
 
-@pytest.mark.xfail(strict=True, reason="known bug: mvhd version 1 offsets are 4 bytes too low")
 def test_native_mp4_version1_header(tmp_path):
     # version 1 (64-bit times) with realistic non-zero creation/modification times
     body = bytes([1, 0, 0, 0]) + struct.pack(">QQIQ", 3_800_000_000, 3_800_000_123, 1000, 90000) + b"\0" * 80
@@ -120,10 +129,39 @@ def test_native_mp4_truncated_file_returns_none(tmp_path):
 # ---------------------------------------------------------------------------
 
 @needs_ffmpeg
-@pytest.mark.xfail(strict=True, reason="known bug: native MKV parser never finds the Info block")
 @pytest.mark.parametrize("name", ["clip.mkv", "clip.webm"])
 def test_native_mkv_matches_ffprobe(clips, name):
     assert _read_mkv_duration(clips[name]) == pytest.approx(CLIP_SECONDS, abs=TOLERANCE)
+
+
+def _mkv_with_info(path: Path, *, void_bytes: int = 0, unknown_size_segment: bool = True) -> Path:
+    """Hand-built MKV: EBML header, Segment, optional big Void, Info (5.0 s)."""
+    ebml = b"\x1a\x45\xdf\xa3\x80"                                   # empty EBML header
+    timescale = b"\x2a\xd7\xb1\x83" + (1_000_000).to_bytes(3, "big")  # 1 ms ticks
+    duration = b"\x44\x89\x84" + struct.pack(">f", 5000.0)            # 5000 ticks = 5 s
+    info = b"\x15\x49\xa9\x66" + bytes([0x80 | (len(timescale) + len(duration))]) + timescale + duration
+    void = b""
+    if void_bytes:
+        void = b"\xec" + (0x200000 | void_bytes).to_bytes(3, "big") + b"\0" * void_bytes
+    body = void + info
+    if unknown_size_segment:
+        seg_size = b"\x01\xff\xff\xff\xff\xff\xff\xff"          # "unknown size"
+    else:
+        seg_size = (0x0100000000000000 | len(body)).to_bytes(8, "big")
+    path.write_bytes(ebml + b"\x18\x53\x80\x67" + seg_size + body)
+    return path
+
+
+@pytest.mark.parametrize("unknown_size", [True, False])
+def test_native_mkv_synthetic_segment(tmp_path, unknown_size):
+    f = _mkv_with_info(tmp_path / "s.mkv", unknown_size_segment=unknown_size)
+    assert _read_mkv_duration(f) == pytest.approx(5.0)
+
+
+def test_native_mkv_skips_elements_larger_than_1mb(tmp_path):
+    # regression: big elements used to be skipped 64 KB at a time, landing mid-element
+    f = _mkv_with_info(tmp_path / "big.mkv", void_bytes=1_500_000)
+    assert _read_mkv_duration(f) == pytest.approx(5.0)
 
 
 def test_native_mkv_garbage_returns_none(tmp_path):
