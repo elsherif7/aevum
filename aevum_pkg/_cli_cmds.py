@@ -11,6 +11,7 @@ _cli_helpers.py; folded in here since this is their only caller.
 """
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
@@ -18,7 +19,15 @@ from ._color import clr
 from ._display import _fuzzy_suggest, print_results, print_url_results
 from ._exit import EX
 from ._scan import _run_scan, check_ffprobe
-from ._youtube import ApiKeyCancelled, _is_url, _normalise_url, _parse_yt_url, scan_url
+from ._youtube import (
+    ApiKeyCancelled,
+    YouTubeLimitError,
+    _has_playlist_param,
+    _is_url,
+    _normalise_url,
+    _parse_yt_url,
+    scan_url,
+)
 
 
 def _make_progress_bar():
@@ -57,6 +66,22 @@ def cmd_scan(raw: str) -> None:
         _scan_folder(raw)
 
 
+def _print_limit_message(e: YouTubeLimitError) -> None:
+    """Explain a rate/quota stop and how to continue (progress is already saved)."""
+    print(f"\n\n  {clr.Y}[LIMIT]{clr.RST} {e}", file=sys.stderr)
+    if e.kind == 'rate' and e.retry_after:
+        mins = max(1, math.ceil(e.retry_after / 60))
+        when = f"in about {mins} minute{'s' if mins != 1 else ''}"
+    elif e.kind == 'quota':
+        when = "after YouTube's daily quota resets (midnight Pacific Time)"
+    else:
+        when = "later"
+    if e.total:
+        print(f"  {clr.W}{e.saved:,} of {e.total:,} videos are saved.{clr.RST}", file=sys.stderr)
+    print(f"  Run the same command again {when} to continue. "
+          f"Saved videos are not fetched twice.\n", file=sys.stderr)
+
+
 def _scan_youtube(raw: str) -> None:
     # Reject links we can't use before asking for an API key or touching the network.
     kind, _ = _parse_yt_url(_normalise_url(raw))
@@ -66,6 +91,9 @@ def _scan_youtube(raw: str) -> None:
               f"youtube.com/watch?v=ID, /playlist?list=ID, /@handle, /channel/ID{clr.RST}\n",
               file=sys.stderr)
         sys.exit(EX.ERR_ARGS)
+    if kind == 'video' and _has_playlist_param(raw):
+        print(f"  {clr.DIM}This link is a video inside a playlist, so only the video is "
+              f"scanned. To scan the whole playlist, use its /playlist?list=... link.{clr.RST}")
 
     url_prog = _make_progress_bar()
     try:
@@ -74,6 +102,9 @@ def _scan_youtube(raw: str) -> None:
     except (KeyboardInterrupt, ApiKeyCancelled):
         print(f"\n\n  {clr.Y}Fetch cancelled.{clr.RST}\n")
         sys.exit(EX.ERR_SCAN)
+    except YouTubeLimitError as e:
+        _print_limit_message(e)
+        sys.exit(EX.ERR_API)
     except Exception as e:
         print(f"\n  {clr.R}[ERROR]{clr.RST} {e}\n", file=sys.stderr)
         sys.exit(EX.ERR_API)

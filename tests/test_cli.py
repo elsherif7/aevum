@@ -221,3 +221,59 @@ def test_ctrl_c_during_file_discovery_does_not_wait_for_the_queue(tmp_path):
     assert proc.returncode == EX.ERR_SCAN
     assert "Scan cancelled" in out
     assert elapsed < 6, f"Ctrl-C took {elapsed:.1f}s to take effect"
+
+
+# ---------------------------------------------------------------------------
+# Limit message and the video-in-playlist hint (in-process, scan_url faked)
+# ---------------------------------------------------------------------------
+
+def _run_scan_youtube(monkeypatch, capsys, url, fake_scan_url):
+    from aevum_pkg import _cli_cmds
+    monkeypatch.setattr(_cli_cmds, "scan_url", fake_scan_url)
+    with pytest.raises(SystemExit) as exc:
+        _cli_cmds._scan_youtube(url)
+    out = capsys.readouterr()
+    return exc.value.code, out.out, out.err
+
+
+def test_rate_limit_message_says_progress_is_saved(monkeypatch, capsys):
+    from aevum_pkg._youtube import YouTubeLimitError
+
+    def fake(*a, **k):
+        e = YouTubeLimitError("Hourly request limit reached (100 requests per hour).",
+                              kind="rate", retry_after=1500)
+        e.saved, e.total = 1200, 2450
+        raise e
+
+    code, out, err = _run_scan_youtube(monkeypatch, capsys, "https://youtube.com/@x", fake)
+    assert code == EX.ERR_API
+    assert "1,200 of 2,450 videos are saved" in err
+    assert "in about 25 minutes" in err
+    assert "Run the same command again" in err
+
+
+def test_quota_message_mentions_daily_reset(monkeypatch, capsys):
+    from aevum_pkg._youtube import YouTubeLimitError
+
+    def fake(*a, **k):
+        raise YouTubeLimitError("YouTube API quota exceeded: x", kind="quota")
+
+    code, out, err = _run_scan_youtube(monkeypatch, capsys, "https://youtube.com/@x", fake)
+    assert code == EX.ERR_API
+    assert "daily quota resets" in err
+    assert "videos are saved" not in err            # nothing to report before any fetch
+
+
+def test_video_link_with_playlist_gets_a_hint(monkeypatch, capsys):
+    from aevum_pkg._youtube import YouTubeLimitError
+
+    def fake(*a, **k):
+        raise YouTubeLimitError("stop", kind="rate", retry_after=60)
+
+    _, out, _ = _run_scan_youtube(
+        monkeypatch, capsys, "https://www.youtube.com/watch?v=abc&list=PL1", fake)
+    assert "only the video is scanned" in out
+
+    _, out, _ = _run_scan_youtube(
+        monkeypatch, capsys, "https://www.youtube.com/watch?v=abc", fake)
+    assert "only the video is scanned" not in out

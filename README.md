@@ -118,6 +118,15 @@ A few other things worth knowing:
   hint rather than guessed at.
 - The first time you scan a YouTube URL, Aevum prompts for a free API
   key and saves it locally so you won't be asked again.
+- A link to a video inside a playlist (`watch?v=...&list=...`) scans
+  just that video. Use the `/playlist?list=...` link to scan the whole
+  playlist.
+- Aevum makes at most 100 YouTube requests per hour, and YouTube has a
+  daily quota of its own. If either stops a big channel or playlist
+  part-way, the videos already fetched are saved. Run the same command
+  again later and it carries on without fetching them twice.
+- Private, deleted, or region-blocked videos are remembered for 7 days,
+  so reruns don't spend quota asking about them again.
 
 ---
 

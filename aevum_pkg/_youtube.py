@@ -284,9 +284,9 @@ def get_quota_status():
     return units_used, units_remaining, percent_used
 
 
-def _merge_into_cache(cache, new_entries_by_id):
+def _merge_into_cache(cache, new_entries_by_id, save=True):
     """
-    Write new_entries_by_id into cache and persist.
+    Write new_entries_by_id into cache and (by default) persist.
     new_entries_by_id: dict of video_id -> entry dict.
 
     Issue 11 fix: no longer reloads cache from disk after writing — the
@@ -295,7 +295,31 @@ def _merge_into_cache(cache, new_entries_by_id):
     now = int(time.time())
     for vid_id, entry in new_entries_by_id.items():
         cache[vid_id] = {**entry, "cached_at": now}
-    _save_yt_video_cache(cache)
+    if save:
+        _save_yt_video_cache(cache)
+
+
+# A video the API didn't return (private, deleted, region-blocked) is remembered as
+# a small "unavailable" stub so reruns don't spend quota asking again. Unlike a
+# duration, availability can change, so a stub expires and is re-checked.
+UNAVAILABLE_TTL = 7 * 24 * 3600
+
+
+def _cache_state(cache, vid_id, now=None):
+    """Return 'hit' (usable entry), 'unavailable' (fresh stub) or 'miss'."""
+    e = cache.get(vid_id)
+    if not isinstance(e, dict):
+        return 'miss'
+    if not e.get('unavailable'):
+        return 'hit'
+    now = time.time() if now is None else now
+    return 'unavailable' if now - e.get('cached_at', 0) < UNAVAILABLE_TTL else 'miss'
+
+
+def _mark_unavailable(cache, video_ids):
+    now = int(time.time())
+    for vid in video_ids:
+        cache[vid] = {'id': vid, 'unavailable': True, 'cached_at': now}
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +361,29 @@ def _parse_iso8601_duration(d):
     return max(0.0, min(result, 365 * 86400))  # cap at 1 year
 
 
+# Error reasons YouTube uses when a quota or rate limit is hit (HTTP 403/429).
+_YT_LIMIT_REASONS = (
+    'quotaExceeded', 'dailyLimitExceeded', 'rateLimitExceeded', 'userRateLimitExceeded',
+)
+
+
+class YouTubeLimitError(PermissionError):
+    """
+    A request limit was hit: Aevum's own hourly limit (kind='rate') or YouTube's
+    daily quota (kind='quota'). Retrying later is safe: everything fetched so far
+    was saved to the cache.
+
+    _fetch_with_cache fills in `saved` / `total`: how many of the requested
+    videos are now in the cache. Both stay None if the limit hit before then.
+    """
+    def __init__(self, message, kind='rate', retry_after=None):
+        super().__init__(message)
+        self.kind        = kind
+        self.retry_after = retry_after
+        self.saved       = None
+        self.total       = None
+
+
 def _yt_api_request(endpoint, params, api_key, quota_cost=None):
     """
     Make one YouTube Data API v3 request and track quota usage.
@@ -360,8 +407,9 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
     # B-07: apply rate limiting per API call
     if not youtube_limiter.allow_request():
         wait = youtube_limiter.wait_time()
-        raise PermissionError(
-            f"Rate limit exceeded. Please wait {int(wait)}s before next request."
+        raise YouTubeLimitError(
+            f"Hourly request limit reached ({youtube_limiter.max_calls} requests per hour).",
+            kind='rate', retry_after=wait,
         )
 
     # Copy params to avoid mutating the caller's dict
@@ -380,12 +428,16 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
     except urllib.error.HTTPError as e:
         # Issue 10: extract the API error message from the JSON body
         # Never include the URL (which contains the API key) in error messages
+        reason = ''
         try:
             body     = e.read().decode('utf-8', errors='replace')
-            err_data = json.loads(body)
-            msg      = err_data.get('error', {}).get('message', str(e))
+            err_data = json.loads(body).get('error', {})
+            msg      = err_data.get('message', str(e))
+            reason   = (err_data.get('errors') or [{}])[0].get('reason', '')
         except Exception:
             msg = str(e)
+        if e.code == 429 or reason in _YT_LIMIT_REASONS:
+            raise YouTubeLimitError(f"YouTube API quota exceeded: {msg}", kind='quota') from None
         raise RuntimeError(f"YouTube API error {e.code}: {msg}") from None
     except urllib.error.URLError as e:
         raise RuntimeError(f"YouTube API network error: {e.reason}") from None
@@ -442,12 +494,14 @@ def _parse_yt_url(url):
     # Issue 12: added music.youtube.com; also support kids and gaming subdomains
     if netloc not in _YT_DOMAINS:
         return None, None
-    if 'list' in qs:
-        return 'playlist', qs['list'][0]
+    # A link to a video that also carries list=... (copied from inside a playlist)
+    # means that one video. Only a /playlist link scans the whole playlist.
     if netloc == 'youtu.be' and path_parts:
         return 'video', path_parts[0]
     if 'v' in qs:
         return 'video', qs['v'][0]
+    if 'list' in qs:
+        return 'playlist', qs['list'][0]
     if len(path_parts) == 2 and path_parts[0] == 'shorts':
         return 'video', path_parts[1]
     if path_parts:
@@ -460,17 +514,35 @@ def _parse_yt_url(url):
     return None, None
 
 
-def _yt_get_channel_uploads_playlist(channel_id_or_handle, api_key):
-    for param_key, param_val in [('forHandle', channel_id_or_handle), ('id', channel_id_or_handle)]:
-        try:
-            data  = _yt_api_request('channels', {'part': 'contentDetails,snippet', param_key: param_val}, api_key)
-            items = data.get('items', [])
-            if items:
-                uploads = items[0]['contentDetails']['relatedPlaylists']['uploads']
-                title   = items[0]['snippet']['title']
-                return uploads, title
-        except Exception:
-            continue
+def _has_playlist_param(url):
+    """True if the URL carries a list=... parameter."""
+    from urllib.parse import parse_qs, urlparse
+    return 'list' in parse_qs(urlparse(_normalise_url(url)).query)
+
+
+def _yt_get_channel_uploads_playlist(channel_ref, api_key, kind='channel_handle'):
+    """
+    Return (uploads_playlist_id, channel_title), or (None, None) if the channel
+    doesn't exist. One API call in the common case.
+
+    /channel/UC... is looked up by id and @handle by forHandle. A bare name
+    (from /c/Name or /user/Name) tries forHandle, then forUsername. Errors,
+    including quota and rate limits, propagate: they are not "channel not found".
+    """
+    if kind == 'channel_id':
+        lookups = [('id', channel_ref)]
+    elif channel_ref.startswith('@'):
+        lookups = [('forHandle', channel_ref)]
+    else:
+        lookups = [('forHandle', channel_ref), ('forUsername', channel_ref)]
+
+    for param_key, param_val in lookups:
+        data  = _yt_api_request('channels', {'part': 'contentDetails,snippet', param_key: param_val}, api_key)
+        items = data.get('items', [])
+        if items:
+            uploads = items[0]['contentDetails']['relatedPlaylists']['uploads']
+            title   = items[0]['snippet']['title']
+            return uploads, title
     return None, None
 
 
@@ -487,6 +559,8 @@ def _yt_fetch_playlist_video_ids(playlist_id, api_key, on_progress=None):
             params['pageToken'] = page_token
         try:
             data = _yt_api_request('playlistItems', params, api_key)
+        except YouTubeLimitError:
+            raise
         except Exception as e:
             raise RuntimeError(f"playlistItems API error: {e}")
         for item in data.get('items', []):
@@ -503,13 +577,17 @@ def _yt_fetch_playlist_video_ids(playlist_id, api_key, on_progress=None):
     return ids
 
 
-def _yt_fetch_video_details(video_ids, api_key, on_progress=None, progress_offset=0, total=0):
+def _yt_fetch_video_details(video_ids, api_key, on_progress=None, progress_offset=0, total=0,
+                            on_batch=None):
     """
     Fetch video details from the API in batches of 50.
     Returns (entries, unavailable_ids).
 
     unavailable_ids: IDs requested but not returned by the API
                      (private, deleted, or region-blocked).
+
+    on_batch(batch_entries, batch_unavailable_ids), if given, is called after
+    every batch, so the caller can keep results even if a later batch fails.
     """
     entries         = []
     unavailable_ids = []
@@ -519,16 +597,19 @@ def _yt_fetch_video_details(video_ids, api_key, on_progress=None, progress_offse
         batch = video_ids[i:i+50]
         try:
             data = _yt_api_request('videos', {'part': 'snippet,contentDetails', 'id': ','.join(batch)}, api_key)
+        except YouTubeLimitError:
+            raise
         except Exception as e:
             raise RuntimeError(f"videos API error: {e}")
 
-        returned_ids = set()
+        batch_entries = []
+        returned_ids  = set()
         for item in data.get('items', []):
             title    = item['snippet']['title']
             channel  = item['snippet'].get('channelTitle', '')
             duration = _parse_iso8601_duration(item['contentDetails']['duration'])
             vid_url  = f"https://youtu.be/{item['id']}"
-            entries.append({
+            batch_entries.append({
                 'id':       item['id'],
                 'title':    title,
                 'duration': duration,
@@ -540,52 +621,77 @@ def _yt_fetch_video_details(video_ids, api_key, on_progress=None, progress_offse
             if on_progress and total > 0:
                 on_progress(done, total)
 
-        missing = set(batch) - returned_ids
+        entries.extend(batch_entries)
+        missing = [vid for vid in dict.fromkeys(batch) if vid not in returned_ids]
         unavailable_ids.extend(missing)
         done += len(missing)
         if on_progress and total > 0 and missing:
             on_progress(done, total)
+        if on_batch:
+            on_batch(batch_entries, missing)
 
     return entries, unavailable_ids
 
 
-def _fetch_with_cache(video_ids, api_key, cache, on_progress=None):
+def _fetch_with_cache(video_ids, api_key, cache, on_progress=None, persist=True):
     """
     For a list of video IDs:
       - Return cached entries immediately for IDs already in cache
-      - Only call the API for IDs not in cache
-      - Merge new results into cache and persist
+      - Skip IDs recently found to be unavailable (private/deleted/blocked)
+      - Only call the API for the rest, and keep each batch as it arrives
 
-    Issue 11 fix: removed redundant _load_yt_video_cache() after
-    _merge_into_cache() — the dict is already up-to-date in memory.
+    Results are saved to disk when the fetch ends, however it ends (finished,
+    rate/quota limit, error or Ctrl-C), and every 10 batches in between, so a
+    failure part-way never throws away the batches already fetched.
 
-    Returns (entries, cache_hits, unavailable_ids).
+    If a YouTube limit stops the fetch, the YouTubeLimitError is re-raised with
+    .saved / .total filled in. persist=False keeps everything in memory only.
+
+    Returns (entries, cache_hits, unavailable_ids). cache_hits counts usable
+    cached entries only; unavailable_ids includes remembered unavailable videos.
     """
-    cached_ids      = [vid for vid in video_ids if vid in cache]
-    new_ids         = [vid for vid in video_ids if vid not in cache]
-    cache_hits      = len(cached_ids)
+    now             = time.time()
+    states          = {vid: _cache_state(cache, vid, now) for vid in video_ids}
+    cache_hits      = sum(1 for vid in video_ids if states[vid] == 'hit')
+    unavailable_ids = [vid for vid in dict.fromkeys(video_ids) if states[vid] == 'unavailable']
+    new_ids         = [vid for vid in video_ids if states[vid] == 'miss']
     total           = len(video_ids)
-    unavailable_ids = []
+    batches         = 0
+
+    def on_batch(batch_entries, batch_unavailable):
+        nonlocal batches
+        _merge_into_cache(cache, {e['id']: e for e in batch_entries}, save=False)
+        _mark_unavailable(cache, batch_unavailable)
+        batches += 1
+        if persist and batches % 10 == 0:
+            _save_yt_video_cache(cache)
 
     if new_ids:
-        new_entries, unavailable_ids = _yt_fetch_video_details(
-            new_ids, api_key, on_progress, cache_hits, total)
-        _merge_into_cache(cache, {e['id']: e for e in new_entries})
-        # Issue 11: cache dict is already updated in-place by _merge_into_cache
-        # — no need to reload from disk here.
+        try:
+            _, new_unavailable = _yt_fetch_video_details(
+                new_ids, api_key, on_progress,
+                cache_hits + len(unavailable_ids), total, on_batch=on_batch)
+            unavailable_ids += new_unavailable
+        except YouTubeLimitError as e:
+            e.total = total
+            e.saved = sum(1 for vid in video_ids if _cache_state(cache, vid) != 'miss')
+            raise
+        finally:
+            if persist:
+                _save_yt_video_cache(cache)
 
     if not new_ids and on_progress and total > 0:
         on_progress(total, total)
 
     entries = []
     for vid in video_ids:
-        if vid in cache:
-            e = cache[vid]
+        if _cache_state(cache, vid) == 'hit':
+            cached = cache[vid]
             entries.append({
-                'title':    e.get('title', vid),
-                'duration': e.get('duration', 0.0),
-                'url':      e.get('url', f"https://youtu.be/{vid}"),
-                'channel':  e.get('channel', ''),
+                'title':    cached.get('title', vid),
+                'duration': cached.get('duration', 0.0),
+                'url':      cached.get('url', f"https://youtu.be/{vid}"),
+                'channel':  cached.get('channel', ''),
             })
     return entries, cache_hits, unavailable_ids
 
@@ -617,9 +723,10 @@ def scan_url(url, on_progress=None, use_cache=True):
     try:
         used, remaining, _ = get_quota_status()
         if remaining < 100:
-            raise PermissionError(
+            raise YouTubeLimitError(
                 f"Daily quota nearly exhausted ({used:,}/10,000 units used). "
-                f"Remaining: {remaining:,} units. Try again tomorrow."
+                f"Remaining: {remaining:,} units.",
+                kind='quota',
             )
     except PermissionError:
         raise
@@ -639,26 +746,10 @@ def scan_url(url, on_progress=None, use_cache=True):
 
     # ── Single video ──────────────────────────────────────────────────
     if kind == 'video':
-        if use_cache and vid_id in cache:
-            e = cache[vid_id]
-            entries = [{
-                'title':    e.get('title', vid_id),
-                'duration': e.get('duration', 0.0),
-                'url':      e.get('url', f"https://youtu.be/{vid_id}"),
-                'channel':  e.get('channel', ''),
-            }]
-            label      = entries[0]['title']
-            cache_hits = 1
-            if on_progress:
-                on_progress(1, 1)
-        else:
-            fetched, unavailable_ids = _yt_fetch_video_details([vid_id], api_key, on_progress, 0, 1)
-            if fetched:
-                _merge_into_cache(cache, {vid_id: fetched[0]})
-            entries           = fetched
-            label             = entries[0]['title'] if entries else vid_id
-            cache_hits        = 0
-            unavailable_count = len(unavailable_ids)
+        entries, cache_hits, unavail = _fetch_with_cache(
+            [vid_id], api_key, cache, on_progress, persist=use_cache)
+        label             = entries[0]['title'] if entries else vid_id
+        unavailable_count = len(unavail)
 
     # ── Playlist ──────────────────────────────────────────────────────
     elif kind == 'playlist':
@@ -666,22 +757,24 @@ def scan_url(url, on_progress=None, use_cache=True):
             pl_data  = _yt_api_request('playlists', {'part': 'snippet', 'id': vid_id}, api_key)
             pl_items = pl_data.get('items', [])
             label    = pl_items[0]['snippet']['title'] if pl_items else vid_id
+        except YouTubeLimitError:
+            raise
         except Exception:
             label = vid_id
 
         ids                         = _yt_fetch_playlist_video_ids(vid_id, api_key, None)
-        entries, cache_hits, unavail = _fetch_with_cache(ids, api_key, cache, on_progress)
+        entries, cache_hits, unavail = _fetch_with_cache(ids, api_key, cache, on_progress, persist=use_cache)
         unavailable_count           = len(unavail)
 
     # ── Channel ───────────────────────────────────────────────────────
     elif kind in ('channel_id', 'channel_handle'):
-        uploads_pl, channel_title = _yt_get_channel_uploads_playlist(vid_id, api_key)
+        uploads_pl, channel_title = _yt_get_channel_uploads_playlist(vid_id, api_key, kind)
         if not uploads_pl:
             raise ValueError(f"Could not find channel: {vid_id}")
         label = channel_title or vid_id
 
         ids                         = _yt_fetch_playlist_video_ids(uploads_pl, api_key, None)
-        entries, cache_hits, unavail = _fetch_with_cache(ids, api_key, cache, on_progress)
+        entries, cache_hits, unavail = _fetch_with_cache(ids, api_key, cache, on_progress, persist=use_cache)
         unavailable_count           = len(unavail)
 
     total_sec   = sum(e['duration'] for e in entries)
