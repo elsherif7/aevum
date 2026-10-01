@@ -417,6 +417,8 @@ def scan_parallel(
     """
     if _visited_inodes is None:
         _visited_inodes = set()
+    if stop_event is None:
+        stop_event = threading.Event()   # lets an interrupt stop the workers even for direct callers
 
     root = Path(root).resolve()
 
@@ -538,7 +540,14 @@ def scan_parallel(
 
         # Issue 7: join collector BEFORE consuming futures so every future
         # that was submitted is visible to as_completed().
-        collector.join()
+        try:
+            collector.join()
+        except KeyboardInterrupt:
+            # Ctrl-C: tell workers to stop and drop queued files, so leaving the
+            # `with` block doesn't wait for every remaining ffprobe call.
+            stop_event.set()
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
 
         if stop_event and stop_event.is_set():
             tree = _build_tree(root, {})
@@ -554,8 +563,8 @@ def scan_parallel(
                     durations[path] = sec
                     sizes[path]     = file_size
         except KeyboardInterrupt:
-            if stop_event:
-                stop_event.set()
+            stop_event.set()
+            pool.shutdown(wait=False, cancel_futures=True)
             raise
 
     if not durations:

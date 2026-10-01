@@ -169,3 +169,26 @@ def test_video_cache_corrupt_file_is_ignored(tmp_path, monkeypatch):
     path.write_text("{oops")
     monkeypatch.setattr(yt, "YT_VCACHE_FILE", path)
     assert yt._load_yt_video_cache() == {}
+
+
+# ---------------------------------------------------------------------------
+# scan_url: order of checks
+# ---------------------------------------------------------------------------
+
+def test_scan_url_rejects_bad_url_before_prompting_for_a_key(monkeypatch):
+    monkeypatch.setattr(yt, "load_api_key", lambda: "")
+
+    def must_not_prompt():
+        raise AssertionError("asked for an API key for an invalid URL")
+
+    monkeypatch.setattr(yt, "prompt_api_key", must_not_prompt)
+    with pytest.raises(ValueError, match="Could not parse"):
+        yt.scan_url("https://example.com/watch?v=abc")
+
+
+@pytest.mark.parametrize("answer", [None, ""])
+def test_scan_url_raises_when_the_key_prompt_is_cancelled(monkeypatch, answer):
+    monkeypatch.setattr(yt, "load_api_key", lambda: "")
+    monkeypatch.setattr(yt, "prompt_api_key", lambda: answer)
+    with pytest.raises(yt.ApiKeyCancelled):
+        yt.scan_url("https://youtu.be/dQw4w9WgXcQ")

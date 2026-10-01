@@ -394,6 +394,10 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
     return result
 
 
+class ApiKeyCancelled(Exception):
+    """The user gave no API key (empty input, Ctrl-C, closed stdin, or a key that could not be saved)."""
+
+
 def prompt_api_key():
     """
     Prompt user for YouTube API key and save it to local storage.
@@ -598,11 +602,16 @@ def scan_url(url, on_progress=None, use_cache=True):
 
     Returns (total_sec, total_count, entries, label, cache_hits, unavailable_count).
     """
+    # Validate the URL first, so a bad link is rejected before asking for a key.
+    kind, vid_id = _parse_yt_url(_normalise_url(url))
+    if kind is None:
+        raise ValueError(f"Could not parse YouTube URL: {url}")
+
     api_key = load_api_key()
     if not api_key:
         api_key = prompt_api_key()
         if not api_key:
-            return 0, 0, [], 'cancelled', 0, 0
+            raise ApiKeyCancelled("No API key provided.")
 
     # Check quota before making requests
     try:
@@ -622,10 +631,6 @@ def scan_url(url, on_progress=None, use_cache=True):
         )
 
     # B-07: rate limiting is now enforced per API call inside _yt_api_request
-
-    kind, vid_id = _parse_yt_url(_normalise_url(url))
-    if kind is None:
-        raise ValueError(f"Could not parse YouTube URL: {url}")
 
     cache             = _load_yt_video_cache() if use_cache else {}
     label             = url

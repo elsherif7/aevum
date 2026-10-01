@@ -11,6 +11,7 @@ tokens.
 """
 from __future__ import annotations
 
+import os
 import sys
 
 from aevum_pkg import __version__
@@ -73,6 +74,19 @@ def _parse_target() -> str:
     tokens = argv[1:]
     if not tokens:
         print(f"\n  {clr.R}[ERROR]{clr.RST} No target specified. Usage: aevum scan <path|url>\n",
+              file=sys.stderr)
+        sys.exit(EX.ERR_ARGS)
+    # `aevum scan -h` / `--version` behave like the top-level flags.
+    if tokens[0] in ('-h', '--help'):
+        _print_help()
+        sys.exit(EX.OK)
+    if tokens[0] in ('-V', '--version'):
+        print(f"aevum {__version__}")
+        sys.exit(EX.OK)
+    # scan takes no options. A leading dash is only a path if that path exists.
+    if tokens[0].startswith('-') and not os.path.exists(tokens[0]):
+        print(f"\n  {clr.R}[ERROR]{clr.RST} Unknown option: {tokens[0]}. "
+              f"'aevum scan' takes no options, only a path or URL.\n",
               file=sys.stderr)
         sys.exit(EX.ERR_ARGS)
     if len(tokens) > 1:

@@ -18,7 +18,7 @@ from ._color import clr
 from ._display import _fuzzy_suggest, print_results, print_url_results
 from ._exit import EX
 from ._scan import _run_scan, check_ffprobe
-from ._youtube import _is_url, scan_url
+from ._youtube import ApiKeyCancelled, _is_url, _normalise_url, _parse_yt_url, scan_url
 
 
 def _make_progress_bar():
@@ -58,11 +58,20 @@ def cmd_scan(raw: str) -> None:
 
 
 def _scan_youtube(raw: str) -> None:
+    # Reject links we can't use before asking for an API key or touching the network.
+    kind, _ = _parse_yt_url(_normalise_url(raw))
+    if kind is None:
+        print(f"\n  {clr.R}[ERROR]{clr.RST} Not a supported YouTube URL: {raw}", file=sys.stderr)
+        print(f"  {clr.DIM}Use a video, playlist, or channel link, e.g. "
+              f"youtube.com/watch?v=ID, /playlist?list=ID, /@handle, /channel/ID{clr.RST}\n",
+              file=sys.stderr)
+        sys.exit(EX.ERR_ARGS)
+
     url_prog = _make_progress_bar()
     try:
         total_sec, total_count, entries, label, cache_hits, unavailable_count = \
             scan_url(raw, url_prog, use_cache=True)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ApiKeyCancelled):
         print(f"\n\n  {clr.Y}Fetch cancelled.{clr.RST}\n")
         sys.exit(EX.ERR_SCAN)
     except Exception as e:
