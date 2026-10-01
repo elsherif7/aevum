@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import re
 import sys
@@ -20,9 +21,34 @@ from ._paths import YT_KEY_FILE, YT_QUOTA_FILE, YT_VCACHE_FILE
 _YT_KEY_PATTERN = re.compile(r'^AIza[0-9A-Za-z\-_]{35}$')
 
 
+def _write_private_file(path, text: str) -> None:
+    """
+    Write `text` to `path` so that it is never readable by other users, not even
+    for an instant. The temp file is created owner-only (mkstemp uses mode 0600)
+    and then renamed into place, instead of writing with default permissions and
+    tightening them afterwards.
+
+    On Windows the mode bits don't apply; the file is protected by the ACL it
+    inherits from the user's profile folder (%LOCALAPPDATA%).
+    """
+    import tempfile
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".tmp_{path.stem}_", suffix=".tmp")
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def save_api_key(api_key: str) -> bool:
     """
-    Store the API key in a local file, owner-only permissions.
+    Store the API key in a local file (owner-only on Linux/macOS).
     Returns True if saved successfully, False otherwise.
     """
     # S-02: validate API key format (YouTube keys start with AIza).
@@ -31,9 +57,7 @@ def save_api_key(api_key: str) -> bool:
         return False
 
     try:
-        YT_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
-        YT_KEY_FILE.write_text(api_key, encoding='utf-8')
-        os.chmod(YT_KEY_FILE, 0o600)
+        _write_private_file(YT_KEY_FILE, api_key)
         return True
     except Exception as e:
         print(f"  Error: Could not save API key: {e}", file=sys.stderr)
@@ -154,6 +178,30 @@ YT_QUOTA_COST = {
 # ---------------------------------------------------------------------------
 
 
+_MAX_CACHED_DURATION = 10 * 365 * 24 * 3600   # 10 years; no real video is longer
+
+
+def _is_number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def _valid_cache_entry(e) -> bool:
+    """
+    Keep only cache entries that are safe to use. The cache is a plain file on
+    disk, so anything in it is untrusted: wrong types or NaN would otherwise
+    crash the report (or the "unavailable" age check) much later.
+    """
+    if not isinstance(e, dict):
+        return False
+    if not _is_number(e.get('cached_at', 0)):
+        return False
+    if e.get('unavailable'):
+        return True
+    return (isinstance(e.get('title'), str)
+            and _is_number(e.get('duration'))
+            and 0 <= e['duration'] <= _MAX_CACHED_DURATION)
+
+
 def _load_yt_video_cache():
     """Load the per-video cache. Returns {} on any error or if file is too large."""
     MAX_YT_CACHE_SIZE = 100 * 1024 * 1024  # 100 MB hard limit
@@ -161,9 +209,12 @@ def _load_yt_video_cache():
         if YT_VCACHE_FILE.exists() and YT_VCACHE_FILE.stat().st_size > MAX_YT_CACHE_SIZE:
             print("  [WARN] YouTube cache too large, ignoring.", file=sys.stderr)
             return {}
-        return json.loads(YT_VCACHE_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(YT_VCACHE_FILE.read_text(encoding="utf-8"))
     except Exception:
         return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {vid: e for vid, e in raw.items() if _valid_cache_entry(e)}
 
 
 def _save_yt_video_cache(cache):
@@ -194,23 +245,39 @@ def _save_yt_video_cache(cache):
 # Quota tracking
 # ---------------------------------------------------------------------------
 
-def _get_current_date_pt():
-    """Return current date string in Pacific Time (where YouTube quota resets).
+def _nth_sunday(year: int, month: int, n: int):
+    import datetime
+    first = datetime.date(year, month, 1)
+    return first + datetime.timedelta(days=(6 - first.weekday()) % 7 + 7 * (n - 1))
 
-    Issue 8 fix: use zoneinfo (stdlib >=3.9) for correct DST handling instead
-    of a fixed -8 offset that was wrong half the year.  Falls back gracefully
-    on Python 3.8 where zoneinfo is not yet in the stdlib.
+
+def _pacific_date_without_tzdata(utc_now) -> str:
     """
+    Pacific date for a naive UTC datetime, using the US daylight-saving rule in
+    force since 2007: DST starts 2:00 local on the 2nd Sunday of March (10:00 UTC)
+    and ends 2:00 local on the 1st Sunday of November (09:00 UTC).
+
+    Used when the system has no time zone database. That's the case on Windows
+    unless the optional `tzdata` package is installed.
+    """
+    import datetime
+    start = datetime.datetime.combine(_nth_sunday(utc_now.year, 3, 2), datetime.time(10, 0))
+    end   = datetime.datetime.combine(_nth_sunday(utc_now.year, 11, 1), datetime.time(9, 0))
+    offset = -7 if start <= utc_now < end else -8
+    return (utc_now + datetime.timedelta(hours=offset)).strftime("%Y-%m-%d")
+
+
+def _get_current_date_pt():
+    """Return current date string in Pacific Time (where YouTube quota resets)."""
     import datetime
     try:
         import zoneinfo
         pt_now = datetime.datetime.now(zoneinfo.ZoneInfo("America/Los_Angeles"))
+        return pt_now.strftime("%Y-%m-%d")
     except Exception:
-        # Python 3.8 fallback: approximate PDT/PST with -7 (slightly better
-        # than always -8, since most of the year the US is on DST).
+        # No zoneinfo or no time zone database (e.g. Windows without tzdata).
         utc_now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-        pt_now  = utc_now - datetime.timedelta(hours=7)
-    return pt_now.strftime("%Y-%m-%d")
+        return _pacific_date_without_tzdata(utc_now)
 
 
 def _load_quota_tracker():

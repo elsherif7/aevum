@@ -18,6 +18,7 @@ from aevum_pkg import __version__
 
 from ._cli_cmds import cmd_scan
 from ._color import clr
+from ._display import _safe
 from ._exit import EX
 
 
@@ -85,7 +86,7 @@ def _parse_target() -> str:
         sys.exit(EX.OK)
     # scan takes no options. A leading dash is only a path if that path exists.
     if tokens[0].startswith('-') and not os.path.exists(tokens[0]):
-        print(f"\n  {clr.R}[ERROR]{clr.RST} Unknown option: {tokens[0]}. "
+        print(f"\n  {clr.R}[ERROR]{clr.RST} Unknown option: {_safe(tokens[0])}. "
               f"'aevum scan' takes no options, only a path or URL.\n",
               file=sys.stderr)
         sys.exit(EX.ERR_ARGS)
@@ -98,6 +99,20 @@ def _parse_target() -> str:
     return tokens[0].strip().strip("'\"")
 
 
+def _harden_streams() -> None:
+    """
+    Never crash while printing. A file name the console encoding can't represent
+    (a Japanese folder name with a cp1252 console, or undecodable bytes in a
+    name) would otherwise raise UnicodeEncodeError after the scan has finished.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors='replace')  # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass
+
+
 def main():
+    _harden_streams()
     target = _parse_target()
     cmd_scan(target)

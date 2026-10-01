@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 from ._color import clr
-from ._display import _fuzzy_suggest, print_results, print_url_results
+from ._display import _fuzzy_suggest, _safe, print_results, print_url_results
 from ._exit import EX
 from ._scan import _run_scan, check_ffprobe
 from ._youtube import (
@@ -68,7 +68,7 @@ def cmd_scan(raw: str) -> None:
 
 def _print_limit_message(e: YouTubeLimitError) -> None:
     """Explain a rate/quota stop and how to continue (progress is already saved)."""
-    print(f"\n\n  {clr.Y}[LIMIT]{clr.RST} {e}", file=sys.stderr)
+    print(f"\n\n  {clr.Y}[LIMIT]{clr.RST} {_safe(e, 500)}", file=sys.stderr)
     if e.kind == 'rate' and e.retry_after:
         mins = max(1, math.ceil(e.retry_after / 60))
         when = f"in about {mins} minute{'s' if mins != 1 else ''}"
@@ -86,7 +86,7 @@ def _scan_youtube(raw: str) -> None:
     # Reject links we can't use before asking for an API key or touching the network.
     kind, _ = _parse_yt_url(_normalise_url(raw))
     if kind is None:
-        print(f"\n  {clr.R}[ERROR]{clr.RST} Not a supported YouTube URL: {raw}", file=sys.stderr)
+        print(f"\n  {clr.R}[ERROR]{clr.RST} Not a supported YouTube URL: {_safe(raw, 500)}", file=sys.stderr)
         print(f"  {clr.DIM}Use a video, playlist, or channel link, e.g. "
               f"youtube.com/watch?v=ID, /playlist?list=ID, /@handle, /channel/ID{clr.RST}\n",
               file=sys.stderr)
@@ -106,7 +106,7 @@ def _scan_youtube(raw: str) -> None:
         _print_limit_message(e)
         sys.exit(EX.ERR_API)
     except Exception as e:
-        print(f"\n  {clr.R}[ERROR]{clr.RST} {e}\n", file=sys.stderr)
+        print(f"\n  {clr.R}[ERROR]{clr.RST} {_safe(e, 500)}\n", file=sys.stderr)
         sys.exit(EX.ERR_API)
 
     api_fetched  = total_count - cache_hits
@@ -123,18 +123,18 @@ def _scan_youtube(raw: str) -> None:
 def _scan_folder(raw: str) -> None:
     folder = Path(raw)
     if not folder.exists():
-        print(f"\n  {clr.R}[ERROR]{clr.RST} Path not found: {folder}", file=sys.stderr)
+        print(f"\n  {clr.R}[ERROR]{clr.RST} Path not found: {_safe(str(folder), 500)}", file=sys.stderr)
         try:
             sug = _fuzzy_suggest(folder.name,
                                  [p.name for p in folder.parent.iterdir() if p.is_dir()])
             if sug:
-                print(f"  {clr.DIM}Did you mean:{clr.RST}  {clr.W}{folder.parent / sug}{clr.RST}", file=sys.stderr)
+                print(f"  {clr.DIM}Did you mean:{clr.RST}  {clr.W}{_safe(str(folder.parent / sug), 500)}{clr.RST}", file=sys.stderr)
         except Exception:
             pass
         print()
         sys.exit(EX.ERR_ARGS)
     if not folder.is_dir():
-        print(f"\n  {clr.R}[ERROR]{clr.RST} That is a file, not a folder: {folder}\n", file=sys.stderr)
+        print(f"\n  {clr.R}[ERROR]{clr.RST} That is a file, not a folder: {_safe(str(folder), 500)}\n", file=sys.stderr)
         sys.exit(EX.ERR_ARGS)
     _require_ffprobe("scan")
 

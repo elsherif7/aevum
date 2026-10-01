@@ -100,19 +100,21 @@ def run_cli(tmp_path):
     fake_home = tmp_path / "home"
     fake_home.mkdir()
 
-    def run(*args: str, stdin: str = "", cwd: Path | None = None) -> subprocess.CompletedProcess:
-        env = {
+    def run(*args: str, stdin: str = "", cwd: Path | None = None,
+            env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+        full_env = {
             **os.environ,
             "HOME": str(fake_home),
             "USERPROFILE": str(fake_home),
             "LOCALAPPDATA": str(fake_home / "AppData" / "Local"),
             "XDG_DATA_HOME": str(fake_home / ".local" / "share"),
             "PYTHONIOENCODING": "utf-8",
+            **(env or {}),
         }
         r = subprocess.run(
             [sys.executable, str(ROOT / "aevum.py"), *args],
             capture_output=True, text=True, encoding="utf-8",
-            input=stdin, env=env, cwd=cwd or ROOT, timeout=120,
+            input=stdin, env=full_env, cwd=cwd or ROOT, timeout=120,
         )
         r.stdout = _ANSI.sub("", r.stdout)
         r.stderr = _ANSI.sub("", r.stderr)

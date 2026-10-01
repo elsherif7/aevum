@@ -473,3 +473,197 @@ def test_scan_url_reports_unknown_channel(fake_api, monkeypatch):
     fake_api()
     with pytest.raises(ValueError, match="Could not find channel"):
         yt.scan_url("https://www.youtube.com/@nobody")
+
+
+# ---------------------------------------------------------------------------
+# API key file: private from the first byte
+# ---------------------------------------------------------------------------
+
+posix_only = pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX permissions only")
+
+
+def _mode(path):
+    return path.stat().st_mode & 0o777
+
+
+@posix_only
+def test_key_file_is_private_even_with_a_permissive_umask(key_file):
+    import os
+    old = os.umask(0)                      # worst case: everything would be 0666
+    try:
+        assert yt.save_api_key(VALID_KEY)
+    finally:
+        os.umask(old)
+    assert _mode(key_file) == 0o600
+
+
+@posix_only
+def test_key_file_does_not_depend_on_a_later_chmod(key_file, monkeypatch):
+    # The old code wrote with default permissions and then called chmod, leaving a
+    # window where the key was readable. Now chmod is not needed at all.
+    import os
+    monkeypatch.setattr(os, "chmod", lambda *a, **k: (_ for _ in ()).throw(AssertionError("chmod used")))
+    old = os.umask(0)
+    try:
+        assert yt.save_api_key(VALID_KEY)
+    finally:
+        os.umask(old)
+    assert _mode(key_file) == 0o600
+
+
+@posix_only
+def test_saving_over_a_world_readable_key_file_makes_it_private(key_file):
+    key_file.parent.mkdir(parents=True)
+    key_file.write_text("old")
+    key_file.chmod(0o644)
+    assert yt.save_api_key(VALID_KEY)
+    assert _mode(key_file) == 0o600
+    assert yt.load_api_key() == VALID_KEY
+
+
+@posix_only
+def test_new_data_directory_is_owner_only(key_file):
+    assert yt.save_api_key(VALID_KEY)
+    assert _mode(key_file.parent) == 0o700
+
+
+def test_failed_save_leaves_no_temp_file_and_no_key(key_file, monkeypatch):
+    import os
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", boom)
+    assert yt.save_api_key(VALID_KEY) is False
+    assert list(key_file.parent.iterdir()) == []         # nothing left behind
+    assert not key_file.exists()
+
+
+def test_key_is_never_printed_or_in_error_messages(monkeypatch, capsys):
+    import urllib.error
+    import urllib.request
+
+    def boom(*a, **k):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    with pytest.raises(RuntimeError) as exc:
+        yt._yt_api_request("videos", {"id": "x"}, VALID_KEY)
+    assert VALID_KEY not in str(exc.value)
+    assert VALID_KEY not in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# Pacific date without a time zone database
+# ---------------------------------------------------------------------------
+
+def _zone():
+    try:
+        import zoneinfo
+        return zoneinfo.ZoneInfo("America/Los_Angeles")
+    except Exception:
+        pytest.skip("no time zone database on this system")
+
+
+def test_pacific_fallback_matches_the_real_time_zone_database():
+    import datetime
+    zone = _zone()
+    utc = datetime.datetime(2025, 1, 1)
+    end = datetime.datetime(2029, 1, 1)
+    step = datetime.timedelta(minutes=30)
+    bad = []
+    while utc < end:
+        expected = utc.replace(tzinfo=datetime.timezone.utc).astimezone(zone).strftime("%Y-%m-%d")
+        if yt._pacific_date_without_tzdata(utc) != expected:
+            bad.append(utc)
+        utc += step
+    assert not bad, f"{len(bad)} mismatches, first at {bad[0]}"
+
+
+@pytest.mark.parametrize("utc, expected", [
+    # The quota resets at midnight Pacific: 07:00 UTC in summer (PDT), 08:00 UTC in winter (PST).
+    ((2026, 7, 1, 6, 59), "2026-06-30"),
+    ((2026, 7, 1, 7, 0), "2026-07-01"),
+    ((2026, 12, 1, 7, 59), "2026-11-30"),
+    ((2026, 12, 1, 8, 0), "2026-12-01"),
+    # Around the 2026 clock changes (8 March and 1 November) the date is unaffected.
+    ((2026, 3, 8, 9, 59), "2026-03-08"),
+    ((2026, 3, 8, 10, 0), "2026-03-08"),
+    ((2026, 11, 1, 8, 59), "2026-11-01"),
+    ((2026, 11, 1, 9, 0), "2026-11-01"),
+])
+def test_pacific_fallback_known_moments(utc, expected):
+    import datetime
+    assert yt._pacific_date_without_tzdata(datetime.datetime(*utc)) == expected
+
+
+def test_current_pt_date_works_when_the_time_zone_database_is_missing(monkeypatch):
+    import datetime
+    import zoneinfo
+
+    def missing(*a, **k):
+        raise zoneinfo.ZoneInfoNotFoundError("America/Los_Angeles")
+
+    monkeypatch.setattr(zoneinfo, "ZoneInfo", missing)
+
+    def now():
+        return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+    before = yt._pacific_date_without_tzdata(now())
+    got = yt._get_current_date_pt()
+    after = yt._pacific_date_without_tzdata(now())
+    assert got in (before, after)
+
+
+# ---------------------------------------------------------------------------
+# A damaged or tampered cache file cannot crash a scan
+# ---------------------------------------------------------------------------
+
+GOOD = {"title": "T", "duration": 60.0, "cached_at": 1}
+
+
+@pytest.mark.parametrize("entry, ok", [
+    (GOOD, True),
+    ({"title": "T", "duration": 60}, True),                                 # no cached_at (older cache)
+    ({"unavailable": True, "cached_at": 5}, True),
+    ("a string", False),
+    ([1, 2], False),
+    (None, False),
+    ({**GOOD, "title": 5}, False),                                          # title not a string
+    ({**GOOD, "duration": "60"}, False),
+    ({**GOOD, "duration": float("nan")}, False),
+    ({**GOOD, "duration": float("inf")}, False),
+    ({**GOOD, "duration": -1}, False),
+    ({**GOOD, "duration": 10**12}, False),                                  # absurdly long
+    ({**GOOD, "duration": True}, False),
+    ({"unavailable": True, "cached_at": "yesterday"}, False),
+    ({**GOOD, "cached_at": float("nan")}, False),
+])
+def test_valid_cache_entry(entry, ok):
+    assert yt._valid_cache_entry(entry) is ok
+
+
+def test_loading_drops_bad_entries_and_keeps_good_ones():
+    yt.YT_VCACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    yt.YT_VCACHE_FILE.write_text(
+        '{"good": {"title": "T", "duration": 60, "cached_at": 1},'
+        ' "nan": {"title": "T", "duration": NaN},'
+        ' "list": [1, 2],'
+        ' "badstub": {"unavailable": true, "cached_at": "x"}}')
+    assert set(yt._load_yt_video_cache()) == {"good"}
+
+
+@pytest.mark.parametrize("content", ["[]", "42", '"text"', "null"])
+def test_loading_a_cache_that_is_not_an_object_gives_empty(content):
+    yt.YT_VCACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    yt.YT_VCACHE_FILE.write_text(content)
+    assert yt._load_yt_video_cache() == {}
+
+
+def test_a_scan_recovers_from_a_damaged_cache(fake_api):
+    yt.YT_VCACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    yt.YT_VCACHE_FILE.write_text('{"v0001": {"title": 5, "duration": NaN}}')
+    api = fake_api()
+    entries, hits, unavailable = yt._fetch_with_cache(["v0001"], "key", yt._load_yt_video_cache())
+    assert len(entries) == 1 and hits == 0
+    assert len(api.video_calls()) == 1                # the bad entry was refetched

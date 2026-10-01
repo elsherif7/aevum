@@ -277,3 +277,63 @@ def test_video_link_with_playlist_gets_a_hint(monkeypatch, capsys):
     _, out, _ = _run_scan_youtube(
         monkeypatch, capsys, "https://www.youtube.com/watch?v=abc", fake)
     assert "only the video is scanned" not in out
+
+
+# ---------------------------------------------------------------------------
+# Hostile and awkward names, end to end
+# ---------------------------------------------------------------------------
+
+def _own_colours_removed(text: str) -> str:
+    import re
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
+@needs_ffmpeg
+@pytest.mark.skipif(os.name == "nt", reason="Windows file names cannot contain control characters")
+def test_hostile_folder_names_cannot_drive_the_terminal(run_cli, clips, tmp_path):
+    root = tmp_path / "lib"
+    names = [
+        "evil\x1b]0;PWNED\x07dir",       # set window title
+        "clear\x1b[2Jscreen",             # clear screen
+        "hide\x1b[?25lcursor",            # private CSI
+        "c1\u009b31mred",                 # C1 control
+        "rlo\u202etxt.4pm",               # bidi override
+    ]
+    import shutil
+    for n in names:
+        (root / n).mkdir(parents=True)
+        shutil.copy(clips["clip.mp4"], root / n / "x.mp4")
+
+    r = run_cli("scan", str(root))
+    assert r.returncode == EX.OK, r.stderr
+    rest = _own_colours_removed(r.stdout)
+    for ch in ("\x1b", "\x07", "\u009b", "\u202e"):
+        assert ch not in rest, f"{ch!r} reached the terminal"
+    assert "evildir" in rest and "clearscreen" in rest      # names still readable
+
+
+@pytest.mark.skipif(os.name == "nt", reason="control characters cannot be passed this way on Windows")
+def test_hostile_text_echoed_in_error_messages_is_sanitised(run_cli):
+    for args in (("scan", "\x1b]0;PWNED\x07nope"),       # path not found
+                 ("scan", "--\x1b[2Jopt"),                # unknown option
+                 ("scan", "https://example.com/\x1b[2J")):  # unsupported URL
+        r = run_cli(*args)
+        assert r.returncode == EX.ERR_ARGS
+        rest = _own_colours_removed(r.stderr)
+        assert "\x1b" not in rest and "\x07" not in rest
+        assert "\x1b[2J" not in r.stderr
+
+
+@needs_ffmpeg
+def test_names_the_console_cannot_encode_do_not_crash_the_report(run_cli, clips, tmp_path):
+    # A Japanese folder name with a cp1252 output encoding (e.g. redirected on Windows)
+    # used to end the run with a UnicodeEncodeError traceback after scanning.
+    import shutil
+    root = tmp_path / "lib"
+    (root / "日本語").mkdir(parents=True)
+    shutil.copy(clips["clip.mp4"], root / "日本語" / "x.mp4")
+
+    r = run_cli("scan", str(root), env={"PYTHONIOENCODING": "cp1252"})
+    assert r.returncode == EX.OK, r.stderr
+    assert "Traceback" not in r.stderr
+    assert "1 files found" in r.stdout

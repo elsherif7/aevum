@@ -7,14 +7,29 @@ from ._color import LINE, clr
 from ._models import FolderNode, ScanTree
 from ._scan import format_duration, format_size
 
-_ANSI_ESCAPE = _re.compile(r'\x1b(?:\[[0-9;]*[mGKHFJA-Za-z]|\][^\x07]*\x07|[^[])')
-_CTRL_CHARS  = _re.compile(r'[\x00-\x1f\x7f]')
+# Complete escape sequences: CSI (ESC [ ... final byte, including private forms such
+# as ESC[?25l), OSC (ESC ] ... BEL or ESC \), charset switches (ESC ( 0), and the
+# two-character ones such as ESC c (full terminal reset).
+_ANSI_ESCAPE = _re.compile(r'\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[ -/]+[0-~]|[0-~])')
+# C0 controls, DEL and C1 controls. U+009B is "CSI" on terminals that honour 8-bit controls.
+_CTRL_CHARS  = _re.compile(r'[\x00-\x1f\x7f-\x9f]')
+# Bidi embeddings/overrides/isolates, which can make "gpj.exe" display as "exe.jpg".
+_BIDI_CHARS  = _re.compile('[\u202a-\u202e\u2066-\u2069]')
 
-def _safe(name: str, maxlen: int = 200) -> str:
-    """Strip ANSI escape sequences and control characters from display strings."""
-    name = _ANSI_ESCAPE.sub('', name)
-    name = _CTRL_CHARS.sub('', name)
-    return name[:maxlen]
+
+def _safe(name: object, maxlen: int = 200) -> str:
+    """
+    Make an untrusted string (folder or file name, video title, channel name, a
+    path typed or pasted by the user) safe to print: no terminal escape sequences,
+    control characters or bidi overrides, and no characters that can't be encoded
+    (the stray bytes of an undecodable file name become '?').
+    """
+    text = str(name)
+    text = _ANSI_ESCAPE.sub('', text)
+    text = _CTRL_CHARS.sub('', text)
+    text = _BIDI_CHARS.sub('', text)
+    text = text.encode('utf-8', 'replace').decode('utf-8')
+    return text[:maxlen]
 
 
 _DEPTH_ATTRS = ("R", "G", "B", "M", "C")
@@ -83,6 +98,7 @@ def print_bar_chart(
     print(f"  {clr.C}{LINE}{clr.RST}")
     print()
     for label, sec in rows:
+        label = _safe(label)
         short = label if len(label) <= MAX_LABEL else label[:MAX_LABEL - 1] + "…"
         dur   = format_duration(sec)["hours_fmt"]
         bar   = _bar(sec, total_sec)
@@ -118,6 +134,7 @@ def print_tree(
     indent = PAD * depth
     fmt    = format_duration(seconds)
     col    = _dc(depth)
+    name   = _safe(name)
     label  = f"{number}.  {name}" if number else name
 
     if count == 0:
@@ -192,8 +209,8 @@ def print_results(
     print()
     print(f"  {clr.C}{LINE}{clr.RST}")
     _folder_p     = Path(folder).resolve()
-    _folder_label = _folder_p.name or _folder_p.drive or str(_folder_p)
-    print(f"  {clr.W}  {_folder_label}{clr.RST}  {clr.DIM}({folder}){clr.RST}")
+    _folder_label = _safe(_folder_p.name or _folder_p.drive or str(_folder_p))
+    print(f"  {clr.W}  {_folder_label}{clr.RST}  {clr.DIM}({_safe(str(folder), 500)}){clr.RST}")
     print(f"  {clr.C}{LINE}{clr.RST}")
     print()
     print_tree(
@@ -237,7 +254,7 @@ def print_url_results(
     fmt = format_duration(total_sec)
     print()
     print(f"  {clr.C}{LINE}{clr.RST}")
-    print(f"  {clr.W}  {label}{clr.RST}  {clr.DIM}({url}){clr.RST}")
+    print(f"  {clr.W}  {_safe(label)}{clr.RST}  {clr.DIM}({_safe(url, 500)}){clr.RST}")
     print(f"  {clr.C}{LINE}{clr.RST}")
     print()
     print(f"  {clr.W}  Total videos  {clr.DIM}:{clr.RST}  {clr.W}{total_count}{clr.RST}")
@@ -262,14 +279,14 @@ def print_url_results(
         print(f"  {clr.C}{LINE}{clr.RST}")
         for i, e in enumerate(ranked, start=1):
             dur_fmt = format_duration(e["duration"])
-            print(f"  {clr.DIM}{i:>2}.{clr.RST}  {clr.W}{dur_fmt['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{e['title'][:60]}{clr.RST}")
+            print(f"  {clr.DIM}{i:>2}.{clr.RST}  {clr.W}{dur_fmt['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{_safe(e['title'])[:60]}{clr.RST}")
         print()
 
     # Bar chart: top channels by total duration (only when multiple channels present)
     if entries and total_sec > 0:
         channel_secs: dict = {}
         for e in entries:
-            ch = e.get("channel") or "Unknown"
+            ch = _safe(e.get("channel") or "Unknown")
             channel_secs[ch] = channel_secs.get(ch, 0.0) + e["duration"]
         if len(channel_secs) > 1:
             MAX_LABEL = 26

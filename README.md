@@ -138,9 +138,14 @@ Get a free key in about two minutes:
 2. Create a project → enable **YouTube Data API v3**
 3. Credentials → Create API Key → paste it when Aevum asks
 
-The key is saved to `~/.local/share/Aevum/yt_api_key.txt` on
-Linux/macOS or `%LOCALAPPDATA%\Aevum\yt_api_key.txt` on Windows, with
-owner-only file permissions.
+The key is saved as plain text to `~/.local/share/Aevum/yt_api_key.txt`
+on Linux/macOS or `%LOCALAPPDATA%\Aevum\yt_api_key.txt` on Windows.
+
+- On Linux/macOS the file is created readable by your user only
+  (mode 600).
+- On Windows Aevum doesn't change the file's permissions. It sits in
+  your profile folder, which other standard user accounts can't read by
+  default.
 
 ---
 
