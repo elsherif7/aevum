@@ -364,6 +364,15 @@ def _http_error(code, reason, message="boom"):
     return urllib.error.HTTPError("https://x", code, "err", {}, io.BytesIO(body))
 
 
+def _http_error_with_retry_after(code, retry_after, reason="rateLimitExceeded", message="slow down"):
+    from email.message import Message
+    hdrs = Message()
+    if retry_after is not None:
+        hdrs["Retry-After"] = str(retry_after)
+    body = json.dumps({"error": {"message": message, "errors": [{"reason": reason}]}}).encode()
+    return urllib.error.HTTPError("https://x", code, "err", hdrs, io.BytesIO(body))
+
+
 class _FakeResponse:
     """What urllib.request.urlopen returns, as a context manager."""
     def __init__(self, payload):
@@ -434,24 +443,65 @@ def test_rate_limit_that_never_clears_gives_up_with_a_rate_error(monkeypatch, sl
     calls = _scripted_urlopen(monkeypatch, *errors)
     with pytest.raises(yt.YouTubeLimitError) as exc:
         yt._yt_api_request("videos", {"id": "x"}, "key")
+    assert exc.value.kind == "rate" and exc.value.retry_after is None   # YouTube gave no hint
+    assert len(calls) == 4 and sleeps == [1, 2, 4]     # first try + 3 retries, no jitter
+
+
+def test_short_retry_after_is_honoured_exactly(monkeypatch, sleeps):
+    calls = _scripted_urlopen(
+        monkeypatch,
+        _http_error_with_retry_after(429, "7"),
+        _http_error_with_retry_after(503, "12", reason="backendError"),
+        {"items": ["ok"]},
+    )
+    assert yt._yt_api_request("videos", {"id": "x"}, "key") == {"items": ["ok"]}
+    assert sleeps == [7, 12]                       # exactly what YouTube asked for, not 1 s / 2 s
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("code, reason, expected_text", [
+    (429, "rateLimitExceeded", "limiting requests"),
+    (503, "backendError", "temporarily unavailable"),
+])
+def test_long_retry_after_stops_instead_of_retrying_early(monkeypatch, sleeps, code, reason, expected_text):
+    calls = _scripted_urlopen(monkeypatch, _http_error_with_retry_after(code, "300", reason=reason))
+    with pytest.raises(yt.YouTubeLimitError) as exc:
+        yt._yt_api_request("videos", {"id": "x"}, "key")
     assert exc.value.kind == "rate"
-    assert len(calls) == 4 and sleeps == [1, 2, 4]     # first try + 3 retries
+    assert exc.value.retry_after == 300.0           # so the CLI can say "in about 5 minutes"
+    assert expected_text in str(exc.value)
+    assert len(calls) == 1 and sleeps == []         # no early retry, no waiting
 
 
-def test_retry_after_header_is_honoured_but_capped(monkeypatch, sleeps):
-    from email.message import Message
+def test_long_retry_after_after_a_short_one_still_stops(monkeypatch, sleeps):
+    calls = _scripted_urlopen(
+        monkeypatch, _http_error_with_retry_after(429, "5"), _http_error_with_retry_after(429, "600"))
+    with pytest.raises(yt.YouTubeLimitError) as exc:
+        yt._yt_api_request("videos", {"id": "x"}, "key")
+    assert exc.value.retry_after == 600.0
+    assert len(calls) == 2 and sleeps == [5]
 
-    def with_header(value):
-        hdrs = Message()
-        hdrs["Retry-After"] = value
-        body = json.dumps({"error": {"message": "slow down",
-                                     "errors": [{"reason": "rateLimitExceeded"}]}}).encode()
-        return urllib.error.HTTPError("https://x", 429, "err", hdrs, io.BytesIO(body))
 
-    _scripted_urlopen(monkeypatch, with_header("7"), with_header("5000"),
-                      with_header("Wed, 21 Oct 2026 07:28:00 GMT"), {"items": []})
-    yt._yt_api_request("videos", {"id": "x"}, "key")
-    assert sleeps == [7, 60, 4]       # 7 s as told; 5000 capped to 60; a date is ignored -> backoff
+def test_retries_that_run_out_report_the_wait_youtube_asked_for(monkeypatch, sleeps):
+    calls = _scripted_urlopen(monkeypatch, *[_http_error_with_retry_after(429, "2")] * 4)
+    with pytest.raises(yt.YouTubeLimitError) as exc:
+        yt._yt_api_request("videos", {"id": "x"}, "key")
+    assert exc.value.kind == "rate" and exc.value.retry_after == 2.0
+    assert len(calls) == 4 and sleeps == [2, 2, 2]
+
+
+def test_a_long_retry_after_mid_scan_keeps_progress_and_says_when_to_return(monkeypatch, sleeps):
+    ids = _ids(150)
+    first_batch = {"items": [
+        {"id": v, "snippet": {"title": v, "channelTitle": ""}, "contentDetails": {"duration": "PT1M"}}
+        for v in ids[:50]
+    ]}
+    _scripted_urlopen(monkeypatch, first_batch, _http_error_with_retry_after(429, "600"))
+    with pytest.raises(yt.YouTubeLimitError) as exc:
+        yt._fetch_with_cache(ids, "key", {})
+    assert (exc.value.saved, exc.value.total, exc.value.retry_after) == (50, 150, 600.0)
+    assert set(yt._load_yt_video_cache()) == set(ids[:50])
+    assert sleeps == []
 
 
 def test_other_http_errors_stay_plain_errors_and_are_not_retried(monkeypatch, sleeps):
@@ -551,6 +601,71 @@ def test_permanent_errors_are_never_retried(monkeypatch, sleeps, code, reason):
     with pytest.raises(RuntimeError):
         yt._yt_api_request("videos", {"id": "x"}, "key")
     assert len(calls) == 1 and sleeps == []
+
+
+@pytest.mark.parametrize("code", [408, 501, 505, 507])
+def test_only_the_four_listed_server_errors_are_retried(monkeypatch, sleeps, code):
+    # 500/502/503/504 are retried. Other 5xx codes (501 Not Implemented, 505 HTTP
+    # Version Not Supported, ...) are permanent, so retrying them would only waste
+    # time; 408 is deliberately left out too.
+    calls = _scripted_urlopen(monkeypatch, _http_error(code, "whatever"))
+    with pytest.raises(RuntimeError, match=str(code)):
+        yt._yt_api_request("videos", {"id": "x"}, "key")
+    assert len(calls) == 1 and sleeps == []
+
+
+@pytest.mark.parametrize("header, expected_sleeps", [
+    ("0", [0]),             # YouTube says "retry now"
+    ("30", [30]),           # exactly at the limit: still honoured
+    ("-5", [1]),            # nonsense: ignored, normal backoff
+    ("soon", [1]),
+    ("", [1]),
+])
+def test_retry_after_edge_cases(monkeypatch, sleeps, header, expected_sleeps):
+    _scripted_urlopen(monkeypatch, _http_error_with_retry_after(429, header), {"items": []})
+    yt._yt_api_request("videos", {"id": "x"}, "key")
+    assert sleeps == expected_sleeps
+
+
+@pytest.mark.parametrize("header", ["30.5", "31", "61", "86400"])
+def test_retry_after_just_over_the_limit_stops(monkeypatch, sleeps, header):
+    calls = _scripted_urlopen(monkeypatch, _http_error_with_retry_after(429, header))
+    with pytest.raises(yt.YouTubeLimitError) as exc:
+        yt._yt_api_request("videos", {"id": "x"}, "key")
+    assert exc.value.retry_after == float(header)
+    assert len(calls) == 1 and sleeps == []
+
+
+def test_the_limit_for_honouring_retry_after_is_30_seconds():
+    assert yt._MAX_RETRY_AFTER == 30
+
+
+NOW = 1_800_000_000.0
+
+
+@pytest.mark.parametrize("value, expected", [
+    ("7", 7.0),
+    ("7.5", 7.5),
+    ("  12 ", 12.0),
+    ("0", 0.0),
+    (None, None),
+    ("", None),
+    ("soon", None),
+    ("-5", None),
+    ("nan", None),
+    ("inf", None),
+    ("1e3", None),
+    ("Wed, 99 Foo 2026 07:28:00 GMT", None),
+])
+def test_retry_after_seconds_numbers_and_junk(value, expected):
+    assert yt._retry_after_seconds(value, now=NOW) == expected
+
+
+def test_retry_after_seconds_understands_http_dates():
+    from email.utils import formatdate
+    assert yt._retry_after_seconds(formatdate(NOW + 90, usegmt=True), now=NOW) == 90.0
+    assert yt._retry_after_seconds(formatdate(NOW + 7200, usegmt=True), now=NOW) == 7200.0
+    assert yt._retry_after_seconds(formatdate(NOW - 30, usegmt=True), now=NOW) == 0.0   # already passed
 
 
 def test_a_temporary_failure_mid_scan_keeps_the_progress_so_far(monkeypatch, sleeps):

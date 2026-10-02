@@ -66,14 +66,24 @@ def cmd_scan(raw: str) -> None:
         _scan_folder(raw)
 
 
+def _wait_phrase(seconds: float) -> str:
+    """'in about 5 minutes', 'in about 3 hours', ... for a wait YouTube asked for."""
+    mins = max(1, math.ceil(seconds / 60))
+    if mins < 120:
+        return f"in about {mins} minute{'s' if mins != 1 else ''}"
+    hours = math.ceil(mins / 60)
+    if hours < 48:
+        return f"in about {hours} hours"
+    return f"in about {math.ceil(hours / 24)} days"
+
+
 def _print_limit_message(e: YouTubeLimitError) -> None:
     """Explain a rate/quota stop and how to continue (progress is already saved)."""
     print(f"\n\n  {clr.Y}[LIMIT]{clr.RST} {_safe(e, 500)}", file=sys.stderr)
     if e.kind == 'quota':
         when = "after YouTube's daily quota resets (midnight Pacific Time)"
-    elif e.retry_after:
-        mins = max(1, math.ceil(e.retry_after / 60))
-        when = f"in about {mins} minute{'s' if mins != 1 else ''}"
+    elif e.retry_after is not None:
+        when = _wait_phrase(e.retry_after)
     else:
         when = "in a minute or two"
     if e.total:

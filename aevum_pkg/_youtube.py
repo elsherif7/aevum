@@ -1,3 +1,4 @@
+import email.utils
 import http.client
 import json
 import math
@@ -229,8 +230,8 @@ def _parse_iso8601_duration(d):
 _YT_QUOTA_REASONS = ('quotaExceeded', 'dailyLimitExceeded')              # HTTP 403
 _YT_RATE_REASONS  = ('rateLimitExceeded', 'userRateLimitExceeded')       # HTTP 429 (or 403)
 
-_RETRY_DELAYS   = (1, 2, 4)    # seconds to wait before each retry of a failed request
-_MAX_RETRY_WAIT = 60           # never honour a Retry-After longer than this
+_RETRY_DELAYS    = (1, 2, 4)   # seconds to wait before each retry when YouTube gives no hint
+_MAX_RETRY_AFTER = 30          # longest Retry-After we sit through; a longer one stops the scan
 
 # Temporary trouble worth retrying: server-side errors, and timeouts or dropped
 # connections (including half-received responses).
@@ -244,9 +245,11 @@ class YouTubeLimitError(PermissionError):
     everything fetched so far was saved to the cache.
 
     kind='quota': the daily quota is used up (it resets at midnight Pacific Time).
-    kind='rate':  a short-window rate limit that outlasted the automatic retries.
+    kind='rate':  YouTube asked us to slow down or wait: a rate limit that outlasted
+                  the automatic retries, or a Retry-After longer than we'll sit through.
 
-    retry_after is a suggested wait in seconds, or None. _fetch_with_cache fills in
+    retry_after is how long YouTube asked us to wait, in seconds, or None if it
+    didn't say. _fetch_with_cache fills in
     `saved` / `total`: how many of the requested videos are now in the cache. Both
     stay None if the limit hit before then.
     """
@@ -289,15 +292,35 @@ def _classify_http_error(e):
     return None, msg
 
 
-def _retry_delay(e, attempt):
-    """Seconds to wait before retrying: the server's Retry-After (capped), else backoff."""
+_RETRY_AFTER_NUMBER = re.compile(r'\d+(?:\.\d+)?')
+
+
+def _retry_after_seconds(value, now=None):
+    """
+    Parse a Retry-After header: either a number of seconds or an HTTP date.
+    Returns the wait in seconds (never negative), or None if the header is
+    missing or can't be understood.
+    """
+    if value is None:
+        return None
+    value = str(value).strip()
+    if _RETRY_AFTER_NUMBER.fullmatch(value):
+        return float(value)
     try:
-        wait = float(e.headers.get('Retry-After'))
-        if math.isfinite(wait) and wait >= 0:
-            return min(wait, _MAX_RETRY_WAIT)
-    except (TypeError, ValueError, AttributeError):
-        pass
-    return _RETRY_DELAYS[attempt]
+        when = email.utils.parsedate_to_datetime(value)
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+    if when.tzinfo is None:
+        import datetime
+        when = when.replace(tzinfo=datetime.timezone.utc)
+    now = time.time() if now is None else now
+    return max(0.0, when.timestamp() - now)
+
+
+def _limit_message(kind, msg):
+    if kind == 'transient':
+        return f"YouTube is temporarily unavailable: {msg}"
+    return f"YouTube is limiting requests: {msg}"
 
 
 def _yt_api_request(endpoint, params, api_key):
@@ -309,9 +332,13 @@ def _yt_api_request(endpoint, params, api_key):
 
       - daily quota used up (403 quotaExceeded): YouTubeLimitError(kind='quota') at
         once, since waiting won't help until the quota resets
-      - rate limit (429): retried with a short backoff, then YouTubeLimitError(kind='rate')
+      - rate limit (429): retried, then YouTubeLimitError(kind='rate')
       - temporary trouble (HTTP 5xx, timeouts, dropped connections): retried the same
         way, then RuntimeError
+      - Retry-After: a wait of up to _MAX_RETRY_AFTER seconds is honoured exactly; a
+        longer one stops at once with YouTubeLimitError(kind='rate', retry_after=...)
+        instead of retrying sooner than YouTube asked. Without it, we back off
+        1 s, 2 s, 4 s (no jitter: Aevum is a single-user tool).
       - anything else (bad key, bad request, ...): RuntimeError, never retried
 
     Every request here is a GET, so retrying is safe.
@@ -339,13 +366,22 @@ def _yt_api_request(endpoint, params, api_key):
                 return json.loads(r.read().decode('utf-8'))
         except urllib.error.HTTPError as e:
             kind, msg = _classify_http_error(e)
-            if kind in ('rate', 'transient') and attempt < last:
-                time.sleep(_retry_delay(e, attempt))
-                continue
+            if kind in ('rate', 'transient'):
+                # Honour a short Retry-After exactly. A long one means YouTube wants us
+                # to stop: retrying earlier than it asked would be wrong, so we stop,
+                # keep what we have, and say when to come back.
+                asked = _retry_after_seconds(e.headers.get('Retry-After') if e.headers else None)
+                if asked is not None and asked > _MAX_RETRY_AFTER:
+                    raise YouTubeLimitError(
+                        _limit_message(kind, msg), kind='rate', retry_after=asked) from None
+                if attempt < last:
+                    time.sleep(asked if asked is not None else _RETRY_DELAYS[attempt])
+                    continue
+                if kind == 'rate':
+                    raise YouTubeLimitError(
+                        _limit_message(kind, msg), kind='rate', retry_after=asked) from None
             if kind == 'quota':
                 raise YouTubeLimitError(f"YouTube API quota exceeded: {msg}", kind='quota') from None
-            if kind == 'rate':
-                raise YouTubeLimitError(f"YouTube is limiting requests: {msg}", kind='rate') from None
             raise RuntimeError(f"YouTube API error {e.code}: {msg}") from None
         except urllib.error.URLError as e:
             if isinstance(e.reason, _TRANSIENT_NETWORK) and attempt < last:

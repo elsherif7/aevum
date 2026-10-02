@@ -126,7 +126,9 @@ A few other things worth knowing:
   channel or playlist, the videos already fetched are saved, and you can
   run the same command again after the quota resets (midnight Pacific
   Time) to carry on without fetching them twice. Brief rate limits and
-  temporary network or server errors are retried automatically.
+  temporary network or server errors are retried automatically. If
+  YouTube asks you to wait more than 30 seconds, Aevum stops, keeps what
+  it fetched, and tells you when to try again.
 - Private, deleted, or region-blocked videos are remembered for 7 days,
   so reruns don't spend quota asking about them again.
 

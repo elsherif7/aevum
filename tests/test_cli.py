@@ -252,6 +252,35 @@ def test_rate_limit_message_says_progress_is_saved(monkeypatch, capsys):
     assert "Run the same command again" in err
 
 
+@pytest.mark.parametrize("seconds, phrase", [
+    (45, "in about 1 minute"),
+    (60, "in about 1 minute"),
+    (61, "in about 2 minutes"),
+    (600, "in about 10 minutes"),
+    (7140, "in about 119 minutes"),
+    (7200, "in about 2 hours"),
+    (169200, "in about 47 hours"),
+    (200000, "in about 3 days"),
+])
+def test_wait_phrase(seconds, phrase):
+    from aevum_pkg._cli_cmds import _wait_phrase
+    assert _wait_phrase(seconds) == phrase
+
+
+def test_long_retry_after_message_tells_the_user_when_to_return(monkeypatch, capsys):
+    from aevum_pkg._youtube import YouTubeLimitError
+
+    def fake(*a, **k):
+        e = YouTubeLimitError("YouTube is limiting requests: slow down", kind="rate", retry_after=600.0)
+        e.saved, e.total = 50, 150
+        raise e
+
+    code, out, err = _run_scan_youtube(monkeypatch, capsys, "https://youtube.com/@x", fake)
+    assert code == EX.ERR_API
+    assert "in about 10 minutes" in err
+    assert "50 of 150 videos are saved" in err
+
+
 def test_rate_limit_without_a_wait_time_says_a_minute_or_two(monkeypatch, capsys):
     from aevum_pkg._youtube import YouTubeLimitError
 
