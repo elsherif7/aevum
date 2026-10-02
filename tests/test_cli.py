@@ -252,6 +252,18 @@ def test_rate_limit_message_says_progress_is_saved(monkeypatch, capsys):
     assert "Run the same command again" in err
 
 
+def test_rate_limit_without_a_wait_time_says_a_minute_or_two(monkeypatch, capsys):
+    from aevum_pkg._youtube import YouTubeLimitError
+
+    def fake(*a, **k):
+        raise YouTubeLimitError("YouTube is limiting requests: slow down", kind="rate")
+
+    code, out, err = _run_scan_youtube(monkeypatch, capsys, "https://youtube.com/@x", fake)
+    assert code == EX.ERR_API
+    assert "in a minute or two" in err
+    assert "daily quota" not in err
+
+
 def test_quota_message_mentions_daily_reset(monkeypatch, capsys):
     from aevum_pkg._youtube import YouTubeLimitError
 

@@ -13,13 +13,10 @@ from aevum_pkg import _youtube as yt
 
 @pytest.fixture(autouse=True)
 def isolate_state(tmp_path, monkeypatch):
-    """Keep every state file (key, cache, quota, rate limiter) inside tmp_path."""
+    """Keep every state file (key, cache, quota) inside tmp_path."""
     monkeypatch.setattr(yt, "YT_KEY_FILE", tmp_path / "state" / "key.txt")
     monkeypatch.setattr(yt, "YT_QUOTA_FILE", tmp_path / "state" / "quota.json")
     monkeypatch.setattr(yt, "YT_VCACHE_FILE", tmp_path / "state" / "cache.json")
-    limiter = yt._RateLimiter(max_calls=100, time_window=3600)
-    limiter._state_file = tmp_path / "state" / "ratelimit.json"
-    monkeypatch.setattr(yt, "youtube_limiter", limiter)
 
 # ---------------------------------------------------------------------------
 # ISO 8601 duration parsing
@@ -391,38 +388,122 @@ def _http_error(code, reason, message="boom"):
     return urllib.error.HTTPError("https://x", code, "err", {}, io.BytesIO(body))
 
 
+class _FakeResponse:
+    """What urllib.request.urlopen returns, as a context manager."""
+    def __init__(self, payload):
+        self._body = json.dumps(payload).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self):
+        return self._body
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    """Record time.sleep calls instead of actually waiting."""
+    waited = []
+    monkeypatch.setattr(yt.time, "sleep", waited.append)
+    return waited
+
+
+def _scripted_urlopen(monkeypatch, *outcomes):
+    """urlopen that yields each outcome in turn: an exception is raised, a dict is returned."""
+    calls = []
+    script = list(outcomes)
+
+    def fake(*a, **k):
+        calls.append(1)
+        outcome = script.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return _FakeResponse(outcome)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    return calls
+
+
 @pytest.mark.parametrize("code, reason", [
     (403, "quotaExceeded"),
     (403, "dailyLimitExceeded"),
-    (403, "rateLimitExceeded"),
-    (429, "whatever"),
 ])
-def test_quota_and_rate_http_errors_become_limit_errors(monkeypatch, code, reason):
-    def boom(*a, **k):
-        raise _http_error(code, reason)
-    monkeypatch.setattr(urllib.request, "urlopen", boom)
+def test_daily_quota_errors_stop_at_once_without_retrying(monkeypatch, sleeps, code, reason):
+    calls = _scripted_urlopen(monkeypatch, _http_error(code, reason))
     with pytest.raises(yt.YouTubeLimitError) as exc:
         yt._yt_api_request("videos", {"id": "x"}, "key")
     assert exc.value.kind == "quota"
+    assert len(calls) == 1 and sleeps == []            # waiting would not help until midnight PT
 
 
-def test_other_http_errors_stay_plain_errors(monkeypatch):
-    def boom(*a, **k):
-        raise _http_error(403, "keyInvalid", "API key not valid")
-    monkeypatch.setattr(urllib.request, "urlopen", boom)
+@pytest.mark.parametrize("code, reason", [
+    (429, "rateLimitExceeded"),
+    (429, "whatever"),
+    (403, "rateLimitExceeded"),
+    (403, "userRateLimitExceeded"),
+])
+def test_rate_limit_errors_are_retried_with_backoff_then_succeed(monkeypatch, sleeps, code, reason):
+    calls = _scripted_urlopen(
+        monkeypatch, _http_error(code, reason), _http_error(code, reason), {"items": ["ok"]})
+    assert yt._yt_api_request("videos", {"id": "x"}, "key") == {"items": ["ok"]}
+    assert len(calls) == 3
+    assert sleeps == [1, 2]
+
+
+def test_rate_limit_that_never_clears_gives_up_with_a_rate_error(monkeypatch, sleeps):
+    errors = [_http_error(429, "rateLimitExceeded") for _ in range(4)]
+    calls = _scripted_urlopen(monkeypatch, *errors)
+    with pytest.raises(yt.YouTubeLimitError) as exc:
+        yt._yt_api_request("videos", {"id": "x"}, "key")
+    assert exc.value.kind == "rate"
+    assert len(calls) == 4 and sleeps == [1, 2, 4]     # first try + 3 retries
+
+
+def test_retry_after_header_is_honoured_but_capped(monkeypatch, sleeps):
+    from email.message import Message
+
+    def with_header(value):
+        hdrs = Message()
+        hdrs["Retry-After"] = value
+        body = json.dumps({"error": {"message": "slow down",
+                                     "errors": [{"reason": "rateLimitExceeded"}]}}).encode()
+        return urllib.error.HTTPError("https://x", 429, "err", hdrs, io.BytesIO(body))
+
+    _scripted_urlopen(monkeypatch, with_header("7"), with_header("5000"),
+                      with_header("Wed, 21 Oct 2026 07:28:00 GMT"), {"items": []})
+    yt._yt_api_request("videos", {"id": "x"}, "key")
+    assert sleeps == [7, 60, 4]       # 7 s as told; 5000 capped to 60; a date is ignored -> backoff
+
+
+def test_other_http_errors_stay_plain_errors_and_are_not_retried(monkeypatch, sleeps):
+    calls = _scripted_urlopen(monkeypatch, _http_error(403, "keyInvalid", "API key not valid"))
     with pytest.raises(RuntimeError, match="API key not valid") as exc:
         yt._yt_api_request("videos", {"id": "x"}, "key")
     assert not isinstance(exc.value, yt.YouTubeLimitError)
     assert "key=" not in str(exc.value)              # the API key never appears in errors
+    assert len(calls) == 1 and sleeps == []
 
 
-def test_local_hourly_limit_is_a_limit_error(monkeypatch):
-    monkeypatch.setattr(yt.youtube_limiter, "allow_request", lambda: False)
-    monkeypatch.setattr(yt.youtube_limiter, "wait_time", lambda: 125.0)
-    with pytest.raises(yt.YouTubeLimitError) as exc:
+def test_a_server_error_without_json_is_a_plain_error(monkeypatch, sleeps):
+    err = urllib.error.HTTPError("https://x", 500, "oops", {}, io.BytesIO(b"<html>"))
+    _scripted_urlopen(monkeypatch, err)
+    with pytest.raises(RuntimeError, match="500"):
         yt._yt_api_request("videos", {"id": "x"}, "key")
-    assert exc.value.kind == "rate" and exc.value.retry_after == 125.0
-    assert isinstance(exc.value, PermissionError)    # old `except PermissionError` still works
+
+
+def test_there_is_no_local_request_limit(monkeypatch, tmp_path):
+    # Aevum used to refuse requests after 100 per hour. YouTube's own quota and
+    # rate-limit responses are the only limits now, and nothing is written to disk
+    # to count requests.
+    assert not hasattr(yt, "youtube_limiter") and not hasattr(yt, "_RateLimiter")
+    calls = _scripted_urlopen(monkeypatch, *[{"items": []}] * 300)
+    for _ in range(300):
+        yt._yt_api_request("videos", {"id": "x"}, "key")
+    assert len(calls) == 300
+    assert not list((tmp_path / "state").glob("*ratelimit*"))
 
 
 # ---------------------------------------------------------------------------

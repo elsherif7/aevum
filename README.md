@@ -121,10 +121,12 @@ A few other things worth knowing:
 - A link to a video inside a playlist (`watch?v=...&list=...`) scans
   just that video. Use the `/playlist?list=...` link to scan the whole
   playlist.
-- Aevum makes at most 100 YouTube requests per hour, and YouTube has a
-  daily quota of its own. If either stops a big channel or playlist
-  part-way, the videos already fetched are saved. Run the same command
-  again later and it carries on without fetching them twice.
+- YouTube's free quota is 10,000 units a day, and a request for 50
+  videos costs about 1 unit. If YouTube says the quota is used up
+  part-way through a big channel or playlist, the videos already fetched
+  are saved. Run the same command again after the quota resets (midnight
+  Pacific Time) and it carries on without fetching them twice. Brief
+  rate-limit responses are retried automatically.
 - Private, deleted, or region-blocked videos are remembered for 7 days,
   so reruns don't spend quota asking about them again.
 

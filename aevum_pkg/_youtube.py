@@ -5,11 +5,6 @@ import re
 import sys
 import time
 
-# ── Rate limiting (inlined from _ratelimit.py) ───────────────────────
-import time as _time_mod
-from collections import deque as _deque
-from threading import Lock as _Lock
-
 from ._color import clr
 from ._paths import YT_KEY_FILE, YT_QUOTA_FILE, YT_VCACHE_FILE
 
@@ -71,87 +66,6 @@ def load_api_key() -> str:
     except Exception:
         return ""
 
-
-class _RateLimiter:
-    """
-    Token bucket rate limiter — 100 req/hr to stay well under YouTube quota.
-
-    S-09 fix: state is persisted to disk so the limit is enforced across
-    multiple process invocations (e.g. shell loops).  The backing file is
-    a simple JSON list of UTC timestamps.  Entries older than time_window
-    are pruned on every load/save.
-    """
-    def __init__(self, max_calls: int, time_window: int):
-        self.max_calls   = max_calls
-        self.time_window = time_window
-        self.calls: _deque[float] = _deque()
-        self.lock        = _Lock()
-        self._state_file = None   # set lazily after _paths is importable
-
-    def _state_path(self):
-        if self._state_file is None:
-            from ._paths import APPDATA
-            self._state_file = APPDATA / "yt_ratelimit.json"
-        return self._state_file
-
-    def _load(self):
-        """Load persisted timestamps into self.calls (pruning stale ones)."""
-        try:
-            import json as _json
-            raw = _json.loads(self._state_path().read_text(encoding="utf-8"))
-            now = _time_mod.time()
-            self.calls = _deque(
-                t for t in raw if isinstance(t, (int, float)) and t >= now - self.time_window
-            )
-        except Exception:
-            self.calls = _deque()
-
-    def _save(self):
-        """Persist current timestamps atomically."""
-        try:
-            import json as _json
-            import os as _os
-            import tempfile
-            p = self._state_path()
-            p.parent.mkdir(parents=True, exist_ok=True)
-            tmp_fd, tmp_path = tempfile.mkstemp(dir=p.parent, suffix=".tmp")
-            try:
-                with _os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
-                    f.write(_json.dumps(list(self.calls)))
-                _os.replace(tmp_path, p)
-            except Exception:
-                try:
-                    _os.unlink(tmp_path)
-                except OSError:
-                    pass
-        except Exception:
-            pass
-
-    def allow_request(self) -> bool:
-        with self.lock:
-            self._load()
-            now = _time_mod.time()
-            while self.calls and self.calls[0] < now - self.time_window:
-                self.calls.popleft()
-            if len(self.calls) < self.max_calls:
-                self.calls.append(now)
-                self._save()
-                return True
-            return False
-
-    def wait_time(self) -> float:
-        with self.lock:
-            self._load()
-            if not self.calls:
-                return 0.0
-            return max(0.0, (self.calls[0] + self.time_window) - _time_mod.time())
-
-    def reset(self):
-        with self.lock:
-            self.calls.clear()
-            self._save()
-
-youtube_limiter = _RateLimiter(max_calls=100, time_window=3600)
 
 # Issue 13: file now uses LF line endings (normalised from original CRLF).
 
@@ -428,20 +342,27 @@ def _parse_iso8601_duration(d):
     return max(0.0, min(result, 365 * 86400))  # cap at 1 year
 
 
-# Error reasons YouTube uses when a quota or rate limit is hit (HTTP 403/429).
-_YT_LIMIT_REASONS = (
-    'quotaExceeded', 'dailyLimitExceeded', 'rateLimitExceeded', 'userRateLimitExceeded',
-)
+# What YouTube says when it refuses a request because of a limit. The two need
+# different handling: the daily quota won't clear until midnight Pacific Time, so
+# retrying is pointless, while a short-window rate limit clears within seconds.
+_YT_QUOTA_REASONS = ('quotaExceeded', 'dailyLimitExceeded')              # HTTP 403
+_YT_RATE_REASONS  = ('rateLimitExceeded', 'userRateLimitExceeded')       # HTTP 429 (or 403)
+
+_RATE_RETRY_DELAYS = (1, 2, 4)    # seconds between retries of a rate-limited request
+_MAX_RETRY_WAIT    = 60           # never honour a Retry-After longer than this
 
 
 class YouTubeLimitError(PermissionError):
     """
-    A request limit was hit: Aevum's own hourly limit (kind='rate') or YouTube's
-    daily quota (kind='quota'). Retrying later is safe: everything fetched so far
-    was saved to the cache.
+    YouTube refused a request because of a limit. Retrying later is safe:
+    everything fetched so far was saved to the cache.
 
-    _fetch_with_cache fills in `saved` / `total`: how many of the requested
-    videos are now in the cache. Both stay None if the limit hit before then.
+    kind='quota': the daily quota is used up (it resets at midnight Pacific Time).
+    kind='rate':  a short-window rate limit that outlasted the automatic retries.
+
+    retry_after is a suggested wait in seconds, or None. _fetch_with_cache fills in
+    `saved` / `total`: how many of the requested videos are now in the cache. Both
+    stay None if the limit hit before then.
     """
     def __init__(self, message, kind='rate', retry_after=None):
         super().__init__(message)
@@ -449,6 +370,46 @@ class YouTubeLimitError(PermissionError):
         self.retry_after = retry_after
         self.saved       = None
         self.total       = None
+
+
+_ssl_context = None
+
+
+def _get_ssl_context():
+    """One TLS context for the whole run. Creating it loads the system certificates (~25 ms)."""
+    global _ssl_context
+    if _ssl_context is None:
+        import ssl
+        _ssl_context = ssl.create_default_context()
+    return _ssl_context
+
+
+def _classify_http_error(e):
+    """Return (kind, message): kind is 'quota', 'rate', or None for any other error."""
+    reason = ''
+    try:
+        body     = e.read().decode('utf-8', errors='replace')
+        err_data = json.loads(body).get('error', {})
+        msg      = err_data.get('message', str(e))
+        reason   = (err_data.get('errors') or [{}])[0].get('reason', '')
+    except Exception:
+        msg = str(e)
+    if reason in _YT_QUOTA_REASONS:
+        return 'quota', msg
+    if e.code == 429 or reason in _YT_RATE_REASONS:
+        return 'rate', msg
+    return None, msg
+
+
+def _retry_delay(e, attempt):
+    """Seconds to wait before retrying: the server's Retry-After (capped), else backoff."""
+    try:
+        wait = float(e.headers.get('Retry-After'))
+        if math.isfinite(wait) and wait >= 0:
+            return min(wait, _MAX_RETRY_WAIT)
+    except (TypeError, ValueError, AttributeError):
+        pass
+    return _RATE_RETRY_DELAYS[attempt]
 
 
 def _yt_api_request(endpoint, params, api_key, quota_cost=None):
@@ -461,8 +422,10 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
     Issue 10 fix: HTTPError is caught and re-raised with a human-readable
     message that includes the API error description (e.g. "quota exceeded").
 
-    B-07 fix: rate limiter check moved here so it fires per API call, not
-    once per scan_url invocation.
+    There is no client-side request limit: YouTube enforces its own quota and rate
+    limits and says so in its responses. A rate limit (429) is retried a few times
+    with a short backoff; a daily quota error stops immediately. Both surface as
+    YouTubeLimitError.
     """
     import urllib.error
     import urllib.parse
@@ -470,14 +433,6 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
 
     if quota_cost is None:
         quota_cost = YT_QUOTA_COST.get(endpoint, 1)
-
-    # B-07: apply rate limiting per API call
-    if not youtube_limiter.allow_request():
-        wait = youtube_limiter.wait_time()
-        raise YouTubeLimitError(
-            f"Hourly request limit reached ({youtube_limiter.max_calls} requests per hour).",
-            kind='rate', retry_after=wait,
-        )
 
     # Copy params to avoid mutating the caller's dict
     params = {**params, 'key': api_key}
@@ -487,27 +442,26 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
     # For production use cases, consider OAuth 2.0 service accounts instead.
     url = f"{YT_API_BASE}/{endpoint}?{urllib.parse.urlencode(params)}"
 
-    try:
-        import ssl as _ssl
-        _ctx = _ssl.create_default_context()
-        with urllib.request.urlopen(url, timeout=15, context=_ctx) as r:
-            result = json.loads(r.read().decode('utf-8'))
-    except urllib.error.HTTPError as e:
-        # Issue 10: extract the API error message from the JSON body
-        # Never include the URL (which contains the API key) in error messages
-        reason = ''
+    ctx = _get_ssl_context()
+    for attempt in range(len(_RATE_RETRY_DELAYS) + 1):
         try:
-            body     = e.read().decode('utf-8', errors='replace')
-            err_data = json.loads(body).get('error', {})
-            msg      = err_data.get('message', str(e))
-            reason   = (err_data.get('errors') or [{}])[0].get('reason', '')
-        except Exception:
-            msg = str(e)
-        if e.code == 429 or reason in _YT_LIMIT_REASONS:
-            raise YouTubeLimitError(f"YouTube API quota exceeded: {msg}", kind='quota') from None
-        raise RuntimeError(f"YouTube API error {e.code}: {msg}") from None
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"YouTube API network error: {e.reason}") from None
+            with urllib.request.urlopen(url, timeout=15, context=ctx) as r:
+                result = json.loads(r.read().decode('utf-8'))
+            break
+        except urllib.error.HTTPError as e:
+            # Issue 10: use the API's own error message.
+            # Never include the URL (which contains the API key) in error messages.
+            kind, msg = _classify_http_error(e)
+            if kind == 'rate' and attempt < len(_RATE_RETRY_DELAYS):
+                time.sleep(_retry_delay(e, attempt))
+                continue
+            if kind == 'quota':
+                raise YouTubeLimitError(f"YouTube API quota exceeded: {msg}", kind='quota') from None
+            if kind == 'rate':
+                raise YouTubeLimitError(f"YouTube is limiting requests: {msg}", kind='rate') from None
+            raise RuntimeError(f"YouTube API error {e.code}: {msg}") from None
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"YouTube API network error: {e.reason}") from None
 
     _add_quota_usage(quota_cost)
     return result

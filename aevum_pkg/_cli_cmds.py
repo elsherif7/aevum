@@ -69,13 +69,13 @@ def cmd_scan(raw: str) -> None:
 def _print_limit_message(e: YouTubeLimitError) -> None:
     """Explain a rate/quota stop and how to continue (progress is already saved)."""
     print(f"\n\n  {clr.Y}[LIMIT]{clr.RST} {_safe(e, 500)}", file=sys.stderr)
-    if e.kind == 'rate' and e.retry_after:
+    if e.kind == 'quota':
+        when = "after YouTube's daily quota resets (midnight Pacific Time)"
+    elif e.retry_after:
         mins = max(1, math.ceil(e.retry_after / 60))
         when = f"in about {mins} minute{'s' if mins != 1 else ''}"
-    elif e.kind == 'quota':
-        when = "after YouTube's daily quota resets (midnight Pacific Time)"
     else:
-        when = "later"
+        when = "in a minute or two"
     if e.total:
         print(f"  {clr.W}{e.saved:,} of {e.total:,} videos are saved.{clr.RST}", file=sys.stderr)
     print(f"  Run the same command again {when} to continue. "
