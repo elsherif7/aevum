@@ -38,7 +38,7 @@ aevum/
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.11 or newer (tested on 3.11 to 3.14)
 - `ffprobe` (part of [FFmpeg](https://ffmpeg.org/download.html)) on
   your `PATH`, needed for local folder scanning
 - A free YouTube Data API v3 key, needed only for scanning YouTube

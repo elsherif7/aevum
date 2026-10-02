@@ -283,6 +283,8 @@ def _classify_http_error(e):
         reason   = (err_data.get('errors') or [{}])[0].get('reason', '')
     except Exception:
         msg = str(e)
+    finally:
+        e.close()   # we've read all we need; release the connection (3.14+ warns if left open)
     if reason in _YT_QUOTA_REASONS:
         return 'quota', msg
     if e.code == 429 or reason in _YT_RATE_REASONS:
@@ -312,7 +314,7 @@ def _retry_after_seconds(value, now=None):
         return None
     if when.tzinfo is None:
         import datetime
-        when = when.replace(tzinfo=datetime.timezone.utc)
+        when = when.replace(tzinfo=datetime.UTC)
     now = time.time() if now is None else now
     return max(0.0, when.timestamp() - now)
 

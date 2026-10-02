@@ -513,6 +513,14 @@ def test_other_http_errors_stay_plain_errors_and_are_not_retried(monkeypatch, sl
     assert len(calls) == 1 and sleeps == []
 
 
+def test_http_errors_are_closed_after_they_are_read():
+    # An unclosed HTTPError keeps its connection open; Python 3.14+ warns about it.
+    fp = io.BytesIO(json.dumps({"error": {"message": "x", "errors": [{"reason": "backendError"}]}}).encode())
+    err = urllib.error.HTTPError("https://x", 503, "err", {}, fp)
+    assert yt._classify_http_error(err) == ("transient", "x")
+    assert fp.closed
+
+
 def test_a_server_error_without_json_is_retried_then_a_plain_error(monkeypatch, sleeps):
     def err():
         return urllib.error.HTTPError("https://x", 500, "oops", {}, io.BytesIO(b"<html>"))
