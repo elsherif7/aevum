@@ -45,4 +45,3 @@ Thumbs.db
 # but guard against anyone accidentally running aevum from inside the repo.
 yt_api_key.txt
 yt_video_cache.json
-yt_quota_tracker.json

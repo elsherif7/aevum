@@ -92,7 +92,7 @@ def run_cli(tmp_path):
 
     HOME / LOCALAPPDATA / XDG_DATA_HOME point at a throwaway directory so a
     test can never read or write the developer's real Aevum data (API key,
-    cache, quota files).
+    cache files).
 
     ANSI color codes are stripped from stdout/stderr so tests can match
     plain text.

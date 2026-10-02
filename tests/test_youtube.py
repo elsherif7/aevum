@@ -1,6 +1,7 @@
 """YouTube helpers that need no network or API key."""
 from __future__ import annotations
 
+import http.client
 import io
 import json
 import urllib.error
@@ -13,9 +14,8 @@ from aevum_pkg import _youtube as yt
 
 @pytest.fixture(autouse=True)
 def isolate_state(tmp_path, monkeypatch):
-    """Keep every state file (key, cache, quota) inside tmp_path."""
+    """Keep every state file (key, cache) inside tmp_path."""
     monkeypatch.setattr(yt, "YT_KEY_FILE", tmp_path / "state" / "key.txt")
-    monkeypatch.setattr(yt, "YT_QUOTA_FILE", tmp_path / "state" / "quota.json")
     monkeypatch.setattr(yt, "YT_VCACHE_FILE", tmp_path / "state" / "cache.json")
 
 # ---------------------------------------------------------------------------
@@ -134,39 +134,8 @@ def test_saved_key_is_owner_only(key_file):
 
 
 # ---------------------------------------------------------------------------
-# Quota tracker and video cache
+# Video cache
 # ---------------------------------------------------------------------------
-
-@pytest.fixture
-def quota_file(tmp_path, monkeypatch):
-    path = tmp_path / "quota.json"
-    monkeypatch.setattr(yt, "YT_QUOTA_FILE", path)
-    return path
-
-
-def test_quota_accumulates_and_reports(quota_file):
-    assert yt._add_quota_usage(5) == 5
-    assert yt._add_quota_usage(7) == 12
-    used, remaining, pct = yt.get_quota_status()
-    assert (used, remaining) == (12, yt.YT_QUOTA_DAILY_LIMIT - 12)
-    assert pct == pytest.approx(0.12)
-
-
-def test_quota_resets_on_a_new_day(quota_file):
-    quota_file.write_text(json.dumps({"date": "2000-01-01", "units_used": 9000}))
-    assert yt.get_quota_status()[0] == 0
-
-
-@pytest.mark.parametrize("content", ["not json", '{"units_used": "lots"}', "[]"])
-def test_quota_corrupt_file_is_treated_as_zero(quota_file, content):
-    quota_file.write_text(content)
-    assert yt._load_quota_tracker()[1] == 0
-
-
-def test_quota_units_are_clamped_to_daily_limit(quota_file):
-    quota_file.write_text(json.dumps({"date": "x", "units_used": 10**9}))
-    assert yt._load_quota_tracker()[1] == yt.YT_QUOTA_DAILY_LIMIT
-
 
 def test_video_cache_round_trip(tmp_path, monkeypatch):
     monkeypatch.setattr(yt, "YT_VCACHE_FILE", tmp_path / "cache.json")
@@ -232,7 +201,7 @@ class FakeApi:
         self.channels    = channels or {}
         self.calls       = []          # (endpoint, params)
 
-    def __call__(self, endpoint, params, api_key, quota_cost=None):
+    def __call__(self, endpoint, params, api_key):
         if self.fail_after is not None and len(self.calls) >= self.fail_after:
             raise yt.YouTubeLimitError("Hourly request limit reached.", kind="rate", retry_after=600)
         self.calls.append((endpoint, dict(params)))
@@ -304,7 +273,7 @@ def test_limit_error_reports_kind_and_wait(fake_api):
 def test_progress_is_saved_when_interrupted_by_ctrl_c(monkeypatch):
     calls = {"n": 0}
 
-    def api(endpoint, params, api_key, quota_cost=None):
+    def api(endpoint, params, api_key):
         calls["n"] += 1
         if calls["n"] == 3:
             raise KeyboardInterrupt
@@ -317,6 +286,13 @@ def test_progress_is_saved_when_interrupted_by_ctrl_c(monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         yt._fetch_with_cache(_ids(200), "key", {})
     assert len(yt._load_yt_video_cache()) == 100
+
+
+def test_a_failed_first_request_does_not_touch_the_cache_file(fake_api):
+    fake_api(fail_after=0)
+    with pytest.raises(yt.YouTubeLimitError):
+        yt._fetch_with_cache(_ids(10), "key", {})
+    assert not yt.YT_VCACHE_FILE.exists()          # nothing arrived, so nothing to write
 
 
 def test_persist_false_never_touches_the_cache_file(fake_api):
@@ -487,23 +463,107 @@ def test_other_http_errors_stay_plain_errors_and_are_not_retried(monkeypatch, sl
     assert len(calls) == 1 and sleeps == []
 
 
-def test_a_server_error_without_json_is_a_plain_error(monkeypatch, sleeps):
-    err = urllib.error.HTTPError("https://x", 500, "oops", {}, io.BytesIO(b"<html>"))
-    _scripted_urlopen(monkeypatch, err)
+def test_a_server_error_without_json_is_retried_then_a_plain_error(monkeypatch, sleeps):
+    def err():
+        return urllib.error.HTTPError("https://x", 500, "oops", {}, io.BytesIO(b"<html>"))
+
+    calls = _scripted_urlopen(monkeypatch, err(), err(), err(), err())
     with pytest.raises(RuntimeError, match="500"):
         yt._yt_api_request("videos", {"id": "x"}, "key")
+    assert len(calls) == 4 and sleeps == [1, 2, 4]
 
 
-def test_there_is_no_local_request_limit(monkeypatch, tmp_path):
-    # Aevum used to refuse requests after 100 per hour. YouTube's own quota and
-    # rate-limit responses are the only limits now, and nothing is written to disk
-    # to count requests.
-    assert not hasattr(yt, "youtube_limiter") and not hasattr(yt, "_RateLimiter")
+def test_aevum_keeps_no_quota_or_request_counters(monkeypatch, tmp_path):
+    # YouTube is the source of truth for quota and rate limits. Aevum used to keep
+    # an hourly request limiter and a daily quota estimate of its own, and refuse
+    # to run based on them. Neither exists any more.
+    import inspect
+    for name in ("youtube_limiter", "_RateLimiter", "get_quota_status", "_add_quota_usage",
+                 "_load_quota_tracker", "YT_QUOTA_FILE", "YT_QUOTA_DAILY_LIMIT", "YT_QUOTA_COST",
+                 "_get_current_date_pt"):
+        assert not hasattr(yt, name), name
+    assert list(inspect.signature(yt._yt_api_request).parameters) == ["endpoint", "params", "api_key"]
+
     calls = _scripted_urlopen(monkeypatch, *[{"items": []}] * 300)
     for _ in range(300):
         yt._yt_api_request("videos", {"id": "x"}, "key")
-    assert len(calls) == 300
-    assert not list((tmp_path / "state").glob("*ratelimit*"))
+    assert len(calls) == 300                           # nothing stopped us, nothing counted
+    assert list((tmp_path / "state").glob("*")) == []  # and nothing was written to disk
+
+
+# ---------------------------------------------------------------------------
+# Temporary failures are retried; permanent ones are not
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("code", [500, 502, 503, 504])
+def test_server_errors_are_retried_then_succeed(monkeypatch, sleeps, code):
+    calls = _scripted_urlopen(monkeypatch, _http_error(code, "backendError"), {"items": ["ok"]})
+    assert yt._yt_api_request("videos", {"id": "x"}, "key") == {"items": ["ok"]}
+    assert len(calls) == 2 and sleeps == [1]
+
+
+def test_server_error_that_never_clears_is_a_plain_error(monkeypatch, sleeps):
+    calls = _scripted_urlopen(monkeypatch, *[_http_error(503, "backendError", "try later")] * 4)
+    with pytest.raises(RuntimeError, match="503") as exc:
+        yt._yt_api_request("videos", {"id": "x"}, "key")
+    assert not isinstance(exc.value, yt.YouTubeLimitError)
+    assert len(calls) == 4 and sleeps == [1, 2, 4]
+
+
+@pytest.mark.parametrize("failure", [
+    TimeoutError("timed out"),                                       # while reading the response
+    ConnectionResetError("reset by peer"),
+    http.client.IncompleteRead(b"par"),                              # half-received response
+    urllib.error.URLError(TimeoutError("connect timed out")),
+    urllib.error.URLError(ConnectionResetError("reset by peer")),
+])
+def test_timeouts_and_dropped_connections_are_retried(monkeypatch, sleeps, failure):
+    calls = _scripted_urlopen(monkeypatch, failure, {"items": []})
+    assert yt._yt_api_request("videos", {"id": "x"}, "key") == {"items": []}
+    assert len(calls) == 2 and sleeps == [1]
+
+
+def test_network_failure_that_never_clears_is_a_plain_error(monkeypatch, sleeps):
+    calls = _scripted_urlopen(monkeypatch, *[TimeoutError("timed out")] * 4)
+    with pytest.raises(RuntimeError, match="network error"):
+        yt._yt_api_request("videos", {"id": "x"}, "key")
+    assert len(calls) == 4 and sleeps == [1, 2, 4]
+
+
+def test_no_internet_is_reported_at_once_not_retried(monkeypatch, sleeps):
+    import socket
+    calls = _scripted_urlopen(
+        monkeypatch, urllib.error.URLError(socket.gaierror(-2, "Name or service not known")))
+    with pytest.raises(RuntimeError, match="network error"):
+        yt._yt_api_request("videos", {"id": "x"}, "key")
+    assert len(calls) == 1 and sleeps == []
+
+
+@pytest.mark.parametrize("code, reason", [
+    (400, "badRequest"),
+    (401, "authError"),
+    (403, "keyInvalid"),
+    (403, "forbidden"),
+    (404, "notFound"),
+])
+def test_permanent_errors_are_never_retried(monkeypatch, sleeps, code, reason):
+    calls = _scripted_urlopen(monkeypatch, _http_error(code, reason))
+    with pytest.raises(RuntimeError):
+        yt._yt_api_request("videos", {"id": "x"}, "key")
+    assert len(calls) == 1 and sleeps == []
+
+
+def test_a_temporary_failure_mid_scan_keeps_the_progress_so_far(monkeypatch, sleeps):
+    # 3 batches of videos; the 2nd request fails for good, so only batch 1 is kept
+    ids = _ids(150)
+    good = {"items": [
+        {"id": v, "snippet": {"title": v, "channelTitle": ""}, "contentDetails": {"duration": "PT1M"}}
+        for v in ids[:50]
+    ]}
+    _scripted_urlopen(monkeypatch, good, *[_http_error(503, "backendError")] * 4)
+    with pytest.raises(RuntimeError, match="503"):
+        yt._fetch_with_cache(ids, "key", {})
+    assert set(yt._load_yt_video_cache()) == set(ids[:50])
 
 
 # ---------------------------------------------------------------------------
@@ -632,68 +692,6 @@ def test_key_is_never_printed_or_in_error_messages(monkeypatch, capsys):
         yt._yt_api_request("videos", {"id": "x"}, VALID_KEY)
     assert VALID_KEY not in str(exc.value)
     assert VALID_KEY not in capsys.readouterr().err
-
-
-# ---------------------------------------------------------------------------
-# Pacific date without a time zone database
-# ---------------------------------------------------------------------------
-
-def _zone():
-    try:
-        import zoneinfo
-        return zoneinfo.ZoneInfo("America/Los_Angeles")
-    except Exception:
-        pytest.skip("no time zone database on this system")
-
-
-def test_pacific_fallback_matches_the_real_time_zone_database():
-    import datetime
-    zone = _zone()
-    utc = datetime.datetime(2025, 1, 1)
-    end = datetime.datetime(2029, 1, 1)
-    step = datetime.timedelta(minutes=30)
-    bad = []
-    while utc < end:
-        expected = utc.replace(tzinfo=datetime.timezone.utc).astimezone(zone).strftime("%Y-%m-%d")
-        if yt._pacific_date_without_tzdata(utc) != expected:
-            bad.append(utc)
-        utc += step
-    assert not bad, f"{len(bad)} mismatches, first at {bad[0]}"
-
-
-@pytest.mark.parametrize("utc, expected", [
-    # The quota resets at midnight Pacific: 07:00 UTC in summer (PDT), 08:00 UTC in winter (PST).
-    ((2026, 7, 1, 6, 59), "2026-06-30"),
-    ((2026, 7, 1, 7, 0), "2026-07-01"),
-    ((2026, 12, 1, 7, 59), "2026-11-30"),
-    ((2026, 12, 1, 8, 0), "2026-12-01"),
-    # Around the 2026 clock changes (8 March and 1 November) the date is unaffected.
-    ((2026, 3, 8, 9, 59), "2026-03-08"),
-    ((2026, 3, 8, 10, 0), "2026-03-08"),
-    ((2026, 11, 1, 8, 59), "2026-11-01"),
-    ((2026, 11, 1, 9, 0), "2026-11-01"),
-])
-def test_pacific_fallback_known_moments(utc, expected):
-    import datetime
-    assert yt._pacific_date_without_tzdata(datetime.datetime(*utc)) == expected
-
-
-def test_current_pt_date_works_when_the_time_zone_database_is_missing(monkeypatch):
-    import datetime
-    import zoneinfo
-
-    def missing(*a, **k):
-        raise zoneinfo.ZoneInfoNotFoundError("America/Los_Angeles")
-
-    monkeypatch.setattr(zoneinfo, "ZoneInfo", missing)
-
-    def now():
-        return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-
-    before = yt._pacific_date_without_tzdata(now())
-    got = yt._get_current_date_pt()
-    after = yt._pacific_date_without_tzdata(now())
-    assert got in (before, after)
 
 
 # ---------------------------------------------------------------------------

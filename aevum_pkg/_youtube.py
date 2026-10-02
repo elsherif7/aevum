@@ -1,3 +1,4 @@
+import http.client
 import json
 import math
 import os
@@ -6,7 +7,7 @@ import sys
 import time
 
 from ._color import clr
-from ._paths import YT_KEY_FILE, YT_QUOTA_FILE, YT_VCACHE_FILE
+from ._paths import YT_KEY_FILE, YT_VCACHE_FILE
 
 # ── API key storage (inlined from _apikey.py) ────────────────────────
 # Simplest practical option: the key is saved once to a single local file
@@ -69,18 +70,8 @@ def load_api_key() -> str:
 
 # Issue 13: file now uses LF line endings (normalised from original CRLF).
 
-YT_API_BASE          = "https://www.googleapis.com/youtube/v3"
-YT_QUOTA_DAILY_LIMIT = 10000
+YT_API_BASE = "https://www.googleapis.com/youtube/v3"
 
-# API costs in quota units.  Not all endpoints cost 1 unit — search.list
-# costs 100.  Pass the correct cost to _yt_api_request() (Issue 9).
-YT_QUOTA_COST = {
-    "videos":         1,
-    "playlistItems":  1,
-    "playlists":      1,
-    "channels":       1,
-    "search":       100,   # expensive — listed here for future use
-}
 
 # ---------------------------------------------------------------------------
 # YouTube video cache
@@ -153,116 +144,6 @@ def _save_yt_video_cache(cache):
             raise
     except Exception:
         pass
-
-
-# ---------------------------------------------------------------------------
-# Quota tracking
-# ---------------------------------------------------------------------------
-
-def _nth_sunday(year: int, month: int, n: int):
-    import datetime
-    first = datetime.date(year, month, 1)
-    return first + datetime.timedelta(days=(6 - first.weekday()) % 7 + 7 * (n - 1))
-
-
-def _pacific_date_without_tzdata(utc_now) -> str:
-    """
-    Pacific date for a naive UTC datetime, using the US daylight-saving rule in
-    force since 2007: DST starts 2:00 local on the 2nd Sunday of March (10:00 UTC)
-    and ends 2:00 local on the 1st Sunday of November (09:00 UTC).
-
-    Used when the system has no time zone database. That's the case on Windows
-    unless the optional `tzdata` package is installed.
-    """
-    import datetime
-    start = datetime.datetime.combine(_nth_sunday(utc_now.year, 3, 2), datetime.time(10, 0))
-    end   = datetime.datetime.combine(_nth_sunday(utc_now.year, 11, 1), datetime.time(9, 0))
-    offset = -7 if start <= utc_now < end else -8
-    return (utc_now + datetime.timedelta(hours=offset)).strftime("%Y-%m-%d")
-
-
-def _get_current_date_pt():
-    """Return current date string in Pacific Time (where YouTube quota resets)."""
-    import datetime
-    try:
-        import zoneinfo
-        pt_now = datetime.datetime.now(zoneinfo.ZoneInfo("America/Los_Angeles"))
-        return pt_now.strftime("%Y-%m-%d")
-    except Exception:
-        # No zoneinfo or no time zone database (e.g. Windows without tzdata).
-        utc_now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-        return _pacific_date_without_tzdata(utc_now)
-
-
-def _load_quota_tracker():
-    """Load quota tracker. Returns (date_str, units_used).
-
-    H-09: validate units_used is a non-negative integer to prevent
-    a corrupted file from bypassing the quota guard.
-    """
-    try:
-        data = json.loads(YT_QUOTA_FILE.read_text(encoding="utf-8"))
-        date = data.get("date", "")
-        raw  = data.get("units_used", 0)
-        # Clamp to valid range — never trust disk data blindly
-        units_used = max(0, min(int(raw), YT_QUOTA_DAILY_LIMIT))
-        return date, units_used
-    except Exception:
-        return "", 0
-
-
-def _save_quota_tracker(date, units_used):
-    """Persist quota tracker atomically. Failures are silently ignored.
-
-    S-04 fix: use temp-file + rename (atomic) instead of write_text which
-    could corrupt the tracker on a mid-write crash and silently reset the
-    quota counter to 0.
-    """
-    try:
-        import tempfile
-        YT_QUOTA_FILE.parent.mkdir(parents=True, exist_ok=True)
-        tmp_fd, tmp_path = tempfile.mkstemp(
-            dir=YT_QUOTA_FILE.parent,
-            prefix=".tmp_quota_",
-            suffix=".json",
-        )
-        try:
-            with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
-                f.write(json.dumps({"date": date, "units_used": units_used}, indent=2))
-            os.replace(tmp_path, YT_QUOTA_FILE)
-        except Exception:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
-    except Exception:
-        pass
-
-
-def _add_quota_usage(units):
-    """Add units to today's usage total. Auto-resets on a new day."""
-    current_date = _get_current_date_pt()
-    tracked_date, units_used = _load_quota_tracker()
-    if tracked_date != current_date:
-        units_used = 0
-    units_used += units
-    _save_quota_tracker(current_date, units_used)
-    return units_used
-
-
-def get_quota_status():
-    """
-    Return (units_used, units_remaining, percent_used).
-    Estimate based on Aevum's tracked usage only.
-    """
-    current_date = _get_current_date_pt()
-    tracked_date, units_used = _load_quota_tracker()
-    if tracked_date != current_date:
-        units_used = 0
-    units_remaining = max(0, YT_QUOTA_DAILY_LIMIT - units_used)
-    percent_used    = min(100.0, (units_used / YT_QUOTA_DAILY_LIMIT) * 100)
-    return units_used, units_remaining, percent_used
 
 
 def _merge_into_cache(cache, new_entries_by_id, save=True):
@@ -348,8 +229,13 @@ def _parse_iso8601_duration(d):
 _YT_QUOTA_REASONS = ('quotaExceeded', 'dailyLimitExceeded')              # HTTP 403
 _YT_RATE_REASONS  = ('rateLimitExceeded', 'userRateLimitExceeded')       # HTTP 429 (or 403)
 
-_RATE_RETRY_DELAYS = (1, 2, 4)    # seconds between retries of a rate-limited request
-_MAX_RETRY_WAIT    = 60           # never honour a Retry-After longer than this
+_RETRY_DELAYS   = (1, 2, 4)    # seconds to wait before each retry of a failed request
+_MAX_RETRY_WAIT = 60           # never honour a Retry-After longer than this
+
+# Temporary trouble worth retrying: server-side errors, and timeouts or dropped
+# connections (including half-received responses).
+_TRANSIENT_HTTP    = (500, 502, 503, 504)
+_TRANSIENT_NETWORK = (TimeoutError, ConnectionError, http.client.HTTPException)
 
 
 class YouTubeLimitError(PermissionError):
@@ -385,7 +271,7 @@ def _get_ssl_context():
 
 
 def _classify_http_error(e):
-    """Return (kind, message): kind is 'quota', 'rate', or None for any other error."""
+    """Return (kind, message): kind is 'quota', 'rate', 'transient', or None for any other error."""
     reason = ''
     try:
         body     = e.read().decode('utf-8', errors='replace')
@@ -398,6 +284,8 @@ def _classify_http_error(e):
         return 'quota', msg
     if e.code == 429 or reason in _YT_RATE_REASONS:
         return 'rate', msg
+    if e.code in _TRANSIENT_HTTP:
+        return 'transient', msg
     return None, msg
 
 
@@ -409,30 +297,31 @@ def _retry_delay(e, attempt):
             return min(wait, _MAX_RETRY_WAIT)
     except (TypeError, ValueError, AttributeError):
         pass
-    return _RATE_RETRY_DELAYS[attempt]
+    return _RETRY_DELAYS[attempt]
 
 
-def _yt_api_request(endpoint, params, api_key, quota_cost=None):
+def _yt_api_request(endpoint, params, api_key):
     """
-    Make one YouTube Data API v3 request and track quota usage.
+    Make one YouTube Data API v3 request and return the parsed JSON.
 
-    Issue 9 fix: quota_cost defaults to the known cost for the endpoint
-    (from YT_QUOTA_COST) rather than always blindly charging 1 unit.
+    Aevum keeps no quota counter and no request limit of its own: YouTube is the
+    source of truth for both, and says so in its responses.
 
-    Issue 10 fix: HTTPError is caught and re-raised with a human-readable
-    message that includes the API error description (e.g. "quota exceeded").
+      - daily quota used up (403 quotaExceeded): YouTubeLimitError(kind='quota') at
+        once, since waiting won't help until the quota resets
+      - rate limit (429): retried with a short backoff, then YouTubeLimitError(kind='rate')
+      - temporary trouble (HTTP 5xx, timeouts, dropped connections): retried the same
+        way, then RuntimeError
+      - anything else (bad key, bad request, ...): RuntimeError, never retried
 
-    There is no client-side request limit: YouTube enforces its own quota and rate
-    limits and says so in its responses. A rate limit (429) is retried a few times
-    with a short backoff; a daily quota error stops immediately. Both surface as
-    YouTubeLimitError.
+    Every request here is a GET, so retrying is safe.
+
+    Issue 10 fix: errors carry the API's own message, never the URL (which contains
+    the API key).
     """
     import urllib.error
     import urllib.parse
     import urllib.request
-
-    if quota_cost is None:
-        quota_cost = YT_QUOTA_COST.get(endpoint, 1)
 
     # Copy params to avoid mutating the caller's dict
     params = {**params, 'key': api_key}
@@ -442,17 +331,15 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
     # For production use cases, consider OAuth 2.0 service accounts instead.
     url = f"{YT_API_BASE}/{endpoint}?{urllib.parse.urlencode(params)}"
 
-    ctx = _get_ssl_context()
-    for attempt in range(len(_RATE_RETRY_DELAYS) + 1):
+    ctx  = _get_ssl_context()
+    last = len(_RETRY_DELAYS)
+    for attempt in range(last + 1):
         try:
             with urllib.request.urlopen(url, timeout=15, context=ctx) as r:
-                result = json.loads(r.read().decode('utf-8'))
-            break
+                return json.loads(r.read().decode('utf-8'))
         except urllib.error.HTTPError as e:
-            # Issue 10: use the API's own error message.
-            # Never include the URL (which contains the API key) in error messages.
             kind, msg = _classify_http_error(e)
-            if kind == 'rate' and attempt < len(_RATE_RETRY_DELAYS):
+            if kind in ('rate', 'transient') and attempt < last:
                 time.sleep(_retry_delay(e, attempt))
                 continue
             if kind == 'quota':
@@ -461,10 +348,16 @@ def _yt_api_request(endpoint, params, api_key, quota_cost=None):
                 raise YouTubeLimitError(f"YouTube is limiting requests: {msg}", kind='rate') from None
             raise RuntimeError(f"YouTube API error {e.code}: {msg}") from None
         except urllib.error.URLError as e:
+            if isinstance(e.reason, _TRANSIENT_NETWORK) and attempt < last:
+                time.sleep(_RETRY_DELAYS[attempt])
+                continue
             raise RuntimeError(f"YouTube API network error: {e.reason}") from None
-
-    _add_quota_usage(quota_cost)
-    return result
+        except _TRANSIENT_NETWORK as e:
+            # timeout or dropped connection while reading the response
+            if attempt < last:
+                time.sleep(_RETRY_DELAYS[attempt])
+                continue
+            raise RuntimeError(f"YouTube API network error: {e}") from None
 
 
 class ApiKeyCancelled(Exception):
@@ -698,7 +591,8 @@ def _fetch_with_cache(video_ids, api_key, cache, on_progress=None, persist=True)
             e.saved = sum(1 for vid in video_ids if _cache_state(cache, vid) != 'miss')
             raise
         finally:
-            if persist:
+            # Only rewrite the cache file if a batch actually arrived.
+            if persist and batches:
                 _save_yt_video_cache(cache)
 
     if not new_ids and on_progress and total > 0:
@@ -725,7 +619,9 @@ def scan_url(url, on_progress=None, use_cache=True):
     """
     Fetch durations for a YouTube URL via the Data API v3.
 
-    Security: Implements rate limiting and quota checking to prevent abuse.
+    Quota and rate limits are YouTube's to enforce: when it refuses a request,
+    _yt_api_request raises YouTubeLimitError and the videos fetched so far are
+    already saved (see _fetch_with_cache).
 
     Returns (total_sec, total_count, entries, label, cache_hits, unavailable_count).
     """
@@ -739,26 +635,6 @@ def scan_url(url, on_progress=None, use_cache=True):
         api_key = prompt_api_key()
         if not api_key:
             raise ApiKeyCancelled("No API key provided.")
-
-    # Check quota before making requests
-    try:
-        used, remaining, _ = get_quota_status()
-        if remaining < 100:
-            raise YouTubeLimitError(
-                f"Daily quota nearly exhausted ({used:,}/10,000 units used). "
-                f"Remaining: {remaining:,} units.",
-                kind='quota',
-            )
-    except PermissionError:
-        raise
-    except Exception as _quota_err:
-        # Quota check failed (e.g. corrupted tracker file) — log and continue
-        print(
-            f"  {clr.Y}[WARN]{clr.RST}  Could not read quota tracker: {_quota_err}",
-            file=sys.stderr,
-        )
-
-    # B-07: rate limiting is now enforced per API call inside _yt_api_request
 
     cache             = _load_yt_video_cache() if use_cache else {}
     label             = url

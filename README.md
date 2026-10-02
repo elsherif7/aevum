@@ -21,7 +21,7 @@ aevum/
 │   ├── test_cli.py       # Arguments, exit codes, end-to-end scans
 │   ├── test_display.py   # Output sanitizing, fuzzy suggestions, bar
 │   ├── test_scan.py      # Duration parsing (MP4/MKV/ffprobe), folder tree
-│   └── test_youtube.py   # URL/duration parsing, API key, quota, cache
+│   └── test_youtube.py   # URL/duration parsing, API key, retries, cache
 └── aevum_pkg/
     ├── _cli.py           # Argument parsing + main() — the only command is 'scan'
     ├── _cli_cmds.py      # cmd_scan, progress bar, ffprobe availability check
@@ -121,12 +121,12 @@ A few other things worth knowing:
 - A link to a video inside a playlist (`watch?v=...&list=...`) scans
   just that video. Use the `/playlist?list=...` link to scan the whole
   playlist.
-- YouTube's free quota is 10,000 units a day, and a request for 50
-  videos costs about 1 unit. If YouTube says the quota is used up
-  part-way through a big channel or playlist, the videos already fetched
-  are saved. Run the same command again after the quota resets (midnight
-  Pacific Time) and it carries on without fetching them twice. Brief
-  rate-limit responses are retried automatically.
+- Aevum keeps no quota count of its own. YouTube decides when you've hit
+  a limit. If it says the daily quota is used up part-way through a big
+  channel or playlist, the videos already fetched are saved, and you can
+  run the same command again after the quota resets (midnight Pacific
+  Time) to carry on without fetching them twice. Brief rate limits and
+  temporary network or server errors are retried automatically.
 - Private, deleted, or region-blocked videos are remembered for 7 days,
   so reruns don't spend quota asking about them again.
 
