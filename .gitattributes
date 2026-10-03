@@ -1,0 +1,12 @@
+# Keep every text file LF in the repo and in working trees, on every platform.
+* text=auto eol=lf
+
+# Be explicit for the file types this project has.
+*.py   text eol=lf
+*.toml text eol=lf
+*.md   text eol=lf
+*.txt  text eol=lf
+*.json text eol=lf
+.gitignore     text eol=lf
+.gitattributes text eol=lf
+LICENSE        text eol=lf
