@@ -103,8 +103,19 @@ falling back to `ffprobe` for other formats), and prints a folder tree
 with per-subfolder duration and size, a duration breakdown bar chart,
 playback-speed conversions (1x/1.25x/1.5x/1.75x/2x), and the 10
 longest files. `ffprobe` gets 30 seconds per file, and folders more
-than 100 levels below the one you scan are not scanned. A `.ts`, `.mod`
-or `.scm` file that is plain text (source code, not media) is ignored.
+than 100 levels below the one you scan are not scanned. A `.ts` file
+that is plain text (TypeScript, not MPEG-TS) is ignored.
+
+Aevum counts these 78 extensions and ignores everything else. The list is
+kept to common formats on purpose, so raw, game, ringtone and ambiguous
+extensions (for example `.mid`, `.ifo`, `.sln`) are not scanned.
+
+- **Video:** `.mp4 .mkv .avi .mov .webm .flv .wmv .m4v .mpg .mpeg .3gp .ts
+  .m2ts .mts .vob .ogv .asf .3g2 .f4v .divx .rmvb .rm .m2v .m1v .mpe .m2p
+  .m2t .m4p .mxf .qt .dv .dvr-ms .wtv .ogm .ogx .h264 .h265 .hevc .mk3d`
+- **Audio:** `.mp3 .aac .flac .wav .ogg .wma .m4a .m4b .opus .aiff .aif .ac3
+  .mka .amr .aifc .ape .wv .tta .mp2 .mpa .au .caf .ra .oga .spx .mpc .dsf
+  .dff .aax .aa .dts .dtshd .eac3 .truehd .thd .awb .w64 .rf64 .bwf`
 
 **YouTube URL** — `aevum scan <url>` accepts a channel, playlist, or
 single video URL, fetches duration data via the YouTube Data API v3,

@@ -21,38 +21,26 @@ PROBE_TIMEOUT = 30
 # Folders more than this many levels below the scan root are not scanned.
 MAX_DEPTH = 100
 
-# '.iso' (disc images, too large) and '.dat' (too generic) are deliberately left out.
+# Common video and audio formats only. Raw/headerless, game, ringtone and ambiguous
+# extensions (.mid, .ifo, .sln, .avs, ...) are left out on purpose, as are .iso and .dat.
 video_extensions = (
     '.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.m4v', '.mpg', '.mpeg', '.3gp', '.ts',
-    '.vob', '.ogv', '.divx', '.rmvb', '.asf', '.m2ts', '.mts', '.m2v', '.f4v', '.f4a', '.f4p', '.nsv', '.roq',
-    '.yuv', '.mxf', '.drc', '.gifv', '.qt', '.rm', '.amv', '.svi', '.3g2', '.mpe', '.mpv', '.m1v',
-    '.m2p', '.m4p', '.mpeg1', '.mpeg2', '.mpeg4', '.h264', '.h265', '.hevc', '.avchd', '.ogm', '.ogx',
-    '.dv', '.dvr', '.dvr-ms', '.rec', '.wtv', '.bdmv', '.evo', '.ifo', '.mod', '.tod', '.trp', '.tp',
-    '.pva', '.nuv', '.fli', '.flc', '.flic', '.smk', '.bik', '.bik2', '.av1', '.avs', '.avs2', '.avs3',
-    '.cavs', '.cdg', '.cdxl', '.cine', '.cpk', '.dhav', '.dif', '.dl', '.dpg', '.ea', '.flh', '.flt',
-    '.gxf', '.h261', '.h263', '.ifv', '.imf', '.ipu', '.ivf', '.ivr', '.kux', '.lxf', '.m2t', '.m4s',
-    '.mjpeg', '.mjpg', '.mlv', '.moflex', '.mods', '.mpl', '.mtv', '.mv', '.mvi', '.mxg', '.pmp',
-    '.psxstr', '.rpl', '.scm', '.seq', '.sfd', '.swf', '.thp', '.ty', '.ty+', '.vc1', '.viv', '.vivo',
-    '.vp6', '.vp8', '.vp9', '.vqf', '.wve', '.y4m', '.mp3', '.aac', '.flac', '.wav', '.ogg', '.wma',
-    '.m4a', '.m4b', '.opus', '.aiff', '.aif', '.aifc', '.ape', '.wv', '.tta', '.mka', '.mk3d', '.mpa', '.mp2', '.ac3',
-    '.eac3', '.dts', '.dtshd', '.truehd', '.thd', '.pcm', '.caf', '.ra', '.ram', '.oga', '.spx', '.amr',
-    '.awb', '.gsm', '.au', '.snd', '.vox', '.8svx', '.iff', '.svx', '.f32', '.f64', '.s8', '.s16',
-    '.s24', '.s32', '.u8', '.u16', '.u24', '.u32', '.w64', '.rf64', '.bwf', '.mid', '.midi', '.kar',
-    '.xmf', '.mxmf', '.rtttl', '.rtx', '.ota', '.imy', '.mp1', '.aa', '.aax', '.ace', '.acm', '.act',
-    '.adp', '.ads', '.adts', '.afc', '.aix', '.apac', '.apc', '.avr', '.bfstm', '.binka', '.bonk',
-    '.brstm', '.dss', '.dsf', '.dff', '.fwse', '.g722', '.g723', '.g726', '.g728', '.g729', '.hca',
-    '.hcom', '.laf', '.latm', '.loas', '.mca', '.mpc', '.msf', '.nsp', '.osq', '.pp_bnk', '.pvf',
-    '.qcp', '.qoa', '.rka', '.rsd', '.sb0', '.sb1', '.sb2', '.sd2', '.shn', '.sln', '.tak', '.vag',
-    '.voc', '.vpk', '.wsd', '.xa', '.xwb',
+    '.m2ts', '.mts', '.vob', '.ogv', '.asf', '.3g2', '.f4v', '.divx', '.rmvb', '.rm', '.m2v', '.m1v',
+    '.mpe', '.m2p', '.m2t', '.m4p', '.mxf', '.qt', '.dv', '.dvr-ms', '.wtv', '.ogm', '.ogx', '.h264',
+    '.h265', '.hevc', '.mk3d',
+    '.mp3', '.aac', '.flac', '.wav', '.ogg', '.wma', '.m4a', '.m4b', '.opus', '.aiff', '.aif', '.ac3',
+    '.mka', '.amr', '.aifc', '.ape', '.wv', '.tta', '.mp2', '.mpa', '.au', '.caf', '.ra', '.oga',
+    '.spx', '.mpc', '.dsf', '.dff', '.aax', '.aa', '.dts', '.dtshd', '.eac3', '.truehd', '.thd', '.awb',
+    '.w64', '.rf64', '.bwf',
 )
 
 _VIDEO_EXT_SET = frozenset(video_extensions)
 
-_MP4_EXTENSIONS = frozenset(('.mp4', '.mov', '.m4v', '.3gp', '.3g2', '.m4a', '.m4p', '.m4b', '.f4v', '.f4a'))
+_MP4_EXTENSIONS = frozenset(('.mp4', '.mov', '.m4v', '.3gp', '.3g2', '.m4a', '.m4p', '.m4b', '.f4v'))
 _MKV_EXTENSIONS = frozenset(('.mkv', '.webm', '.mka', '.mk3d'))
 
-# Also used for text (TypeScript, MOD/SCM source), so these are sniffed before probing.
-_TEXT_AMBIGUOUS_EXTENSIONS = frozenset(('.ts', '.mod', '.scm'))
+# TypeScript uses the same extension as MPEG-TS, so it is sniffed before probing.
+_TEXT_AMBIGUOUS_EXTENSIONS = frozenset(('.ts',))
 
 
 def _looks_like_text(path) -> bool:

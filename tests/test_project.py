@@ -101,3 +101,12 @@ def test_mypy_checks_every_module():
     assert "aevum_pkg" in files
     assert "tests" in files
     assert PYPROJECT["tool"]["mypy"]["check_untyped_defs"] is True
+
+
+def test_readme_lists_every_scanned_extension():
+    from aevum_pkg._scan import video_extensions
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    section = readme.split("- **Video:**", 1)[1].split("**YouTube URL**", 1)[0]
+    listed = [ext for chunk in re.findall(r"`([^`]+)`", section) for ext in chunk.split()]
+    assert sorted(listed) == sorted(video_extensions)

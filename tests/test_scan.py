@@ -70,19 +70,46 @@ def test_format_size(size, expected):
     assert format_size(size) == expected
 
 
+_APPROVED_EXTENSIONS = frozenset(f".{e}" for e in """
+    mp4 mkv avi mov webm flv wmv m4v mpg mpeg 3gp ts m2ts mts vob ogv asf
+    3g2 f4v divx rmvb rm m2v m1v mpe m2p m2t m4p mxf qt dv dvr-ms wtv ogm ogx h264 h265 hevc mk3d
+    mp3 aac flac wav ogg wma m4a m4b opus aiff aif ac3 mka amr
+    aifc ape wv tta mp2 mpa au caf ra oga spx mpc dsf dff aax aa dts dtshd eac3 truehd thd awb w64 rf64 bwf
+""".split())
+
+
+def test_extension_list_is_the_approved_set():
+    assert len(video_extensions) == len(set(video_extensions)) == 78
+    assert _VIDEO_EXT_SET == _APPROVED_EXTENSIONS
+
+
 def test_extension_set_has_common_formats_and_excludes_disc_images():
-    for ext in (".mp4", ".mkv", ".webm", ".mp3", ".flac"):
+    for ext in (".mp4", ".mkv", ".webm", ".mp3", ".flac", ".m4b"):
         assert ext in _VIDEO_EXT_SET
     assert ".iso" not in _VIDEO_EXT_SET
 
 
-def test_extension_list_has_no_duplicates():
-    assert len(video_extensions) == len(set(video_extensions))
-
-
-@pytest.mark.parametrize("ext", [".webp", ".avif", ".mng", ".sol", ".str", ".txt", ".jpg"])
-def test_extension_set_excludes_images_and_source_code(ext):
+@pytest.mark.parametrize("ext", [
+    ".webp", ".avif", ".mng", ".sol", ".str", ".txt", ".jpg",
+    # files that share an extension with non-media files
+    ".ifo", ".bdmv", ".mpl", ".mid", ".midi", ".ram", ".sln", ".ace", ".avs", ".drc", ".mod", ".scm",
+    # raw, ringtone and game formats
+    ".pcm", ".yuv", ".rtttl", ".bik", ".smk", ".f4a", ".mp4v",
+])
+def test_extension_set_excludes_non_media_raw_and_obscure_formats(ext):
     assert ext not in _VIDEO_EXT_SET
+
+
+def test_removed_extensions_are_never_probed(tmp_path, monkeypatch):
+    for name in ("VIDEO_TS.IFO", "index.bdmv", "song.mid", "link.ram", "app.sln", "x.avs", "t.mod"):
+        (tmp_path / name).write_bytes(b"x")
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(a))
+    stats: dict[str, int] = {}
+    _, count, *_ = scan_parallel(tmp_path, stats=stats)
+    assert count == 0
+    assert calls == []
+    assert stats["unreadable_files"] == 0
 
 
 # get_duration (native parser first, ffprobe fallback)
@@ -438,7 +465,7 @@ def test_one_depth_limit_is_shared():
 
 # text files with media extensions
 
-@pytest.mark.parametrize("name", ["a.ts", "b.mod", "c.scm", "D.TS"])
+@pytest.mark.parametrize("name", ["a.ts", "D.TS"])
 def test_text_files_with_ambiguous_extensions_are_not_probed(tmp_path, monkeypatch, name):
     (tmp_path / name).write_text("export const x = 1;\n")
     calls = []
