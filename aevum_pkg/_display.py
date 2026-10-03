@@ -4,7 +4,7 @@ from pathlib import Path
 
 from ._color import LINE, clr
 from ._models import FolderNode, ScanTree
-from ._scan import format_duration, format_size
+from ._scan import MAX_DEPTH, format_duration, format_size
 from ._text import _safe
 
 _DEPTH_ATTRS = ("R", "G", "B", "M", "C")
@@ -79,7 +79,7 @@ def print_tree(
     direct_files: list[tuple[Path, float]] | None = None,
     depth: int = 0,
     number: str = "",
-    max_depth: int = 50,
+    max_depth: int = MAX_DEPTH,
     fbytes: int = 0,
 ) -> None:
     if depth > max_depth:

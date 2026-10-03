@@ -102,7 +102,9 @@ each media file's duration (a fast native MP4/MKV header parser first,
 falling back to `ffprobe` for other formats), and prints a folder tree
 with per-subfolder duration and size, a duration breakdown bar chart,
 playback-speed conversions (1x/1.25x/1.5x/1.75x/2x), and the 10
-longest files.
+longest files. `ffprobe` gets 30 seconds per file, and folders more
+than 100 levels below the one you scan are not scanned. A `.ts`, `.mod`
+or `.scm` file that is plain text (source code, not media) is ignored.
 
 **YouTube URL** — `aevum scan <url>` accepts a channel, playlist, or
 single video URL, fetches duration data via the YouTube Data API v3,
@@ -126,6 +128,10 @@ A few other things worth knowing:
 - A file that can be reached by more than one path (a hardlink, or a
   symlink to a file) is counted once, and Aevum says how many
   duplicates it skipped.
+- If something could not be counted, a short line after "Done!" says so:
+  media files that could not be read (and how many of those timed out),
+  folders that could not be opened, and folders nested too deep. The
+  totals leave those out, and the exit code is still 0.
 - Colors are used only when output goes to a terminal. Set `NO_COLOR=1`
   to turn them off, or `FORCE_COLOR=1` to keep them when piping. When
   output is piped or redirected, the progress bar is left out.

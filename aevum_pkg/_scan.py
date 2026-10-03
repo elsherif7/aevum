@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import os
 import struct
 import subprocess
@@ -14,10 +15,16 @@ from ._text import warn
 # ffprobe is CPU and disk bound, so more than 2x the core count doesn't help.
 MAX_WORKERS = min(8, (os.cpu_count() or 4) * 2)
 
+# A cold disk or a network share can be slow to answer for a single file.
+PROBE_TIMEOUT = 30
+
+# Folders more than this many levels below the scan root are not scanned.
+MAX_DEPTH = 100
+
 # '.iso' (disc images, too large) and '.dat' (too generic) are deliberately left out.
 video_extensions = (
     '.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.m4v', '.mpg', '.mpeg', '.3gp', '.ts',
-    '.vob', '.ogv', '.divx', '.rmvb', '.asf', '.m2ts', '.mts', '.m2v', '.f4v', '.f4p', '.nsv', '.roq',
+    '.vob', '.ogv', '.divx', '.rmvb', '.asf', '.m2ts', '.mts', '.m2v', '.f4v', '.f4a', '.f4p', '.nsv', '.roq',
     '.yuv', '.mxf', '.drc', '.gifv', '.qt', '.rm', '.amv', '.svi', '.3g2', '.mpe', '.mpv', '.m1v',
     '.m2p', '.m4p', '.mpeg1', '.mpeg2', '.mpeg4', '.h264', '.h265', '.hevc', '.avchd', '.ogm', '.ogx',
     '.dv', '.dvr', '.dvr-ms', '.rec', '.wtv', '.bdmv', '.evo', '.ifo', '.mod', '.tod', '.trp', '.tp',
@@ -27,7 +34,7 @@ video_extensions = (
     '.mjpeg', '.mjpg', '.mlv', '.moflex', '.mods', '.mpl', '.mtv', '.mv', '.mvi', '.mxg', '.pmp',
     '.psxstr', '.rpl', '.scm', '.seq', '.sfd', '.swf', '.thp', '.ty', '.ty+', '.vc1', '.viv', '.vivo',
     '.vp6', '.vp8', '.vp9', '.vqf', '.wve', '.y4m', '.mp3', '.aac', '.flac', '.wav', '.ogg', '.wma',
-    '.m4a', '.opus', '.aiff', '.aif', '.aifc', '.ape', '.wv', '.tta', '.mka', '.mpa', '.mp2', '.ac3',
+    '.m4a', '.m4b', '.opus', '.aiff', '.aif', '.aifc', '.ape', '.wv', '.tta', '.mka', '.mk3d', '.mpa', '.mp2', '.ac3',
     '.eac3', '.dts', '.dtshd', '.truehd', '.thd', '.pcm', '.caf', '.ra', '.ram', '.oga', '.spx', '.amr',
     '.awb', '.gsm', '.au', '.snd', '.vox', '.8svx', '.iff', '.svx', '.f32', '.f64', '.s8', '.s16',
     '.s24', '.s32', '.u8', '.u16', '.u24', '.u32', '.w64', '.rf64', '.bwf', '.mid', '.midi', '.kar',
@@ -40,6 +47,25 @@ video_extensions = (
 )
 
 _VIDEO_EXT_SET = frozenset(video_extensions)
+
+_MP4_EXTENSIONS = frozenset(('.mp4', '.mov', '.m4v', '.3gp', '.3g2', '.m4a', '.m4p', '.m4b', '.f4v', '.f4a'))
+_MKV_EXTENSIONS = frozenset(('.mkv', '.webm', '.mka', '.mk3d'))
+
+# Also used for text (TypeScript, MOD/SCM source), so these are sniffed before probing.
+_TEXT_AMBIGUOUS_EXTENSIONS = frozenset(('.ts', '.mod', '.scm'))
+
+
+def _looks_like_text(path) -> bool:
+    try:
+        with open(path, 'rb') as f:
+            head = f.read(4096)
+        if b'\0' in head:
+            return False
+        # final=False so a character cut off at the 4 KiB boundary isn't an error
+        codecs.getincrementaldecoder('utf-8')().decode(head)
+        return True
+    except (OSError, UnicodeDecodeError):
+        return False
 
 
 def check_ffprobe() -> bool:
@@ -116,8 +142,6 @@ def _read_mkv_duration(path):
     Read the duration from the EBML Info block. Reads 2 MB first and retries with
     8 MB if Info isn't found, which covers Info placed after a large Tracks or SeekHead.
     """
-    file_size = os.path.getsize(path)
-
     def _try_parse(data):
 
         def read_vint(buf, pos):
@@ -191,6 +215,7 @@ def _read_mkv_duration(path):
         return None
 
     try:
+        file_size = os.path.getsize(path)
         SMALL_READ = 2 * 1024 * 1024
         LARGE_READ = 8 * 1024 * 1024
         with open(path, 'rb') as f:
@@ -207,16 +232,16 @@ def _read_mkv_duration(path):
         return None
 
 
-def get_duration(path: str | Path) -> float:
-    """Native parse for MP4 and MKV, ffprobe for everything else."""
+def _probe_duration(path: str | Path) -> tuple[float, bool]:
+    """Return (seconds, timed_out). Seconds is 0.0 when the duration can't be read."""
     ext    = Path(path).suffix.lower()
     result = None
-    if ext in ('.mp4', '.mov', '.m4v', '.3gp', '.3g2', '.m4a', '.m4p', '.m4b', '.mp4v', '.f4v', '.f4a'):
+    if ext in _MP4_EXTENSIONS:
         result = _read_mp4_duration(path)
-    elif ext in ('.mkv', '.webm', '.mka', '.mk3d'):
+    elif ext in _MKV_EXTENSIONS:
         result = _read_mkv_duration(path)
     if result is not None and result > 0:
-        return result
+        return result, False
 
     try:
         proc = subprocess.run(
@@ -224,15 +249,21 @@ def get_duration(path: str | Path) -> float:
              'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', str(path)],
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=PROBE_TIMEOUT,
             shell=False
         )
         val = proc.stdout.strip()
-        return float(val) if val and val != 'N/A' else 0.0
-    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, ValueError, OSError) as _e:
-        if isinstance(_e, subprocess.TimeoutExpired):
-            warn(f"ffprobe timed out on: {path}")
-        return 0.0
+        return (float(val) if val and val != 'N/A' else 0.0), False
+    except subprocess.TimeoutExpired:
+        warn(f"ffprobe timed out on: {path}")
+        return 0.0, True
+    except (subprocess.CalledProcessError, ValueError, OSError):
+        return 0.0, False
+
+
+def get_duration(path: str | Path) -> float:
+    """Native parse for MP4 and MKV, ffprobe for everything else."""
+    return _probe_duration(path)[0]
 
 
 def format_size(b: int) -> str:
@@ -270,10 +301,11 @@ def scan_parallel(
     Scan root for media files. Returns (total_sec, total_count, tree, durations, sizes).
 
     A collector thread walks the folders and submits files to a thread pool.
-    Files whose duration can't be read are left out. A file reachable by more
+    Files whose duration can't be read are left out of the totals and counted. A file reachable by more
     than one path (a hardlink, or a symlink to a file) is counted once: the real
     file wins over a symlink, then the alphabetically first path. If stats is
-    given, stats["duplicates_skipped"] is set to the number of duplicates dropped.
+    given, it is filled with duplicates_skipped, unreadable_files, timed_out,
+    unreadable_dirs and skipped_deep.
     """
     if _visited_inodes is None:
         _visited_inodes = set()
@@ -293,6 +325,8 @@ def scan_parallel(
         _visited_inodes.add(root_inode)
     except OSError as e:
         warn(f"Cannot access {root}: {e}")
+        if stats is not None:
+            stats["unreadable_dirs"] = 1
         return 0.0, 0, ScanTree([], [], 0), {}, {}
 
     durations = {}
@@ -301,14 +335,18 @@ def scan_parallel(
     total     = 0
     lock      = threading.Lock()
 
-    MAX_DEPTH = 30
     root_depth = len(root.parts)
+    unreadable_dirs = 0
+    skipped_deep    = 0
 
     def probe(path, is_link):
         nonlocal done
         if stop_event and stop_event.is_set():
-            return path, 0.0, 0, None, is_link
-        sec = get_duration(path)
+            return path, 0.0, 0, None, is_link, False
+        try:
+            sec, timed_out = _probe_duration(path)
+        except Exception:
+            sec, timed_out = 0.0, False
         file_id = None
         try:
             st        = path.stat()
@@ -323,14 +361,17 @@ def scan_parallel(
             _snap_total = total
         if on_progress and _snap_total > 0:
             on_progress(_snap_done, _snap_total)
-        return path, sec, file_size, file_id, is_link
+        return path, sec, file_size, file_id, is_link, timed_out
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         futures = {}
 
         def submit(entry, is_link):
             nonlocal total
-            if os.path.splitext(entry.name)[1].lower() not in _VIDEO_EXT_SET:
+            ext = os.path.splitext(entry.name)[1].lower()
+            if ext not in _VIDEO_EXT_SET:
+                return
+            if ext in _TEXT_AMBIGUOUS_EXTENSIONS and _looks_like_text(entry.path):
                 return
             p = Path(entry.path)
             with lock:
@@ -338,6 +379,7 @@ def scan_parallel(
             futures[pool.submit(probe, p, is_link)] = p
 
         def collect_and_submit():
+            nonlocal unreadable_dirs, skipped_deep
             stack = [(str(root), root_depth)]
             visited_dirs = set()
 
@@ -348,6 +390,7 @@ def scan_parallel(
                 current, depth = stack.pop()
 
                 if depth - root_depth > MAX_DEPTH:
+                    skipped_deep += 1
                     continue
 
                 # skip folders already seen, which also stops symlink loops
@@ -360,6 +403,7 @@ def scan_parallel(
 
                     visited_dirs.add(current_inode)
                 except OSError:
+                    unreadable_dirs += 1
                     continue
 
                 try:
@@ -389,8 +433,8 @@ def scan_parallel(
                             except (OSError, RuntimeError):
                                 # broken symlink or unreadable entry
                                 continue
-                except PermissionError:
-                    pass
+                except OSError:
+                    unreadable_dirs += 1
 
         collector = threading.Thread(target=collect_and_submit, daemon=True)
         collector.start()
@@ -409,7 +453,7 @@ def scan_parallel(
             tree = _build_tree(root, {})
             return 0.0, 0, tree, {}, {}
 
-        found = []   # (path, sec, size, file_id, is_link)
+        found = []   # (path, sec, size, file_id, is_link, timed_out)
         try:
             for future in as_completed(futures):
                 if stop_event and stop_event.is_set():
@@ -420,11 +464,12 @@ def scan_parallel(
             pool.shutdown(wait=False, cancel_futures=True)
             raise
 
-    # drop unreadable files, and keep one path per underlying file: real file first, then name order
+    # keep one path per underlying file: real file first, then name order
     best: dict[tuple, tuple] = {}
     dropped = 0
-    for item in sorted(found, key=lambda r: (r[4], str(r[0]))):
-        path, sec, file_size, file_id, _ = item
+    ordered = sorted(found, key=lambda r: (r[4], str(r[0])))
+    for item in ordered:
+        path, sec, file_size, file_id, _, _ = item
         if sec <= 0.0:
             continue
         if file_id is not None:
@@ -434,8 +479,26 @@ def scan_parallel(
             best[file_id] = item
         durations[path] = sec
         sizes[path]     = file_size
+
+    unreadable_files = 0
+    timed_out_files  = 0
+    bad_ids: set[tuple] = set()
+    for path, sec, _, file_id, _, timed_out in ordered:
+        if sec > 0.0:
+            continue
+        if file_id is not None:
+            if file_id in best or file_id in bad_ids:
+                continue
+            bad_ids.add(file_id)
+        unreadable_files += 1
+        timed_out_files  += timed_out
+
     if stats is not None:
         stats["duplicates_skipped"] = dropped
+        stats["unreadable_files"]   = unreadable_files
+        stats["timed_out"]          = timed_out_files
+        stats["unreadable_dirs"]    = unreadable_dirs
+        stats["skipped_deep"]       = skipped_deep
 
     if not durations:
         tree = _build_tree(root, {})
@@ -452,7 +515,6 @@ def _build_tree(root, durations, sizes=None) -> ScanTree:
     Build the folder tree in O(n), with children and files sorted by name.
     The ancestor walk is capped at MAX_DEPTH so a symlink cycle can't loop forever.
     """
-    MAX_DEPTH = 200
     root      = Path(root)
     sizes     = sizes or {}
 
@@ -466,7 +528,7 @@ def _build_tree(root, durations, sizes=None) -> ScanTree:
         folder_direct.setdefault(path.parent, []).append((path, sec))
         ancestor = path.parent
         depth    = 0
-        while depth < MAX_DEPTH:
+        while depth <= MAX_DEPTH:
             folder_secs[ancestor]  = folder_secs.get(ancestor, 0.0) + sec
             folder_bytes[ancestor] = folder_bytes.get(ancestor, 0) + file_bytes
             folder_count[ancestor] = folder_count.get(ancestor, 0) + 1

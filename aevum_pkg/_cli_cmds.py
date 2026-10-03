@@ -9,7 +9,7 @@ from pathlib import Path
 from ._color import clr, eclr
 from ._display import _fuzzy_suggest, print_results, print_url_results
 from ._exit import EX
-from ._scan import _run_scan, check_ffprobe
+from ._scan import MAX_DEPTH, _run_scan, check_ffprobe
 from ._text import _safe
 from ._youtube import (
     ApiKeyCancelled,
@@ -129,6 +129,23 @@ def _scan_youtube(raw: str) -> None:
     sys.exit(EX.OK)
 
 
+def _print_skip_summary(stats: dict[str, int]) -> None:
+    files = stats.get("unreadable_files", 0)
+    if files:
+        timed_out = stats.get("timed_out", 0)
+        extra = f", {timed_out} of them timed out" if timed_out else ""
+        noun = "media file" if files == 1 else "media files"
+        print(f"  {clr.DIM}({files} {noun} could not be read{extra}){clr.RST}")
+    dirs = stats.get("unreadable_dirs", 0)
+    if dirs:
+        noun = "folder" if dirs == 1 else "folders"
+        print(f"  {clr.DIM}({dirs} {noun} could not be opened){clr.RST}")
+    deep = stats.get("skipped_deep", 0)
+    if deep:
+        noun = "folder" if deep == 1 else "folders"
+        print(f"  {clr.DIM}({deep} {noun} nested more than {MAX_DEPTH} levels deep not scanned){clr.RST}")
+
+
 def _scan_folder(raw: str) -> None:
     folder = Path(raw)
     if not folder.exists():
@@ -167,5 +184,6 @@ def _scan_folder(raw: str) -> None:
         noun = "file" if skipped == 1 else "files"
         print(f"  {clr.DIM}({skipped} duplicate {noun} skipped: hardlinks or symlinks "
               f"to files already counted){clr.RST}")
+    _print_skip_summary(stats)
     print_results(folder, total_sec, total_count, tree, durations, sizes)
     sys.exit(EX.OK)

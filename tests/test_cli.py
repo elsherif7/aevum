@@ -424,3 +424,39 @@ def test_local_scan_says_media_files_not_videos(run_cli, library):
     assert r.returncode == 0
     assert "media files" in r.stdout
     assert "video" not in r.stdout.lower()
+
+
+# summary lines for skipped items
+
+def test_skip_summary_lines(capsys):
+    from aevum_pkg._cli_cmds import _print_skip_summary
+
+    _print_skip_summary({"unreadable_files": 3, "timed_out": 1, "unreadable_dirs": 2, "skipped_deep": 1})
+    out = capsys.readouterr().out
+    assert "(3 media files could not be read, 1 of them timed out)" in out
+    assert "(2 folders could not be opened)" in out
+    assert "(1 folder nested more than 100 levels deep not scanned)" in out
+    assert "video" not in out.lower()
+
+
+def test_skip_summary_is_silent_when_nothing_was_skipped(capsys):
+    from aevum_pkg._cli_cmds import _print_skip_summary
+
+    _print_skip_summary({"duplicates_skipped": 0, "unreadable_files": 0, "timed_out": 0,
+                         "unreadable_dirs": 0, "skipped_deep": 0})
+    assert capsys.readouterr().out == ""
+
+
+@needs_ffmpeg
+def test_scan_reports_unreadable_media_and_still_exits_zero(run_cli, library):
+    r = run_cli("scan", str(library))
+    assert r.returncode == 0
+    assert "(1 media file could not be read)" in r.stdout
+
+
+@needs_ffmpeg
+def test_clean_scan_prints_no_skip_summary(run_cli, library):
+    (library / "broken.mp4").unlink()
+    r = run_cli("scan", str(library))
+    assert r.returncode == 0
+    assert "could not be" not in r.stdout
