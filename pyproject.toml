@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "aevum"
-version = "1.0.0"
+dynamic = ["version"]
 description = "Media Library Scanner"
 readme = "README.md"
 license = "GPL-3.0-only"
@@ -35,6 +35,9 @@ dev = [
 [project.scripts]
 aevum = "aevum_pkg._cli:main"
 
+[tool.setuptools.dynamic]
+version = { attr = "aevum_pkg.__version__" }   # the one place the version lives
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["aevum_pkg*"]
@@ -59,12 +62,5 @@ pythonpath = ["."]
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
-# Only check annotated modules — unannotated modules are skipped until
-# they receive annotations in a future pass.
-files = [
-    "aevum_pkg/_models.py",
-    "aevum_pkg/_scan.py",
-    "aevum_pkg/_youtube.py",
-    "aevum_pkg/_display.py",
-    "aevum_pkg/_cli_cmds.py",
-]
+check_untyped_defs = true
+files = ["aevum.py", "aevum_pkg", "scripts"]

@@ -1,6 +1,7 @@
 """Local scanning: duration parsing, formatting, and the folder tree."""
 from __future__ import annotations
 
+import os
 import struct
 from pathlib import Path
 
@@ -221,3 +222,51 @@ def test_scan_folder_without_media_returns_zero(tmp_path):
 def test_scan_missing_folder_returns_zero(tmp_path):
     total_sec, total_count, *_ = scan_parallel(tmp_path / "nope")
     assert (total_sec, total_count) == (0.0, 0)
+
+
+# ---------------------------------------------------------------------------
+# Same file reachable by several paths is counted once
+# ---------------------------------------------------------------------------
+
+def _first_clip(library):
+    return sorted(library.rglob("*.mp4"))[0]
+
+
+@needs_ffmpeg
+@pytest.mark.skipif(not hasattr(os, "link"), reason="no hardlinks")
+def test_hardlink_is_counted_once(library):
+    _, base_count, _, base_durs, _ = scan_parallel(library)
+    src = _first_clip(library)
+    try:
+        os.link(src, src.with_name("hardlinked_copy.mp4"))
+    except OSError:
+        pytest.skip("filesystem refuses hardlinks")
+    stats: dict[str, int] = {}
+    total_sec, count, _, durs, _ = scan_parallel(library, stats=stats)
+    assert count == base_count
+    assert stats["duplicates_skipped"] == 1
+    assert total_sec == pytest.approx(sum(base_durs.values()))
+    assert src in durs   # alphabetical tie-break keeps the same name each run
+
+
+@needs_ffmpeg
+def test_file_symlink_is_counted_once_and_real_file_wins(library):
+    _, base_count, *_ = scan_parallel(library)
+    src = _first_clip(library)
+    link = src.with_name("0_link_first_alphabetically.mp4")   # sorts before src
+    try:
+        link.symlink_to(src)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+    stats: dict[str, int] = {}
+    _, count, _, durs, _ = scan_parallel(library, stats=stats)
+    assert count == base_count
+    assert stats["duplicates_skipped"] == 1
+    assert src in durs and link not in durs     # real file beats a symlink
+
+
+@needs_ffmpeg
+def test_no_duplicates_reports_zero(library):
+    stats: dict[str, int] = {}
+    scan_parallel(library, stats=stats)
+    assert stats["duplicates_skipped"] == 0

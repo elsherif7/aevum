@@ -125,8 +125,8 @@ def print_tree(
     """
     Recursively print the folder tree.
 
-    Issue 26 fix: max_depth is now threaded through every recursive call so
-    that runaway-deep folder structures can't cause unbounded recursion.
+    max_depth is passed down every recursive call, so a very deep folder
+    structure can't cause unbounded recursion.
     """
     if depth > max_depth:
         return
@@ -166,7 +166,6 @@ def print_tree(
 
     for i, node in enumerate(children, start=1):
         sub_number = f"{number}.{i}" if number else str(i)
-        # Issue 26: pass max_depth through every recursive call
         print_tree(
             node.name, node.total_sec, node.total_count,
             node.children, node.direct_files,
@@ -306,11 +305,9 @@ def _fuzzy_suggest(word: str, candidates: list[str]) -> str | None:
     """
     Return the closest candidate to word within edit-distance 2, or None.
 
-    Issue 27 fix: candidate lists larger than 50 items are skipped entirely.
-    The Levenshtein inner loop is O(len(word) * len(candidate)) and calling it
-    hundreds of times on a large subfolder list would be noticeably slow.
-    The threshold of 50 is generous for the intended use-cases (command names,
-    sort fields) while protecting against large input.
+    Candidate lists larger than 50 items are skipped entirely. The
+    Levenshtein inner loop is O(len(word) * len(candidate)), so running it
+    on a large folder listing would be noticeably slow.
 
     Security: Limits input lengths to prevent ReDoS attacks.
     """

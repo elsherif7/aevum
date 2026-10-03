@@ -1,8 +1,8 @@
 """
 Exit codes for Aevum CLI.
 
-Q-02 fix: extracted from _cli.py to avoid circular imports and make
-exit codes importable from any module.
+Kept in its own module so any module can import the exit codes without
+creating a circular import with _cli.py.
 """
 
 

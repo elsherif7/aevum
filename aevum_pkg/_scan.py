@@ -186,9 +186,6 @@ def _read_mp4_duration(path):
                 name, size, hdr_size = read_atom(file_size)
                 if name is None or size < hdr_size:
                     break
-                # H-05: guard against zero-size top-level atom causing infinite loop
-                if size == 0:
-                    break
                 if name == b'moov':
                     moov_end = pos + size
                     inner = pos + hdr_size
@@ -196,9 +193,6 @@ def _read_mp4_duration(path):
                         f.seek(inner)
                         iname, isize, ihdr = read_atom(moov_end)
                         if iname is None or isize < ihdr:
-                            break
-                        # H-04: guard against zero-size inner atom causing infinite loop
-                        if isize == 0:
                             break
                         if iname == b'mvhd':
                             box = f.read(min(isize - ihdr, 40))
@@ -228,13 +222,10 @@ def _read_mp4_duration(path):
 def _read_mkv_duration(path):
     """Read duration from MKV/WEBM by scanning EBML for the Segment/Info block.
 
-    Issue 3 fix: increased read size from 2 MB to 8 MB so that Info blocks
-    placed after large Tracks/SeekHead structures are still found without
-    falling back to ffprobe.
-
-    P-01 fix: use a two-pass strategy — try 2 MB first (covers most files),
-    then retry with 8 MB only if the Info block was not found.  This reduces
-    average memory usage from 8 MB/file to ~2 MB/file for typical MKVs.
+    Two passes: read 2 MB first (enough for most files), and only if the
+    Info block isn't found, retry with 8 MB. That finds Info blocks placed
+    after large Tracks/SeekHead structures without falling back to ffprobe,
+    while typical files only cost 2 MB of memory.
     """
     file_size = os.path.getsize(path)
 
@@ -313,8 +304,8 @@ def _read_mkv_duration(path):
         return None
 
     try:
-        # P-01: two-pass strategy — try 2 MB first (covers most MKV files),
-        # then retry with 8 MB only if the Info block was not found.
+        # Two passes: 2 MB first (covers most MKV files), then 8 MB only if
+        # the Info block was not found.
         SMALL_READ = 2 * 1024 * 1024
         LARGE_READ = 8 * 1024 * 1024
         with open(path, 'rb') as f:
@@ -379,8 +370,7 @@ def format_size(b: int) -> str:
 
 
 def format_duration(seconds: float) -> dict[str, str]:
-    # Issue 6: clamp negatives so delta formatting never produces garbage output
-    # H-07: clamp to reasonable max (100 years) to prevent integer overflow
+    # Clamp to 0..100 years so negative or absurd values can't produce garbage output.
     seconds = max(0.0, min(float(seconds), 100 * 365 * 86400))
     days    = int(seconds // 86400)
     hours   = int((seconds % 86400) // 3600)
@@ -398,6 +388,7 @@ def scan_parallel(
     on_progress: Callable[[int, int], None] | None = None,
     stop_event: threading.Event | None = None,
     _visited_inodes: set | None = None,
+    stats: dict[str, int] | None = None,
 ) -> tuple[float, int, ScanTree, dict[Path, float], dict[Path, int]]:
     """
     Parallel scan: collector thread discovers files and submits them to the
@@ -406,14 +397,16 @@ def scan_parallel(
 
     Security: Detects symlink loops and limits recursion depth to prevent DoS.
 
-    Issue 2 fix: `total` is read inside the lock inside probe() so the
-    progress callback never sees a torn value.
+    `total` is read inside the lock inside probe(), so the progress callback
+    never sees a torn value. The collector thread is joined before
+    as_completed() is called, so no future submitted near the end is dropped.
+    Files whose duration can't be read (0.0) are excluded, so the file count
+    matches the readable media files.
 
-    Issue 7 fix: collector thread is fully joined before as_completed() is
-    called, so no futures submitted near the end are silently dropped.
-
-    Issue 4 fix: files returning 0.0 duration are excluded so the reported
-    file count matches real, readable media files.
+    A file reachable by more than one path (a hardlink, or a symlink to a
+    file) is counted once. When two paths point at the same file the real
+    one wins over a symlink, then the alphabetically first path. If *stats*
+    is given, stats["duplicates_skipped"] is set to how many were dropped.
     """
     if _visited_inodes is None:
         _visited_inodes = set()
@@ -445,14 +438,17 @@ def scan_parallel(
     MAX_DEPTH = 30
     root_depth = len(root.parts)
 
-    def probe(path):
+    def probe(path, is_link):
         nonlocal done
         if stop_event and stop_event.is_set():
-            return path, 0.0, 0
+            return path, 0.0, 0, None, is_link
         sec = get_duration(path)
+        file_id = None
         try:
             st        = path.stat()
             file_size = st.st_size
+            if st.st_ino:   # some filesystems report 0: can't tell files apart
+                file_id = (st.st_dev, st.st_ino)
         except OSError:
             file_size = 0
         with lock:
@@ -461,13 +457,22 @@ def scan_parallel(
             _snap_total = total
         if on_progress and _snap_total > 0:
             on_progress(_snap_done, _snap_total)
-        return path, sec, file_size
+        return path, sec, file_size, file_id, is_link
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         futures = {}
 
-        def collect_and_submit():
+        def submit(entry, is_link):
+            """Queue a media file for probing (other extensions are ignored)."""
             nonlocal total
+            if os.path.splitext(entry.name)[1].lower() not in _VIDEO_EXT_SET:
+                return
+            p = Path(entry.path)
+            with lock:
+                total += 1
+            futures[pool.submit(probe, p, is_link)] = p
+
+        def collect_and_submit():
             # Security: Track (path, depth) to prevent excessive recursion
             stack = [(str(root), root_depth)]
             visited_dirs = set()
@@ -514,21 +519,13 @@ def scan_parallel(
                                     if entry.is_dir(follow_symlinks=True):
                                         stack.append((entry.path, depth + 1))
                                     elif entry.is_file(follow_symlinks=True):
-                                        if os.path.splitext(entry.name)[1].lower() in _VIDEO_EXT_SET:
-                                            p = Path(entry.path)
-                                            with lock:
-                                                total += 1
-                                            futures[pool.submit(probe, p)] = p
+                                        submit(entry, True)
                                 else:
                                     # Not a symlink, process normally
                                     if entry.is_dir(follow_symlinks=False):
                                         stack.append((entry.path, depth + 1))
                                     elif entry.is_file(follow_symlinks=False):
-                                        if os.path.splitext(entry.name)[1].lower() in _VIDEO_EXT_SET:
-                                            p = Path(entry.path)
-                                            with lock:
-                                                total += 1
-                                            futures[pool.submit(probe, p)] = p
+                                        submit(entry, False)
                             except (OSError, RuntimeError):
                                 # Skip broken symlinks or inaccessible entries
                                 continue
@@ -538,8 +535,8 @@ def scan_parallel(
         collector = threading.Thread(target=collect_and_submit, daemon=True)
         collector.start()
 
-        # Issue 7: join collector BEFORE consuming futures so every future
-        # that was submitted is visible to as_completed().
+        # Join the collector before consuming futures so every submitted
+        # future is visible to as_completed().
         try:
             collector.join()
         except KeyboardInterrupt:
@@ -553,19 +550,34 @@ def scan_parallel(
             tree = _build_tree(root, {})
             return 0.0, 0, tree, {}, {}
 
+        found = []   # (path, sec, size, file_id, is_link)
         try:
             for future in as_completed(futures):
                 if stop_event and stop_event.is_set():
                     break
-                path, sec, file_size = future.result()
-                # Issue 4: skip files whose duration could not be determined
-                if sec > 0.0:
-                    durations[path] = sec
-                    sizes[path]     = file_size
+                found.append(future.result())
         except KeyboardInterrupt:
             stop_event.set()
             pool.shutdown(wait=False, cancel_futures=True)
             raise
+
+    # Skip files whose duration could not be determined.
+    # Keep one path per underlying file: real file first, then name order.
+    best: dict[tuple, tuple] = {}
+    dropped = 0
+    for item in sorted(found, key=lambda r: (r[4], str(r[0]))):
+        path, sec, file_size, file_id, _ = item
+        if sec <= 0.0:
+            continue
+        if file_id is not None:
+            if file_id in best:
+                dropped += 1
+                continue
+            best[file_id] = item
+        durations[path] = sec
+        sizes[path]     = file_size
+    if stats is not None:
+        stats["duplicates_skipped"] = dropped
 
     if not durations:
         tree = _build_tree(root, {})
@@ -581,8 +593,8 @@ def _build_tree(root, durations, sizes=None) -> ScanTree:
     """O(n) tree builder.  Returns a ScanTree of FolderNode objects, with
     children and direct files sorted by name (ascending).
 
-    Issue 5 fix: ancestor walk is capped at MAX_DEPTH to prevent an
-    infinite loop on symlink cycles.
+    The ancestor walk is capped at MAX_DEPTH so a symlink cycle can't loop
+    forever.
     """
     MAX_DEPTH = 200
     root      = Path(root)
@@ -629,12 +641,6 @@ def _build_tree(root, durations, sizes=None) -> ScanTree:
             secs         = folder_secs.get(child, 0.0)
             count        = folder_count.get(child, 0)
             fbytes       = folder_bytes.get(child, 0)
-            if count == 0:
-                child_nodes.append(FolderNode(
-                    name=child.name, total_sec=0.0, total_count=0,
-                    total_bytes=0, children=[], direct_files=[],
-                ))
-                continue
             child_children, child_direct = build(child)
             child_nodes.append(FolderNode(
                 name=child.name,
@@ -655,7 +661,7 @@ def _build_tree(root, durations, sizes=None) -> ScanTree:
     return ScanTree(children=children, direct_files=direct_files, root_bytes=root_bytes)
 
 
-def _run_scan(folder, on_progress):
+def _run_scan(folder, on_progress, stats=None):
     """
     Run scan_parallel.
     Returns (total_sec, total_count, tree, durations, sizes).
@@ -663,7 +669,7 @@ def _run_scan(folder, on_progress):
     folder     = Path(folder)
     stop_event = threading.Event()
     try:
-        result = scan_parallel(folder, on_progress, stop_event)
+        result = scan_parallel(folder, on_progress, stop_event, stats=stats)
     except KeyboardInterrupt:
         stop_event.set()
         raise

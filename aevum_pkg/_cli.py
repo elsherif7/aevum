@@ -17,7 +17,7 @@ import sys
 from aevum_pkg import __version__
 
 from ._cli_cmds import cmd_scan
-from ._color import clr
+from ._color import clr, eclr
 from ._display import _safe
 from ._exit import EX
 
@@ -68,13 +68,13 @@ def _parse_target() -> str:
         sys.exit(EX.OK)
 
     if argv[0] != 'scan':
-        print(f"\n  {clr.R}[ERROR]{clr.RST} Missing 'scan' command. Usage: aevum scan <path|url>\n",
+        print(f"\n  {eclr.R}[ERROR]{eclr.RST} Missing 'scan' command. Usage: aevum scan <path|url>\n",
               file=sys.stderr)
         sys.exit(EX.ERR_ARGS)
 
     tokens = argv[1:]
     if not tokens:
-        print(f"\n  {clr.R}[ERROR]{clr.RST} No target specified. Usage: aevum scan <path|url>\n",
+        print(f"\n  {eclr.R}[ERROR]{eclr.RST} No target specified. Usage: aevum scan <path|url>\n",
               file=sys.stderr)
         sys.exit(EX.ERR_ARGS)
     # `aevum scan -h` / `--version` behave like the top-level flags.
@@ -86,12 +86,12 @@ def _parse_target() -> str:
         sys.exit(EX.OK)
     # scan takes no options. A leading dash is only a path if that path exists.
     if tokens[0].startswith('-') and not os.path.exists(tokens[0]):
-        print(f"\n  {clr.R}[ERROR]{clr.RST} Unknown option: {_safe(tokens[0])}. "
+        print(f"\n  {eclr.R}[ERROR]{eclr.RST} Unknown option: {_safe(tokens[0])}. "
               f"'aevum scan' takes no options, only a path or URL.\n",
               file=sys.stderr)
         sys.exit(EX.ERR_ARGS)
     if len(tokens) > 1:
-        print(f"\n  {clr.R}[ERROR]{clr.RST} Too many arguments. "
+        print(f"\n  {eclr.R}[ERROR]{eclr.RST} Too many arguments. "
               f"If your path contains spaces, wrap it in quotes: aevum scan \"my path\"\n",
               file=sys.stderr)
         sys.exit(EX.ERR_ARGS)

@@ -15,7 +15,7 @@ import math
 import sys
 from pathlib import Path
 
-from ._color import clr
+from ._color import clr, eclr
 from ._display import _fuzzy_suggest, _safe, print_results, print_url_results
 from ._exit import EX
 from ._scan import _run_scan, check_ffprobe
@@ -30,16 +30,29 @@ from ._youtube import (
 )
 
 
+def _is_interactive() -> bool:
+    """True when stdout is a terminal, so in-place progress output makes sense."""
+    try:
+        return sys.stdout.isatty()
+    except (AttributeError, ValueError, OSError):
+        return False
+
+
+#: Carriage return that rewinds the progress line, only on a terminal.
+_CR = "\r" if _is_interactive() else ""
+
+
 def _make_progress_bar():
     """
     Return a progress callback that renders a text progress bar to stdout.
 
-    Issue 15 fix: guard against total == 0 inside the callback itself so
-    that any caller passing total=0 directly gets a no-op instead of a
-    ZeroDivisionError.
+    The callback does nothing when stdout is not a terminal, or when
+    total is 0.
     """
+    interactive = _is_interactive()
+
     def on_progress(done, total):
-        if total <= 0:   # Issue 15
+        if not interactive or total <= 0:
             return
         pct    = int((done / total) * 100)
         filled = int(24 * done / total)
@@ -53,9 +66,9 @@ def _make_progress_bar():
 def _require_ffprobe(context: str = "") -> None:
     if not check_ffprobe():
         ctx = f" ({context})" if context else ""
-        print(f"\n  {clr.R}[ERROR]{clr.RST} ffprobe not found on PATH{ctx}.", file=sys.stderr)
-        print(f"  {clr.DIM}ffprobe is required for local folder scanning.{clr.RST}", file=sys.stderr)
-        print(f"  Install FFmpeg: {clr.C}https://ffmpeg.org/download.html{clr.RST}\n", file=sys.stderr)
+        print(f"\n  {eclr.R}[ERROR]{eclr.RST} ffprobe not found on PATH{ctx}.", file=sys.stderr)
+        print(f"  {eclr.DIM}ffprobe is required for local folder scanning.{eclr.RST}", file=sys.stderr)
+        print(f"  Install FFmpeg: {eclr.C}https://ffmpeg.org/download.html{eclr.RST}\n", file=sys.stderr)
         sys.exit(EX.ERR_DEPS)
 
 
@@ -79,7 +92,7 @@ def _wait_phrase(seconds: float) -> str:
 
 def _print_limit_message(e: YouTubeLimitError) -> None:
     """Explain a rate/quota stop and how to continue (progress is already saved)."""
-    print(f"\n\n  {clr.Y}[LIMIT]{clr.RST} {_safe(e, 500)}", file=sys.stderr)
+    print(f"\n\n  {eclr.Y}[LIMIT]{eclr.RST} {_safe(e, 500)}", file=sys.stderr)
     if e.kind == 'quota':
         when = "after YouTube's daily quota resets (midnight Pacific Time)"
     elif e.retry_after is not None:
@@ -87,7 +100,7 @@ def _print_limit_message(e: YouTubeLimitError) -> None:
     else:
         when = "in a minute or two"
     if e.total:
-        print(f"  {clr.W}{e.saved:,} of {e.total:,} videos are saved.{clr.RST}", file=sys.stderr)
+        print(f"  {eclr.W}{e.saved:,} of {e.total:,} videos are saved.{eclr.RST}", file=sys.stderr)
     print(f"  Run the same command again {when} to continue. "
           f"Saved videos are not fetched twice.\n", file=sys.stderr)
 
@@ -96,9 +109,9 @@ def _scan_youtube(raw: str) -> None:
     # Reject links we can't use before asking for an API key or touching the network.
     kind, _ = _parse_yt_url(_normalise_url(raw))
     if kind is None:
-        print(f"\n  {clr.R}[ERROR]{clr.RST} Not a supported YouTube URL: {_safe(raw, 500)}", file=sys.stderr)
-        print(f"  {clr.DIM}Use a video, playlist, or channel link, e.g. "
-              f"youtube.com/watch?v=ID, /playlist?list=ID, /@handle, /channel/ID{clr.RST}\n",
+        print(f"\n  {eclr.R}[ERROR]{eclr.RST} Not a supported YouTube URL: {_safe(raw, 500)}", file=sys.stderr)
+        print(f"  {eclr.DIM}Use a video, playlist, or channel link, e.g. "
+              f"youtube.com/watch?v=ID, /playlist?list=ID, /@handle, /channel/ID{eclr.RST}\n",
               file=sys.stderr)
         sys.exit(EX.ERR_ARGS)
     if kind == 'video' and _has_playlist_param(raw):
@@ -116,7 +129,7 @@ def _scan_youtube(raw: str) -> None:
         _print_limit_message(e)
         sys.exit(EX.ERR_API)
     except Exception as e:
-        print(f"\n  {clr.R}[ERROR]{clr.RST} {_safe(e, 500)}\n", file=sys.stderr)
+        print(f"\n  {eclr.R}[ERROR]{eclr.RST} {_safe(e, 500)}\n", file=sys.stderr)
         sys.exit(EX.ERR_API)
 
     api_fetched  = total_count - cache_hits
@@ -124,7 +137,7 @@ def _scan_youtube(raw: str) -> None:
                     if api_fetched > 0 else
                     f"  {clr.W}({cache_hits} cached, 0 API calls){clr.RST}")
     unavail_note = f"  {clr.Y}({unavailable_count} unavailable){clr.RST}" if unavailable_count > 0 else ""
-    print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}{unavail_note}".ljust(100))
+    print(f"{_CR}  {clr.G}Done!{clr.RST}  {clr.W}{total_count} videos found.{clr.RST}{yt_info}{unavail_note}".ljust(100))
     print_url_results(raw, label, total_sec, total_count, entries,
                       unavailable_count=unavailable_count)
     sys.exit(EX.OK)
@@ -133,29 +146,36 @@ def _scan_youtube(raw: str) -> None:
 def _scan_folder(raw: str) -> None:
     folder = Path(raw)
     if not folder.exists():
-        print(f"\n  {clr.R}[ERROR]{clr.RST} Path not found: {_safe(str(folder), 500)}", file=sys.stderr)
+        print(f"\n  {eclr.R}[ERROR]{eclr.RST} Path not found: {_safe(str(folder), 500)}", file=sys.stderr)
         try:
             sug = _fuzzy_suggest(folder.name,
                                  [p.name for p in folder.parent.iterdir() if p.is_dir()])
             if sug:
-                print(f"  {clr.DIM}Did you mean:{clr.RST}  {clr.W}{_safe(str(folder.parent / sug), 500)}{clr.RST}", file=sys.stderr)
+                print(f"  {eclr.DIM}Did you mean:{eclr.RST}  {eclr.W}{_safe(str(folder.parent / sug), 500)}{eclr.RST}", file=sys.stderr)
         except Exception:
             pass
         print()
         sys.exit(EX.ERR_ARGS)
     if not folder.is_dir():
-        print(f"\n  {clr.R}[ERROR]{clr.RST} That is a file, not a folder: {_safe(str(folder), 500)}\n", file=sys.stderr)
+        print(f"\n  {eclr.R}[ERROR]{eclr.RST} That is a file, not a folder: {_safe(str(folder), 500)}\n", file=sys.stderr)
         sys.exit(EX.ERR_ARGS)
     _require_ffprobe("scan")
 
     on_progress = _make_progress_bar()
-    print(f"  {clr.DIM}Collecting files...{clr.RST}", end='', flush=True)
+    if _is_interactive():
+        print(f"  {clr.DIM}Collecting files...{clr.RST}", end='', flush=True)
+    stats: dict[str, int] = {}
     try:
-        total_sec, total_count, tree, durations, sizes = _run_scan(folder, on_progress)
+        total_sec, total_count, tree, durations, sizes = _run_scan(folder, on_progress, stats)
     except KeyboardInterrupt:
         print(f"\n\n  {clr.Y}Scan cancelled.{clr.RST}\n")
         sys.exit(EX.ERR_SCAN)
 
-    print(f"\r  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} files found.".ljust(100))
+    print(f"{_CR}  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} files found.".ljust(100))
+    skipped = stats.get("duplicates_skipped", 0)
+    if skipped:
+        noun = "file" if skipped == 1 else "files"
+        print(f"  {clr.DIM}({skipped} duplicate {noun} skipped: hardlinks or symlinks "
+              f"to files already counted){clr.RST}")
     print_results(folder, total_sec, total_count, tree, durations, sizes)
     sys.exit(EX.OK)

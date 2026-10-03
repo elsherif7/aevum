@@ -76,3 +76,27 @@ def test_source_parses_with_the_minimum_versions_grammar(path):
     # not catch newer library calls: running the tests on the oldest supported Python
     # is what proves those.
     ast.parse(path.read_text(encoding="utf-8"), filename=str(path), feature_version=_minimum())
+
+
+def test_version_has_a_single_source():
+    project = PYPROJECT
+    assert "version" not in project["project"]
+    assert "version" in project["project"]["dynamic"]
+    assert project["tool"]["setuptools"]["dynamic"]["version"] == {"attr": "aevum_pkg.__version__"}
+
+
+def test_version_string_is_a_plain_release_number():
+    from aevum_pkg import __version__
+    assert re.fullmatch(r"\d+\.\d+\.\d+", __version__)
+
+
+def test_build_backend_is_new_enough_for_spdx_license():
+    # `license = "GPL-3.0-only"` (a plain SPDX string) needs setuptools 77+;
+    # older versions fail the build with a configuration error.
+    assert "setuptools>=77" in PYPROJECT["build-system"]["requires"]
+
+
+def test_mypy_checks_every_module():
+    files = PYPROJECT["tool"]["mypy"]["files"]
+    assert "aevum_pkg" in files
+    assert PYPROJECT["tool"]["mypy"]["check_untyped_defs"] is True

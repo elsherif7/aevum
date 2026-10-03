@@ -14,7 +14,7 @@ from ._paths import YT_KEY_FILE, YT_VCACHE_FILE
 # Simplest practical option: the key is saved once to a single local file
 # with restrictive permissions (0o600, owner read/write only) so it
 # doesn't need to be re-entered on every run.
-# H-01: compile once at module level.
+# Compiled once at module level.
 _YT_KEY_PATTERN = re.compile(r'^AIza[0-9A-Za-z\-_]{35}$')
 
 
@@ -48,7 +48,7 @@ def save_api_key(api_key: str) -> bool:
     Store the API key in a local file (owner-only on Linux/macOS).
     Returns True if saved successfully, False otherwise.
     """
-    # S-02: validate API key format (YouTube keys start with AIza).
+    # Validate the key format (YouTube keys start with AIza).
     if not api_key or not _YT_KEY_PATTERN.match(api_key):
         print("  Error: Invalid API key format (expected AIza...)", file=sys.stderr)
         return False
@@ -69,8 +69,6 @@ def load_api_key() -> str:
         return ""
 
 
-# Issue 13: file now uses LF line endings (normalised from original CRLF).
-
 YT_API_BASE = "https://www.googleapis.com/youtube/v3"
 
 
@@ -80,7 +78,7 @@ YT_API_BASE = "https://www.googleapis.com/youtube/v3"
 # Stores individual video details keyed by video ID — cached forever since
 # a video's duration never changes once uploaded.
 #
-# File path comes from _paths.py (Issue 23/32).
+# The file path comes from _paths.py.
 # ---------------------------------------------------------------------------
 
 
@@ -152,8 +150,8 @@ def _merge_into_cache(cache, new_entries_by_id, save=True):
     Write new_entries_by_id into cache and (by default) persist.
     new_entries_by_id: dict of video_id -> entry dict.
 
-    Issue 11 fix: no longer reloads cache from disk after writing — the
-    in-memory dict already contains the new entries after this call.
+    The in-memory dict already holds the new entries after this call, so
+    nothing is reloaded from disk.
     """
     now = int(time.time())
     for vid_id, entry in new_entries_by_id.items():
@@ -219,7 +217,7 @@ def _parse_iso8601_duration(d):
     if not m:
         return 0.0
     dd, h, mi, s = m.groups()
-    # H-08: clamp to reasonable max and ensure non-negative
+    # Never negative, and capped at one year.
     result = float(dd or 0) * 86400 + float(h or 0) * 3600 + float(mi or 0) * 60 + float(s or 0)
     return max(0.0, min(result, 365 * 86400))  # cap at 1 year
 
@@ -345,8 +343,8 @@ def _yt_api_request(endpoint, params, api_key):
 
     Every request here is a GET, so retrying is safe.
 
-    Issue 10 fix: errors carry the API's own message, never the URL (which contains
-    the API key).
+    Errors carry the API's own message, never the URL (which contains the
+    API key).
     """
     import urllib.error
     import urllib.parse
@@ -354,7 +352,7 @@ def _yt_api_request(endpoint, params, api_key):
 
     # Copy params to avoid mutating the caller's dict
     params = {**params, 'key': api_key}
-    # S-03 note: API key is in URL query string (YouTube API v3 design).
+    # Note: the API key goes in the URL query string (YouTube API v3 design).
     # This means the key appears in server logs, proxy logs, and network monitoring.
     # This is a known limitation of the YouTube Data API v3 design.
     # For production use cases, consider OAuth 2.0 service accounts instead.
@@ -435,7 +433,7 @@ def _parse_yt_url(url):
     """
     Parse a YouTube URL into (kind, id).
 
-    Issue 12 fix: music.youtube.com URLs are now accepted.
+    music.youtube.com links are accepted too.
     """
     from urllib.parse import parse_qs, urlparse
     p          = urlparse(url)
@@ -443,7 +441,6 @@ def _parse_yt_url(url):
     path_parts = [x for x in p.path.split('/') if x]
     netloc     = p.netloc.removeprefix('www.')
 
-    # Issue 12: added music.youtube.com; also support kids and gaming subdomains
     if netloc not in _YT_DOMAINS:
         return None, None
     # A link to a video that also carries list=... (copied from inside a playlist)
@@ -501,8 +498,8 @@ def _yt_get_channel_uploads_playlist(channel_ref, api_key, kind='channel_handle'
 def _yt_fetch_playlist_video_ids(playlist_id, api_key, on_progress=None):
     ids        = []
     page_token = None
-    # H-06: cap pagination at 2000 pages (100,000 videos) to prevent infinite
-    # loops from malformed/adversarial nextPageToken responses.
+    # Cap pagination at 2000 pages (100,000 videos) so a malformed or hostile
+    # nextPageToken response can't loop forever.
     MAX_PAGES  = 2000
     page_count = 0
     while page_count < MAX_PAGES:

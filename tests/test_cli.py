@@ -378,3 +378,16 @@ def test_names_the_console_cannot_encode_do_not_crash_the_report(run_cli, clips,
     assert r.returncode == EX.OK, r.stderr
     assert "Traceback" not in r.stderr
     assert "1 files found" in r.stdout
+
+
+@needs_ffmpeg
+def test_scan_reports_skipped_duplicate_links(run_cli, library):
+    src = sorted(library.rglob("*.mp4"))[0]
+    try:
+        src.with_name("zz_link.mp4").symlink_to(src)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+    r = run_cli("scan", str(library))
+    assert r.returncode == 0
+    assert "1 duplicate file skipped" in r.stdout
+    assert "zz_link" not in r.stdout

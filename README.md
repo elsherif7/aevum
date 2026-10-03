@@ -19,7 +19,9 @@ aevum/
 ├── tests/                # pytest suite (needs ffmpeg/ffprobe on PATH; no network or API key)
 │   ├── conftest.py       # Shared fixtures: ffmpeg-generated media, isolated CLI runner
 │   ├── test_cli.py       # Arguments, exit codes, end-to-end scans
+│   ├── test_color.py     # NO_COLOR / FORCE_COLOR, terminal vs piped output
 │   ├── test_display.py   # Output sanitizing, fuzzy suggestions, bar
+│   ├── test_project.py   # pyproject.toml settings, Python-version floor
 │   ├── test_scan.py      # Duration parsing (MP4/MKV/ffprobe), folder tree
 │   └── test_youtube.py   # URL/duration parsing, API key, retries, cache
 └── aevum_pkg/
@@ -29,7 +31,7 @@ aevum/
     ├── _youtube.py       # YouTube Data API v3 scanning (channels, playlists, videos) + API key storage
     ├── _display.py       # Human-readable output (tree, bar chart, top files)
     ├── _models.py        # FolderNode / ScanTree data types
-    ├── _color.py         # ANSI color handling
+    ├── _color.py         # ANSI color handling (off when output isn't a terminal)
     ├── _paths.py         # Platform-correct data directory paths
     └── _exit.py          # Exit code constants
 ```
@@ -48,7 +50,9 @@ aevum/
 
 ## Installation
 
-Aevum is installed from source, straight from GitHub.
+Aevum is installed from source, straight from GitHub. It needs
+`pip` with `setuptools` 77 or newer, which pip fetches for you in the
+build step.
 
 1. Clone the repo:
    ```
@@ -113,6 +117,12 @@ aevum scan https://youtube.com/watch?v=...
 
 A few other things worth knowing:
 
+- A file that can be reached by more than one path (a hardlink, or a
+  symlink to a file) is counted once, and Aevum says how many
+  duplicates it skipped.
+- Colors are used only when output goes to a terminal. Set `NO_COLOR=1`
+  to turn them off, or `FORCE_COLOR=1` to keep them when piping. When
+  output is piped or redirected, the progress bar is left out.
 - `scan` is required — there's no bare `aevum <path>` shorthand.
 - A path containing spaces must be quoted, or it's rejected with a
   hint rather than guessed at.
