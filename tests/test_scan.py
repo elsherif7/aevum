@@ -507,3 +507,75 @@ def test_real_mpeg_ts_clip_is_still_counted(tmp_path):
     assert set(p.name for p in durs) == {"clip.ts"}
     assert total_sec == pytest.approx(CLIP_SECONDS, abs=0.5)
     assert stats["unreadable_files"] == 0
+
+
+# folder symlinks
+
+def _link(target: Path, link: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+
+
+@pytest.mark.parametrize("link_name", ["0_alias", "zz_alias"])
+def test_folder_link_inside_root_is_counted_once_under_the_real_path(tmp_path, monkeypatch, link_name):
+    monkeypatch.setattr(_scan, "_probe_duration", _fake_probe())
+    root = tmp_path / "root"
+    (root / "real").mkdir(parents=True)
+    (root / "real" / "a.mp3").write_bytes(b"x")
+    _link(root / "real", root / link_name)
+    _, count, _, durs, _ = scan_parallel(root)
+    assert count == 1
+    assert list(durs) == [(root / "real" / "a.mp3").resolve()]
+
+
+def test_folder_link_outside_root_is_followed(tmp_path, monkeypatch):
+    monkeypatch.setattr(_scan, "_probe_duration", _fake_probe())
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (outside / "b.mp3").write_bytes(b"x")
+    (root / "a.mp3").write_bytes(b"x")
+    _link(outside, root / "drive")
+    _, count, _, durs, _ = scan_parallel(root)
+    assert count == 2
+    assert {p.name for p in durs} == {"a.mp3", "b.mp3"}
+    assert any("drive" in p.parts for p in durs if p.name == "b.mp3")
+
+
+@pytest.mark.parametrize("target", ["root", "parent"])
+def test_folder_link_to_an_ancestor_does_not_loop(tmp_path, monkeypatch, target):
+    monkeypatch.setattr(_scan, "_probe_duration", _fake_probe())
+    root = tmp_path / "root"
+    (root / "sub").mkdir(parents=True)
+    (root / "sub" / "a.mp3").write_bytes(b"x")
+    _link(root if target == "root" else tmp_path, root / "sub" / "up")
+    _, count, _, durs, _ = scan_parallel(root)
+    assert count == 1
+    assert {p.name for p in durs} == {"a.mp3"}
+
+
+@pytest.mark.skipif(not hasattr(os, "link"), reason="no hardlinks")
+def test_real_file_beats_a_file_reached_through_a_folder_link(tmp_path, monkeypatch):
+    monkeypatch.setattr(_scan, "_probe_duration", _fake_probe())
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    (root / "real").mkdir(parents=True)
+    outside.mkdir()
+    (outside / "x.mp3").write_bytes(b"x")
+    try:
+        os.link(outside / "x.mp3", root / "real" / "x_hard.mp3")
+    except OSError:
+        pytest.skip("filesystem refuses hardlinks")
+    _link(outside, root / "0_drive")          # sorts before "real"
+    stats: dict[str, int] = {}
+    _, count, _, durs, _ = scan_parallel(root, stats=stats)
+    assert count == 1
+    assert stats["duplicates_skipped"] == 1
+    assert [p.name for p in durs] == ["x_hard.mp3"]
+
+
+def test_visited_inodes_is_no_longer_a_parameter():
+    assert "_visited_inodes" not in inspect.signature(scan_parallel).parameters

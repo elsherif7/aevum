@@ -282,7 +282,6 @@ def scan_parallel(
     root: str | Path,
     on_progress: Callable[[int, int], None] | None = None,
     stop_event: threading.Event | None = None,
-    _visited_inodes: set | None = None,
     stats: dict[str, int] | None = None,
 ) -> tuple[float, int, ScanTree, dict[Path, float], dict[Path, int]]:
     """
@@ -291,12 +290,11 @@ def scan_parallel(
     A collector thread walks the folders and submits files to a thread pool.
     Files whose duration can't be read are left out of the totals and counted. A file reachable by more
     than one path (a hardlink, or a symlink to a file) is counted once: the real
-    file wins over a symlink, then the alphabetically first path. If stats is
-    given, it is filled with duplicates_skipped, unreadable_files, timed_out,
-    unreadable_dirs and skipped_deep.
+    file wins over a symlink, then the alphabetically first path. Folder symlinks
+    are followed, including ones that point outside root, and every file below one
+    ranks as a symlink. If stats is given, it is filled with duplicates_skipped,
+    unreadable_files, timed_out, unreadable_dirs and skipped_deep.
     """
-    if _visited_inodes is None:
-        _visited_inodes = set()
     if stop_event is None:
         stop_event = threading.Event()
 
@@ -305,12 +303,6 @@ def scan_parallel(
     try:
         root_stat  = root.stat()
         root_inode = (root_stat.st_dev, root_stat.st_ino)
-
-        if root_inode in _visited_inodes:
-            warn(f"Symlink loop detected: {root}")
-            return 0.0, 0, ScanTree([], [], 0), {}, {}
-
-        _visited_inodes.add(root_inode)
     except OSError as e:
         warn(f"Cannot access {root}: {e}")
         if stats is not None:
@@ -368,30 +360,37 @@ def scan_parallel(
 
         def collect_and_submit():
             nonlocal unreadable_dirs, skipped_deep
-            stack = [(str(root), root_depth)]
-            visited_dirs = set()
+            # a folder's identity is recorded when it is queued, so it is walked only once
+            seen = {root_inode}
+            stack = [(str(root), root_depth, False)]   # (path, depth, reached through a link)
+            links: list[tuple[str, int]] = []
 
-            while stack:
+            def queue(path, depth, via_link, st):
+                ident = (st.st_dev, st.st_ino)
+                if ident not in seen:
+                    seen.add(ident)
+                    stack.append((path, depth, via_link))
+
+            while True:
                 if stop_event and stop_event.is_set():
-                    break
+                    return
+                if not stack:
+                    # Linked folders wait until every real folder has been queued, so a link
+                    # to a folder inside the root never claims it before its real path does.
+                    if not links:
+                        return
+                    batch, links = sorted(links), []
+                    for link_path, link_depth in batch:
+                        try:
+                            queue(link_path, link_depth, True, os.stat(link_path))
+                        except OSError:
+                            continue
+                    continue
 
-                current, depth = stack.pop()
+                current, depth, via_link = stack.pop()
 
                 if depth - root_depth > MAX_DEPTH:
                     skipped_deep += 1
-                    continue
-
-                # skip folders already seen, which also stops symlink loops
-                try:
-                    current_stat = Path(current).stat()
-                    current_inode = (current_stat.st_dev, current_stat.st_ino)
-
-                    if current_inode in visited_dirs:
-                        continue
-
-                    visited_dirs.add(current_inode)
-                except OSError:
-                    unreadable_dirs += 1
                     continue
 
                 try:
@@ -402,22 +401,19 @@ def scan_parallel(
 
                             try:
                                 if entry.is_symlink():
-                                    resolved = Path(entry.path).resolve(strict=True)
-                                    resolved_stat = resolved.stat()
-                                    resolved_inode = (resolved_stat.st_dev, resolved_stat.st_ino)
-
-                                    if resolved_inode in _visited_inodes or resolved_inode in visited_dirs:
-                                        continue
-
                                     if entry.is_dir(follow_symlinks=True):
-                                        stack.append((entry.path, depth + 1))
+                                        links.append((entry.path, depth + 1))
                                     elif entry.is_file(follow_symlinks=True):
                                         submit(entry, True)
-                                else:
-                                    if entry.is_dir(follow_symlinks=False):
-                                        stack.append((entry.path, depth + 1))
-                                    elif entry.is_file(follow_symlinks=False):
-                                        submit(entry, False)
+                                elif entry.is_dir(follow_symlinks=False):
+                                    try:
+                                        st = entry.stat(follow_symlinks=False)
+                                    except OSError:
+                                        unreadable_dirs += 1
+                                        continue
+                                    queue(entry.path, depth + 1, via_link, st)
+                                elif entry.is_file(follow_symlinks=False):
+                                    submit(entry, via_link)
                             except (OSError, RuntimeError):
                                 # broken symlink or unreadable entry
                                 continue
@@ -510,10 +506,12 @@ def _build_tree(root, durations, sizes=None) -> ScanTree:
     folder_bytes:  dict[Path, int]   = {}
     folder_count:  dict[Path, int]   = {}
     folder_direct: dict[Path, list]  = {}
+    direct_bytes:  dict[Path, int]   = {}
 
     for path, sec in durations.items():
         file_bytes = sizes.get(path, 0)
         folder_direct.setdefault(path.parent, []).append((path, sec))
+        direct_bytes[path.parent] = direct_bytes.get(path.parent, 0) + file_bytes
         ancestor = path.parent
         depth    = 0
         while depth <= MAX_DEPTH:
@@ -541,7 +539,7 @@ def _build_tree(root, durations, sizes=None) -> ScanTree:
         child_nodes = []
         child_paths = sorted(
             children_of.get(node, set()),
-            key=lambda p: p.name.lower(),
+            key=lambda p: (p.name.lower(), p.name),
         )
         for child in child_paths:
             secs         = folder_secs.get(child, 0.0)
@@ -555,16 +553,18 @@ def _build_tree(root, durations, sizes=None) -> ScanTree:
                 total_bytes=fbytes,
                 children=child_children,
                 direct_files=child_direct,
+                direct_bytes=direct_bytes.get(child, 0),
             ))
         direct = sorted(
             folder_direct.get(node, []),
-            key=lambda x: x[0].name.lower(),
+            key=lambda x: (x[0].name.lower(), x[0].name),
         )
         return child_nodes, direct
 
     children, direct_files = build(root)
     root_bytes = folder_bytes.get(root, 0)
-    return ScanTree(children=children, direct_files=direct_files, root_bytes=root_bytes)
+    return ScanTree(children=children, direct_files=direct_files, root_bytes=root_bytes,
+                    direct_bytes=direct_bytes.get(root, 0))
 
 
 def _run_scan(folder, on_progress, stats=None):

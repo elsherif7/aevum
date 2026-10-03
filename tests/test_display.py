@@ -15,6 +15,7 @@ from aevum_pkg._display import (
     print_url_results,
 )
 from aevum_pkg._models import FolderNode, ScanTree
+from aevum_pkg._scan import _build_tree
 from aevum_pkg._text import _safe, warn
 
 
@@ -34,6 +35,18 @@ def test_safe_truncates_long_names():
 ])
 def test_fuzzy_suggest(word, candidates, expected):
     assert _fuzzy_suggest(word, candidates) == expected
+
+
+@pytest.mark.parametrize("word, candidate, expected", [
+    ("Mo", "Mp", "Mp"),                  # one edit is fine for a short name
+    ("Mo", "Xy", None),                  # two edits is not
+    ("Docs", "Doc", "Doc"),
+    ("Docs", "Dcos", None),              # a transposition is two edits
+    ("Download", "Downlaod", "Downlaod"),
+    ("Download", "Dxwnlxax", None),      # three edits
+])
+def test_fuzzy_suggest_distance_depends_on_name_length(word, candidate, expected):
+    assert _fuzzy_suggest(word, [candidate]) == expected
 
 
 def test_fuzzy_suggest_skips_huge_candidate_lists():
@@ -148,3 +161,56 @@ def test_print_url_results_survives_odd_cached_titles(capsys):
     entries = [{"title": 12345, "duration": 60.0, "channel": ["not", "a", "string"]}]
     print_url_results("https://youtu.be/x", "label", 60.0, 1, entries)
     assert "12345" in capsys.readouterr().out
+
+
+# bar chart, tree sizes and ordering
+
+def test_bar_chart_needs_at_least_two_rows(capsys):
+    print_bar_chart([_node("only")], 60.0)
+    assert capsys.readouterr().out == ""
+
+    print_bar_chart([_node("a"), _node("b")], 120.0)
+    assert "Duration Breakdown" in capsys.readouterr().out
+
+    print_bar_chart([_node("a")], 120.0, [(Path("/r/x.mp4"), 60.0)])   # a folder plus root files
+    assert "Duration Breakdown" in capsys.readouterr().out
+
+
+def test_results_with_a_single_group_have_no_breakdown(capsys, tmp_path):
+    tree = ScanTree([], [(tmp_path / "x.mp4", 60.0)], 1000, 1000)
+    print_results(tmp_path, 60.0, 1, tree, {tmp_path / "x.mp4": 60.0})
+    out = capsys.readouterr().out
+    assert "Duration Breakdown" not in out
+    assert "Grand Total" in out
+
+
+def test_tree_shows_root_file_size_without_touching_the_disk(capsys):
+    root = Path("/does/not/exist/root")
+    durations = {root / "a.mp4": 10.0, root / "sub" / "b.mp4": 20.0}
+    sizes = {root / "a.mp4": 3072, root / "sub" / "b.mp4": 2048}
+    tree = _build_tree(root, durations, sizes)
+    assert tree.direct_bytes == 3072
+    assert tree.children[0].direct_bytes == 2048
+    assert tree.root_bytes == 5120
+
+    print_tree("root", 30.0, 2, tree.children, tree.direct_files,
+               fbytes=tree.root_bytes, direct_bytes=tree.direct_bytes)
+    out = capsys.readouterr().out
+    assert "(no folder)" in out
+    assert "3.0 KB" in out
+
+
+def test_models_default_direct_bytes_to_zero():
+    assert FolderNode("n", 1.0, 1, 1, [], []).direct_bytes == 0
+    assert ScanTree([], [], 0).direct_bytes == 0
+
+
+def test_folders_that_differ_only_by_case_keep_a_stable_order():
+    root = Path("/r")
+    files = [(root / "a" / "x.mp4", 1.0), (root / "A" / "y.mp4", 1.0),
+             (root / "b" / "z.mp4", 1.0), (root / "B" / "w.mp4", 1.0)]
+    orders = set()
+    for items in (files, files[::-1], files[1:] + files[:1]):
+        tree = _build_tree(root, dict(items))
+        orders.add(tuple(c.name for c in tree.children))
+    assert orders == {("A", "a", "B", "b")}

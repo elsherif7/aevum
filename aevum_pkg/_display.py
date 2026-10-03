@@ -33,7 +33,7 @@ def print_bar_chart(
     total_sec: float,
     direct_files: list[tuple[Path, float]] | None = None,
 ) -> None:
-    """Bar chart of each top-level subfolder's share of the total. Files directly in the root are grouped as '(root files)'."""
+    """Bar chart of each top-level subfolder's share of the total, with files directly in the root as '(root files)'. Skipped when there is only one row."""
     if total_sec <= 0:
         return
 
@@ -47,7 +47,7 @@ def print_bar_chart(
         if direct_sec > 0:
             rows.append(("(root files)", direct_sec))
 
-    if not rows:
+    if len(rows) < 2:
         return
 
     rows.sort(key=lambda x: x[1], reverse=True)
@@ -81,6 +81,7 @@ def print_tree(
     number: str = "",
     max_depth: int = MAX_DEPTH,
     fbytes: int = 0,
+    direct_bytes: int = 0,
 ) -> None:
     if depth > max_depth:
         return
@@ -108,13 +109,7 @@ def print_tree(
         child_col    = _dc(depth + 1)
         virt_num     = f"{number}.0" if number else "0"
         print(f"{indent}    {child_col}{virt_num}.  (no folder){clr.RST}")
-        dir_bytes = 0
-        for p, _ in direct_files:
-            try:
-                dir_bytes += p.stat().st_size
-            except OSError:
-                pass
-        dir_size_label = f"  {clr.DIM}|{clr.RST}  {clr.W}{format_size(dir_bytes)}{clr.RST}" if dir_bytes else ""
+        dir_size_label = f"  {clr.DIM}|{clr.RST}  {clr.W}{format_size(direct_bytes)}{clr.RST}" if direct_bytes else ""
         print(f"{indent}        {clr.DIM}+--{clr.RST}  {clr.W}{dir_fmt['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{direct_count} {'media file' if direct_count == 1 else 'media files'}{clr.RST}{dir_size_label}")
         print()
 
@@ -126,6 +121,7 @@ def print_tree(
             depth + 1, sub_number,
             max_depth=max_depth,
             fbytes=node.total_bytes,
+            direct_bytes=node.direct_bytes,
         )
     if children:
         print()
@@ -170,6 +166,7 @@ def print_results(
         _folder_label, total_sec, total_count,
         tree.children, tree.direct_files,
         fbytes=tree.root_bytes,
+        direct_bytes=tree.direct_bytes,
     )
     if tree.children or tree.direct_files:
         print_bar_chart(tree.children, total_sec, tree.direct_files)
@@ -255,7 +252,8 @@ def print_url_results(
 
 def _fuzzy_suggest(word: str, candidates: list[str]) -> str | None:
     """
-    Return the closest candidate within edit distance 2, or None.
+    Return the closest candidate, or None. A name of 4 characters or fewer may differ
+    by one edit, longer names by two.
 
     Lists of more than 50 candidates are skipped because the Levenshtein
     loop would be noticeably slow on a big folder listing.
@@ -302,4 +300,4 @@ def _fuzzy_suggest(word: str, candidates: list[str]) -> str | None:
 
     scored = [(c, _dist(word, c)) for c in filtered]
     best_c, best_d = min(scored, key=lambda x: x[1])
-    return best_c if best_d <= 2 else None
+    return best_c if best_d <= (1 if len(word) <= 4 else 2) else None

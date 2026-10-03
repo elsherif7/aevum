@@ -12,6 +12,7 @@ class FolderNode(NamedTuple):
     total_bytes:  int
     children:     list[FolderNode]
     direct_files: list[tuple[Path, float]]  # (path, seconds) for files directly in this folder
+    direct_bytes: int = 0                   # size of those direct files
 
 
 class ScanTree(NamedTuple):
@@ -19,3 +20,4 @@ class ScanTree(NamedTuple):
     children:     list[FolderNode]
     direct_files: list[tuple[Path, float]]
     root_bytes:   int
+    direct_bytes: int = 0                   # size of the files directly in the root
