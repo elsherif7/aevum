@@ -31,6 +31,7 @@ aevum/
     ├── _youtube.py       # YouTube Data API v3 scanning (channels, playlists, videos) + API key storage
     ├── _display.py       # Human-readable output (tree, bar chart, top files)
     ├── _models.py        # FolderNode / ScanTree data types
+    ├── _text.py          # Sanitizing untrusted text for the terminal, scanner warnings
     ├── _color.py         # ANSI color handling (off when output isn't a terminal)
     ├── _paths.py         # Platform-correct data directory paths
     └── _exit.py          # Exit code constants
@@ -115,8 +116,13 @@ aevum scan https://youtube.com/playlist?list=...
 aevum scan https://youtube.com/watch?v=...
 ```
 
+Video links can also be `youtu.be/ID`, `/shorts/ID`, `/live/ID` or
+`/embed/ID`. The `https://` part is optional.
+
 A few other things worth knowing:
 
+- If a folder exists with a name that looks like a web address (for
+  example `www.backup`), it is scanned as a folder.
 - A file that can be reached by more than one path (a hardlink, or a
   symlink to a file) is counted once, and Aevum says how many
   duplicates it skipped.
@@ -171,6 +177,7 @@ on Linux/macOS or `%LOCALAPPDATA%\Aevum\yt_api_key.txt` on Windows.
 | 1 | Bad arguments / path not found |
 | 2 | Missing dependency (`ffprobe` not on `PATH`) |
 | 3 | Scan failed or was interrupted |
+| 4 | Not used |
 | 5 | YouTube API error |
 
 ---

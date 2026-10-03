@@ -1,30 +1,11 @@
 from __future__ import annotations
 
-import re as _re
 from pathlib import Path
 
 from ._color import LINE, clr
 from ._models import FolderNode, ScanTree
 from ._scan import format_duration, format_size
-
-# Whole escape sequences: CSI (including private forms like ESC[?25l), OSC (ended by BEL or
-# ESC \), charset switches (ESC ( 0), and two-character ones like ESC c (terminal reset).
-_ANSI_ESCAPE = _re.compile(r'\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[ -/]+[0-~]|[0-~])')
-# C0 controls, DEL and C1 controls. U+009B is CSI on terminals that honour 8-bit controls.
-_CTRL_CHARS  = _re.compile(r'[\x00-\x1f\x7f-\x9f]')
-# Bidi embeddings, overrides and isolates, which can make "gpj.exe" display as "exe.jpg".
-_BIDI_CHARS  = _re.compile('[‪-‮⁦-⁩]')
-
-
-def _safe(name: object, maxlen: int = 200) -> str:
-    """Make an untrusted string (file name, video title, typed path) safe to print."""
-    text = str(name)
-    text = _ANSI_ESCAPE.sub('', text)
-    text = _CTRL_CHARS.sub('', text)
-    text = _BIDI_CHARS.sub('', text)
-    text = text.encode('utf-8', 'replace').decode('utf-8')  # undecodable file name bytes become '?'
-    return text[:maxlen]
-
+from ._text import _safe
 
 _DEPTH_ATTRS = ("R", "G", "B", "M", "C")
 

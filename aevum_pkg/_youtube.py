@@ -159,20 +159,19 @@ _YT_DOMAINS = (
     'music.youtube.com', 'kids.youtube.com', 'gaming.youtube.com',
 )
 
+_HTTP_SCHEMES = ('http://', 'https://')
+
+
 def _is_url(s):
-    if s.startswith(('http://', 'https://')):
+    if s.lower().startswith(_HTTP_SCHEMES):
         return True
     # bare domains such as "www.youtube.com/..." or "music.youtube.com/..."
-    for domain in _YT_DOMAINS:
-        if s.startswith(domain) or s.startswith('www.' + domain):
-            return True
-    if s.startswith('www.'):
-        return True
-    return False
+    host = re.split(r'[/?#]', s, maxsplit=1)[0].lower().rsplit(':', 1)[0]
+    return host.startswith('www.') or host in _YT_DOMAINS
 
 
 def _normalise_url(url):
-    if not url.startswith(('http://', 'https://')):
+    if not url.lower().startswith(_HTTP_SCHEMES):
         return 'https://' + url
     return url
 
@@ -373,22 +372,25 @@ def prompt_api_key():
 def _parse_yt_url(url):
     """Parse a YouTube URL into (kind, id), or (None, None) if it isn't a supported link."""
     from urllib.parse import parse_qs, urlparse
-    p          = urlparse(url)
+    try:
+        p      = urlparse(url)
+        host   = (p.hostname or '').removeprefix('www.')
+    except ValueError:
+        return None, None
     qs         = parse_qs(p.query)
     path_parts = [x for x in p.path.split('/') if x]
-    netloc     = p.netloc.removeprefix('www.')
 
-    if netloc not in _YT_DOMAINS:
+    if host not in _YT_DOMAINS:
         return None, None
     # a video link that also carries list=... (copied from inside a playlist) means that
     # one video. Only a /playlist link scans the whole playlist.
-    if netloc == 'youtu.be' and path_parts:
+    if host == 'youtu.be' and path_parts:
         return 'video', path_parts[0]
     if 'v' in qs:
         return 'video', qs['v'][0]
     if 'list' in qs:
         return 'playlist', qs['list'][0]
-    if len(path_parts) == 2 and path_parts[0] == 'shorts':
+    if len(path_parts) == 2 and path_parts[0] in ('shorts', 'live', 'embed'):
         return 'video', path_parts[1]
     if path_parts:
         if path_parts[0].startswith('@'):

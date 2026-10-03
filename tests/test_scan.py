@@ -22,9 +22,22 @@ from aevum_pkg._scan import (
 TOLERANCE = 0.1  # seconds; container rounding differs a little per format
 
 
-# ---------------------------------------------------------------------------
+# warnings
+
+def test_ffprobe_timeout_warning_is_sanitised(tmp_path, monkeypatch, capsys):
+    import subprocess
+
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="ffprobe", timeout=15)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert get_duration(tmp_path / "evil\x1b[2J\nname.avi") == 0.0
+    err = capsys.readouterr().err
+    assert err == f"  [WARN] ffprobe timed out on: {tmp_path / 'evil'} name.avi\n".replace(
+        f"{tmp_path / 'evil'} name", f"{tmp_path}/evil name")
+
+
 # formatting
-# ---------------------------------------------------------------------------
 
 def test_format_duration_breakdown():
     fmt = format_duration(90061)  # 1d 1h 1m 1s
@@ -63,9 +76,7 @@ def test_extension_set_excludes_images_and_source_code(ext):
     assert ext not in _VIDEO_EXT_SET
 
 
-# ---------------------------------------------------------------------------
 # get_duration (native parser first, ffprobe fallback)
-# ---------------------------------------------------------------------------
 
 @needs_ffmpeg
 @pytest.mark.parametrize("name", ["clip.mp4", "clip.mkv", "clip.webm", "clip.mp3"])
@@ -87,9 +98,7 @@ def test_get_duration_returns_zero_for_empty_file(tmp_path):
     assert get_duration(empty) == 0.0
 
 
-# ---------------------------------------------------------------------------
 # native MP4 parser
-# ---------------------------------------------------------------------------
 
 def _box(name: bytes, payload: bytes) -> bytes:
     return struct.pack(">I4s", 8 + len(payload), name) + payload
@@ -125,9 +134,7 @@ def test_native_mp4_truncated_file_returns_none(tmp_path):
     assert _read_mp4_duration(f) is None
 
 
-# ---------------------------------------------------------------------------
 # native MKV parser
-# ---------------------------------------------------------------------------
 
 @needs_ffmpeg
 @pytest.mark.parametrize("name", ["clip.mkv", "clip.webm"])
@@ -171,9 +178,7 @@ def test_native_mkv_garbage_returns_none(tmp_path):
     assert _read_mkv_duration(f) is None
 
 
-# ---------------------------------------------------------------------------
 # scan_parallel / tree
-# ---------------------------------------------------------------------------
 
 @needs_ffmpeg
 def test_scan_counts_only_readable_media(library):
@@ -224,9 +229,7 @@ def test_scan_missing_folder_returns_zero(tmp_path):
     assert (total_sec, total_count) == (0.0, 0)
 
 
-# ---------------------------------------------------------------------------
 # Same file reachable by several paths is counted once
-# ---------------------------------------------------------------------------
 
 def _first_clip(library):
     return sorted(library.rglob("*.mp4"))[0]

@@ -9,18 +9,18 @@ import pytest
 from aevum_pkg._display import (
     _bar,
     _fuzzy_suggest,
-    _safe,
     print_bar_chart,
     print_results,
     print_tree,
     print_url_results,
 )
 from aevum_pkg._models import FolderNode, ScanTree
+from aevum_pkg._text import _safe, warn
 
 
 def test_safe_strips_ansi_and_control_characters():
     assert _safe("\x1b[31mred\x1b[0m") == "red"
-    assert _safe("a\x00b\x07c\nd") == "abcd"
+    assert _safe("a\x00b\x07c\nd") == "abc d"
 
 
 def test_safe_truncates_long_names():
@@ -66,7 +66,9 @@ def test_bar_shows_percentage():
     ("a\u009b31mb", "a31mb"),                        # C1 CSI character
     ("a\u0085b\u009cb", "abb"),                      # other C1 controls
     ("a\x00b\x07c\x08d\x7fe", "abcde"),             # NUL, BEL, backspace, DEL
-    ("line1\nline2\r\tend", "line1line2end"),        # newlines and tabs
+    ("line1\nline2\r\tend", "line1 line2  end"),     # newlines and tabs become spaces
+    ("a\u2028b\u2029c", "a b c"),                    # Unicode line and paragraph separators
+    ("a\u200eb\u200fc\u061cd", "abcd"),              # invisible direction marks
     ("evil\u202etxt.4pm", "eviltxt.4pm"),            # right-to-left override
     ("a\u2066b\u2069c", "abc"),                      # isolates
 ])
@@ -84,6 +86,13 @@ def test_safe_replaces_unencodable_surrogates():
     out = _safe("bad-\udcff-name")
     assert out == "bad-?-name"
     out.encode("utf-8")                            # must not raise
+
+
+def test_warn_sanitises_and_goes_to_stderr(capsys):
+    warn("bad\x1b[2J\nname")
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == "  [WARN] bad name\n"
 
 
 def test_safe_accepts_non_strings():

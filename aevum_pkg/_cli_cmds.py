@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import math
+import os
 import sys
 from pathlib import Path
 
 from ._color import clr, eclr
-from ._display import _fuzzy_suggest, _safe, print_results, print_url_results
+from ._display import _fuzzy_suggest, print_results, print_url_results
 from ._exit import EX
 from ._scan import _run_scan, check_ffprobe
+from ._text import _safe
 from ._youtube import (
     ApiKeyCancelled,
     YouTubeLimitError,
@@ -56,7 +58,8 @@ def _require_ffprobe(context: str = "") -> None:
 
 
 def cmd_scan(raw: str) -> None:
-    if _is_url(raw):
+    # a folder named like a domain ("www.backup") is still a folder
+    if _is_url(raw) and (raw.lower().startswith(("http://", "https://")) or not os.path.isdir(raw)):
         _scan_youtube(raw)
     else:
         _scan_folder(raw)
@@ -152,6 +155,10 @@ def _scan_folder(raw: str) -> None:
         total_sec, total_count, tree, durations, sizes = _run_scan(folder, on_progress, stats)
     except KeyboardInterrupt:
         print(f"\n\n  {clr.Y}Scan cancelled.{clr.RST}\n")
+        sys.exit(EX.ERR_SCAN)
+    except Exception as e:
+        print(f"\n\n  {eclr.R}[ERROR]{eclr.RST} {_safe(type(e).__name__)}: {_safe(e, 500)}\n",
+              file=sys.stderr)
         sys.exit(EX.ERR_SCAN)
 
     print(f"{_CR}  {clr.G}Done!{clr.RST}  {clr.W}{total_count}{clr.RST} files found.".ljust(100))

@@ -13,8 +13,8 @@ from aevum_pkg import __version__
 
 from ._cli_cmds import cmd_scan
 from ._color import clr, eclr
-from ._display import _safe
 from ._exit import EX
+from ._text import _safe
 
 
 def _print_help() -> None:
@@ -90,7 +90,12 @@ def _parse_target() -> str:
               file=sys.stderr)
         sys.exit(EX.ERR_ARGS)
 
-    return tokens[0].strip().strip("'\"")
+    target = tokens[0].strip().strip("'\"").strip()
+    if not target:
+        print(f"\n  {eclr.R}[ERROR]{eclr.RST} No target specified. Usage: aevum scan <path|url>\n",
+              file=sys.stderr)
+        sys.exit(EX.ERR_ARGS)
+    return target
 
 
 def _harden_streams() -> None:

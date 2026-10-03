@@ -6,6 +6,7 @@ import io
 import json
 import urllib.error
 import urllib.request
+from email.message import Message
 
 import pytest
 
@@ -18,9 +19,7 @@ def isolate_state(tmp_path, monkeypatch):
     monkeypatch.setattr(yt, "YT_KEY_FILE", tmp_path / "state" / "key.txt")
     monkeypatch.setattr(yt, "YT_VCACHE_FILE", tmp_path / "state" / "cache.json")
 
-# ---------------------------------------------------------------------------
 # ISO 8601 duration parsing
-# ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("raw, seconds", [
     ("PT45S", 45),
@@ -49,9 +48,7 @@ def test_parse_iso8601_duration_with_days(raw, seconds):
     assert yt._parse_iso8601_duration(raw) == seconds
 
 
-# ---------------------------------------------------------------------------
 # URL detection and parsing
-# ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("value", [
     "https://youtube.com/watch?v=abc",
@@ -59,12 +56,16 @@ def test_parse_iso8601_duration_with_days(raw, seconds):
     "www.youtube.com/@somechannel",
     "youtube.com/playlist?list=PL123",
     "music.youtube.com/watch?v=abc",
+    "HTTPS://YouTube.com/watch?v=abc",
+    "WWW.YOUTUBE.COM/watch?v=abc",
+    "Youtu.be/abc",
+    "youtube.com:443/watch?v=abc",
 ])
 def test_is_url_true(value):
     assert yt._is_url(value)
 
 
-@pytest.mark.parametrize("value", ["D:\\Movies", "/home/user/Videos", "Movies", "."])
+@pytest.mark.parametrize("value", ["D:\\Movies", "/home/user/Videos", "Movies", ".", "youtube.community", "youtube.com.backup"])
 def test_is_url_false_for_paths(value):
     assert not yt._is_url(value)
 
@@ -72,12 +73,18 @@ def test_is_url_false_for_paths(value):
 def test_normalise_url_adds_scheme():
     assert yt._normalise_url("youtube.com/x") == "https://youtube.com/x"
     assert yt._normalise_url("http://youtube.com/x") == "http://youtube.com/x"
+    assert yt._normalise_url("HTTPS://youtube.com/x") == "HTTPS://youtube.com/x"
 
 
 @pytest.mark.parametrize("url, expected", [
     ("https://www.youtube.com/watch?v=dQw4w9WgXcQ", ("video", "dQw4w9WgXcQ")),
     ("https://youtu.be/dQw4w9WgXcQ", ("video", "dQw4w9WgXcQ")),
     ("https://www.youtube.com/shorts/abc123", ("video", "abc123")),
+    ("https://www.youtube.com/live/abc123", ("video", "abc123")),
+    ("https://www.youtube.com/embed/abc123", ("video", "abc123")),
+    ("https://www.youtube.com/embed/videoseries?list=PL123", ("playlist", "PL123")),
+    ("HTTPS://WWW.YOUTUBE.COM/watch?v=abc", ("video", "abc")),
+    ("https://www.youtube.com:443/watch?v=abc", ("video", "abc")),
     ("https://www.youtube.com/playlist?list=PL123", ("playlist", "PL123")),
     ("https://www.youtube.com/@somechannel", ("channel_handle", "@somechannel")),
     ("https://www.youtube.com/c/SomeName", ("channel_handle", "SomeName")),
@@ -96,14 +103,15 @@ def test_parse_yt_url(url, expected):
     "https://example.com/watch?v=abc",
     "https://www.youtube.com/",
     "https://www.youtube.com/feed/trending",
+    "https://www.youtube.com/live",
+    "https://user@example.com/youtube.com/watch?v=abc",
+    "https://[bad/watch?v=abc",
 ])
 def test_parse_yt_url_rejects_unknown(url):
     assert yt._parse_yt_url(url) == (None, None)
 
 
-# ---------------------------------------------------------------------------
 # API key storage (redirected into tmp_path, never the real data dir)
-# ---------------------------------------------------------------------------
 
 VALID_KEY = "AIza" + "x" * 35
 
@@ -133,9 +141,7 @@ def test_saved_key_is_owner_only(key_file):
     assert key_file.stat().st_mode & 0o777 == 0o600
 
 
-# ---------------------------------------------------------------------------
 # Video cache
-# ---------------------------------------------------------------------------
 
 def test_video_cache_round_trip(tmp_path, monkeypatch):
     monkeypatch.setattr(yt, "YT_VCACHE_FILE", tmp_path / "cache.json")
@@ -154,9 +160,7 @@ def test_video_cache_corrupt_file_is_ignored(tmp_path, monkeypatch):
     assert yt._load_yt_video_cache() == {}
 
 
-# ---------------------------------------------------------------------------
 # scan_url: order of checks
-# ---------------------------------------------------------------------------
 
 def test_scan_url_rejects_bad_url_before_prompting_for_a_key(monkeypatch):
     monkeypatch.setattr(yt, "load_api_key", lambda: "")
@@ -183,9 +187,7 @@ def test_has_playlist_param():
     assert not yt._has_playlist_param("https://www.youtube.com/watch?v=abc")
 
 
-# ---------------------------------------------------------------------------
 # A fake YouTube API (no network)
-# ---------------------------------------------------------------------------
 
 class FakeApi:
     """
@@ -239,15 +241,13 @@ def fake_api(monkeypatch):
     return install
 
 
-# ---------------------------------------------------------------------------
 # Progress survives a rate/quota stop
-# ---------------------------------------------------------------------------
 
 def test_batches_fetched_before_a_limit_are_saved_and_not_refetched(fake_api):
     ids = _ids(230)                        # 5 batches of 50
     fake_api(fail_after=2)                 # 2 batches succeed, the 3rd is refused
 
-    cache = {}
+    cache: dict = {}
     with pytest.raises(yt.YouTubeLimitError) as exc:
         yt._fetch_with_cache(ids, "key", cache)
     assert (exc.value.saved, exc.value.total) == (100, 230)
@@ -301,9 +301,7 @@ def test_persist_false_never_touches_the_cache_file(fake_api):
     assert not yt.YT_VCACHE_FILE.exists()
 
 
-# ---------------------------------------------------------------------------
 # Unavailable videos are remembered (for a while)
-# ---------------------------------------------------------------------------
 
 def test_unavailable_videos_are_cached_and_not_requested_again(fake_api):
     ids = _ids(10)
@@ -355,17 +353,14 @@ def test_single_video_scan_uses_the_cache(fake_api, monkeypatch):
     assert second[4] == 1                            # cache_hits
 
 
-# ---------------------------------------------------------------------------
 # Limit detection in the real request function
-# ---------------------------------------------------------------------------
 
 def _http_error(code, reason, message="boom"):
     body = json.dumps({"error": {"message": message, "errors": [{"reason": reason}]}}).encode()
-    return urllib.error.HTTPError("https://x", code, "err", {}, io.BytesIO(body))
+    return urllib.error.HTTPError("https://x", code, "err", Message(), io.BytesIO(body))
 
 
 def _http_error_with_retry_after(code, retry_after, reason="rateLimitExceeded", message="slow down"):
-    from email.message import Message
     hdrs = Message()
     if retry_after is not None:
         hdrs["Retry-After"] = str(retry_after)
@@ -391,7 +386,7 @@ class _FakeResponse:
 @pytest.fixture
 def sleeps(monkeypatch):
     """Record time.sleep calls instead of actually waiting."""
-    waited = []
+    waited: list[float] = []
     monkeypatch.setattr(yt.time, "sleep", waited.append)
     return waited
 
@@ -516,14 +511,14 @@ def test_other_http_errors_stay_plain_errors_and_are_not_retried(monkeypatch, sl
 def test_http_errors_are_closed_after_they_are_read():
     # An unclosed HTTPError keeps its connection open; Python 3.14+ warns about it.
     fp = io.BytesIO(json.dumps({"error": {"message": "x", "errors": [{"reason": "backendError"}]}}).encode())
-    err = urllib.error.HTTPError("https://x", 503, "err", {}, fp)
+    err = urllib.error.HTTPError("https://x", 503, "err", Message(), fp)
     assert yt._classify_http_error(err) == ("transient", "x")
     assert fp.closed
 
 
 def test_a_server_error_without_json_is_retried_then_a_plain_error(monkeypatch, sleeps):
     def err():
-        return urllib.error.HTTPError("https://x", 500, "oops", {}, io.BytesIO(b"<html>"))
+        return urllib.error.HTTPError("https://x", 500, "oops", Message(), io.BytesIO(b"<html>"))
 
     calls = _scripted_urlopen(monkeypatch, err(), err(), err(), err())
     with pytest.raises(RuntimeError, match="500"):
@@ -532,9 +527,7 @@ def test_a_server_error_without_json_is_retried_then_a_plain_error(monkeypatch, 
 
 
 def test_aevum_keeps_no_quota_or_request_counters(monkeypatch, tmp_path):
-    # YouTube is the source of truth for quota and rate limits. Aevum used to keep
-    # an hourly request limiter and a daily quota estimate of its own, and refuse
-    # to run based on them. Neither exists any more.
+    # Aevum has no request limiter or quota estimate of its own; YouTube's responses decide.
     import inspect
     for name in ("youtube_limiter", "_RateLimiter", "get_quota_status", "_add_quota_usage",
                  "_load_quota_tracker", "YT_QUOTA_FILE", "YT_QUOTA_DAILY_LIMIT", "YT_QUOTA_COST",
@@ -549,9 +542,7 @@ def test_aevum_keeps_no_quota_or_request_counters(monkeypatch, tmp_path):
     assert list((tmp_path / "state").glob("*")) == []  # and nothing was written to disk
 
 
-# ---------------------------------------------------------------------------
 # Temporary failures are retried; permanent ones are not
-# ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("code", [500, 502, 503, 504])
 def test_server_errors_are_retried_then_succeed(monkeypatch, sleeps, code):
@@ -689,9 +680,7 @@ def test_a_temporary_failure_mid_scan_keeps_the_progress_so_far(monkeypatch, sle
     assert set(yt._load_yt_video_cache()) == set(ids[:50])
 
 
-# ---------------------------------------------------------------------------
 # Channel lookup
-# ---------------------------------------------------------------------------
 
 CHANNEL = {
     "snippet": {"title": "My Channel"},
@@ -739,9 +728,7 @@ def test_scan_url_reports_unknown_channel(fake_api, monkeypatch):
         yt.scan_url("https://www.youtube.com/@nobody")
 
 
-# ---------------------------------------------------------------------------
 # API key file: private from the first byte
-# ---------------------------------------------------------------------------
 
 posix_only = pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX permissions only")
 
@@ -763,8 +750,7 @@ def test_key_file_is_private_even_with_a_permissive_umask(key_file):
 
 @posix_only
 def test_key_file_does_not_depend_on_a_later_chmod(key_file, monkeypatch):
-    # The old code wrote with default permissions and then called chmod, leaving a
-    # window where the key was readable. Now chmod is not needed at all.
+    # the key must be private from the first byte, so chmod must not be needed
     import os
     monkeypatch.setattr(os, "chmod", lambda *a, **k: (_ for _ in ()).throw(AssertionError("chmod used")))
     old = os.umask(0)
@@ -817,9 +803,7 @@ def test_key_is_never_printed_or_in_error_messages(monkeypatch, capsys):
     assert VALID_KEY not in capsys.readouterr().err
 
 
-# ---------------------------------------------------------------------------
 # A damaged or tampered cache file cannot crash a scan
-# ---------------------------------------------------------------------------
 
 GOOD = {"title": "T", "duration": 60.0, "cached_at": 1}
 

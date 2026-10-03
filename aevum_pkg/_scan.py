@@ -3,13 +3,13 @@ from __future__ import annotations
 import os
 import struct
 import subprocess
-import sys
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from ._models import FolderNode, ScanTree
+from ._text import warn
 
 # ffprobe is CPU and disk bound, so more than 2x the core count doesn't help.
 MAX_WORKERS = min(8, (os.cpu_count() or 4) * 2)
@@ -231,7 +231,7 @@ def get_duration(path: str | Path) -> float:
         return float(val) if val and val != 'N/A' else 0.0
     except (subprocess.TimeoutExpired, subprocess.CalledProcessError, ValueError, OSError) as _e:
         if isinstance(_e, subprocess.TimeoutExpired):
-            print(f"  [WARN] ffprobe timed out on: {path}", file=sys.stderr)
+            warn(f"ffprobe timed out on: {path}")
         return 0.0
 
 
@@ -287,12 +287,12 @@ def scan_parallel(
         root_inode = (root_stat.st_dev, root_stat.st_ino)
 
         if root_inode in _visited_inodes:
-            print(f"  Warning: Symlink loop detected: {root}", file=sys.stderr)
+            warn(f"Symlink loop detected: {root}")
             return 0.0, 0, ScanTree([], [], 0), {}, {}
 
         _visited_inodes.add(root_inode)
     except OSError as e:
-        print(f"  Warning: Cannot access {root}: {e}", file=sys.stderr)
+        warn(f"Cannot access {root}: {e}")
         return 0.0, 0, ScanTree([], [], 0), {}, {}
 
     durations = {}

@@ -44,6 +44,44 @@ def test_scan_without_target(run_cli):
     assert "No target" in r.stderr
 
 
+@pytest.mark.parametrize("target", ["", "   ", "''", '" "'])
+def test_blank_target_is_rejected(run_cli, target):
+    r = run_cli("scan", target)
+    assert r.returncode == EX.ERR_ARGS
+    assert "No target" in r.stderr
+
+
+def test_existing_folder_wins_over_domain_like_name(tmp_path, monkeypatch):
+    from aevum_pkg import _cli_cmds
+
+    (tmp_path / "www.backup").mkdir()
+    (tmp_path / "youtube.com").mkdir()
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(_cli_cmds, "_scan_folder", lambda raw: calls.append(("folder", raw)))
+    monkeypatch.setattr(_cli_cmds, "_scan_youtube", lambda raw: calls.append(("youtube", raw)))
+    _cli_cmds.cmd_scan("www.backup")
+    _cli_cmds.cmd_scan("youtube.com")
+    _cli_cmds.cmd_scan("www.other")
+    _cli_cmds.cmd_scan("https://www.backup")
+    assert calls == [("folder", "www.backup"), ("folder", "youtube.com"),
+                     ("youtube", "www.other"), ("youtube", "https://www.backup")]
+
+
+def test_unexpected_scan_error_exits_3(tmp_path, monkeypatch, capsys):
+    from aevum_pkg import _cli_cmds
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("boom\x1b[2J")
+
+    monkeypatch.setattr(_cli_cmds, "check_ffprobe", lambda: True)
+    monkeypatch.setattr(_cli_cmds, "_run_scan", boom)
+    with pytest.raises(SystemExit) as exc:
+        _cli_cmds.cmd_scan(str(tmp_path))
+    assert exc.value.code == EX.ERR_SCAN
+    assert "[ERROR] RuntimeError: boom" in capsys.readouterr().err
+
+
 def test_unquoted_path_with_spaces_is_rejected(run_cli):
     r = run_cli("scan", "my", "folder")
     assert r.returncode == EX.ERR_ARGS
