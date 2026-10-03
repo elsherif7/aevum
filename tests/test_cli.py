@@ -391,3 +391,11 @@ def test_scan_reports_skipped_duplicate_links(run_cli, library):
     assert r.returncode == 0
     assert "1 duplicate file skipped" in r.stdout
     assert "zz_link" not in r.stdout
+
+
+@needs_ffmpeg
+def test_local_scan_says_media_files_not_videos(run_cli, library):
+    r = run_cli("scan", str(library))
+    assert r.returncode == 0
+    assert "media files" in r.stdout
+    assert "video" not in r.stdout.lower()

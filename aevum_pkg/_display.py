@@ -143,7 +143,7 @@ def print_tree(
     else:
         print(f"{indent}{col}{label}{clr.RST}")
         size_label = f"  {clr.DIM}|{clr.RST}  {clr.W}{format_size(fbytes)}{clr.RST}" if fbytes else ""
-        print(f"{indent}    {clr.DIM}+--{clr.RST}  {clr.W}{fmt['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{count} {'video' if count == 1 else 'videos'}{clr.RST}{size_label}")
+        print(f"{indent}    {clr.DIM}+--{clr.RST}  {clr.W}{fmt['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{count} {'media file' if count == 1 else 'media files'}{clr.RST}{size_label}")
 
     print()
 
@@ -161,7 +161,7 @@ def print_tree(
             except OSError:
                 pass
         dir_size_label = f"  {clr.DIM}|{clr.RST}  {clr.W}{format_size(dir_bytes)}{clr.RST}" if dir_bytes else ""
-        print(f"{indent}        {clr.DIM}+--{clr.RST}  {clr.W}{dir_fmt['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{direct_count} {'video' if direct_count == 1 else 'videos'}{clr.RST}{dir_size_label}")
+        print(f"{indent}        {clr.DIM}+--{clr.RST}  {clr.W}{dir_fmt['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{direct_count} {'media file' if direct_count == 1 else 'media files'}{clr.RST}{dir_size_label}")
         print()
 
     for i, node in enumerate(children, start=1):
