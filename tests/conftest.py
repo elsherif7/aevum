@@ -1,9 +1,6 @@
 """
-Shared fixtures for the Aevum test suite.
-
-Real media files are generated with ffmpeg (a few seconds of silence or a
-sine tone) so the tests need no binary assets in the repo and no network.
-Everything that needs ffmpeg/ffprobe is skipped when they aren't installed.
+Shared fixtures. Media files are generated with ffmpeg, so no binary assets are
+committed. Tests that need ffmpeg are skipped when it isn't installed.
 """
 from __future__ import annotations
 
@@ -23,10 +20,8 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 HAVE_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 needs_ffmpeg = pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg/ffprobe not on PATH")
 
-# Every generated clip is this long (seconds).
 CLIP_SECONDS = 3
 
-# name -> ffmpeg audio codec
 _CLIPS = {
     "clip.mp4":  "aac",
     "clip.mkv":  "libvorbis",
@@ -88,14 +83,9 @@ def library(tmp_path, clips) -> Path:
 @pytest.fixture
 def run_cli(tmp_path):
     """
-    Run the real CLI (aevum.py) in a subprocess.
-
-    HOME / LOCALAPPDATA / XDG_DATA_HOME point at a throwaway directory so a
-    test can never read or write the developer's real Aevum data (API key,
-    cache files).
-
-    ANSI color codes are stripped from stdout/stderr so tests can match
-    plain text.
+    Run aevum.py in a subprocess. HOME, LOCALAPPDATA and XDG_DATA_HOME point at a
+    temp folder, so tests never touch the real Aevum data. ANSI codes are stripped
+    from the output.
     """
     fake_home = tmp_path / "home"
     fake_home.mkdir()

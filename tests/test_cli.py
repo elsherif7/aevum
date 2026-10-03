@@ -108,9 +108,7 @@ def test_scan_dot_shows_the_real_folder_name(run_cli, library):
     assert "library" in r.stdout          # not a blank root label
 
 
-# ---------------------------------------------------------------------------
 # options after `scan`
-# ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("flag", ["-h", "--help"])
 def test_scan_help_flag_prints_help(run_cli, flag):
@@ -141,9 +139,7 @@ def test_folder_name_starting_with_dash_is_still_a_path(run_cli, tmp_path):
     assert "0 files found" in r.stdout
 
 
-# ---------------------------------------------------------------------------
 # YouTube targets: validation happens before the API key prompt
-# ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("url", [
     "https://example.com/watch?v=abc",
@@ -166,12 +162,9 @@ def test_cancelling_the_api_key_prompt_is_a_clean_cancel(run_cli, stdin):
     assert "Grand Total" not in r.stdout
 
 
-# ---------------------------------------------------------------------------
 # Ctrl-C stops a running scan promptly
-# ---------------------------------------------------------------------------
 
-# Runs the real CLI, but with a slow folder walk, so Ctrl-C lands while files
-# are still being discovered and the worker queue is filling up.
+# The real CLI with a slow folder walk, so Ctrl-C lands while files are still being found.
 _SLOW_WALK_RUNNER = """
 import os, sys, time
 real_scandir = os.scandir
@@ -188,8 +181,7 @@ main()
 
 @pytest.mark.skipif(os.name == "nt", reason="uses a POSIX shell script and SIGINT")
 def test_ctrl_c_during_file_discovery_does_not_wait_for_the_queue(tmp_path):
-    # Fake ffprobe: 2 s per file. Without the fix, Ctrl-C waited for every file
-    # queued so far (tens of seconds); with it, only for the few already running.
+    # fake ffprobe, 2 s per file: Ctrl-C should wait only for the probes already running
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     ffprobe = fake_bin / "ffprobe"
@@ -223,9 +215,7 @@ def test_ctrl_c_during_file_discovery_does_not_wait_for_the_queue(tmp_path):
     assert elapsed < 6, f"Ctrl-C took {elapsed:.1f}s to take effect"
 
 
-# ---------------------------------------------------------------------------
 # Limit message and the video-in-playlist hint (in-process, scan_url faked)
-# ---------------------------------------------------------------------------
 
 def _run_scan_youtube(monkeypatch, capsys, url, fake_scan_url):
     from aevum_pkg import _cli_cmds
@@ -320,9 +310,7 @@ def test_video_link_with_playlist_gets_a_hint(monkeypatch, capsys):
     assert "only the video is scanned" not in out
 
 
-# ---------------------------------------------------------------------------
 # Hostile and awkward names, end to end
-# ---------------------------------------------------------------------------
 
 def _own_colours_removed(text: str) -> str:
     import re
@@ -367,8 +355,7 @@ def test_hostile_text_echoed_in_error_messages_is_sanitised(run_cli):
 
 @needs_ffmpeg
 def test_names_the_console_cannot_encode_do_not_crash_the_report(run_cli, clips, tmp_path):
-    # A Japanese folder name with a cp1252 output encoding (e.g. redirected on Windows)
-    # used to end the run with a UnicodeEncodeError traceback after scanning.
+    # a Japanese folder name with a cp1252 output encoding must not end in a UnicodeEncodeError
     import shutil
     root = tmp_path / "lib"
     (root / "日本語").mkdir(parents=True)

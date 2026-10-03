@@ -23,7 +23,7 @@ class _BrokenStream:
         raise ValueError("I/O operation on closed file")
 
 
-# --- the decision function --------------------------------------------------
+# the decision function
 
 @pytest.mark.parametrize("env, tty, expected", [
     ({}, True, True),
@@ -43,7 +43,7 @@ def test_color_enabled(env, tty, expected):
 
 def test_color_enabled_survives_missing_or_closed_stream():
     assert color_enabled(None, {}) is False
-    assert color_enabled(_BrokenStream(), {}) is False  # type: ignore[arg-type]
+    assert color_enabled(_BrokenStream(), {}) is False
 
 
 def test_disabled_colors_are_empty_strings():
@@ -53,7 +53,7 @@ def test_disabled_colors_are_empty_strings():
         assert getattr(on, name).startswith("\033[")
 
 
-# --- whole program, piped (no terminal) -------------------------------------
+# whole program, piped (no terminal)
 
 def _run(*args, env=None):
     base = {k: v for k, v in os.environ.items()
@@ -91,7 +91,7 @@ def test_piped_scan_has_no_carriage_return_progress(library):
     assert "Done!" in r.stdout
 
 
-# --- whole program on a real terminal (POSIX only) --------------------------
+# whole program on a real terminal (POSIX only)
 
 def _run_on_tty(*args, env=None) -> str:
     import pty as _pty

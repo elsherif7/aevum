@@ -1,14 +1,4 @@
-"""
-Command handler for the Aevum CLI.
-
-'scan' takes exactly one target and no flags: point it at a local
-folder path or a YouTube URL and it prints the result. No JSON mode,
-no quiet mode, no batch/merge mode, no filters, no sort/top options —
-those all depended on flags that have been removed.
-
-The small progress-bar and ffprobe-check helpers used to live in
-_cli_helpers.py; folded in here since this is their only caller.
-"""
+"""The scan command: dispatch, progress bar, and the YouTube limit message."""
 from __future__ import annotations
 
 import math
@@ -31,24 +21,17 @@ from ._youtube import (
 
 
 def _is_interactive() -> bool:
-    """True when stdout is a terminal, so in-place progress output makes sense."""
     try:
         return sys.stdout.isatty()
     except (AttributeError, ValueError, OSError):
         return False
 
 
-#: Carriage return that rewinds the progress line, only on a terminal.
+# rewinds the progress line; empty when stdout is not a terminal
 _CR = "\r" if _is_interactive() else ""
 
 
 def _make_progress_bar():
-    """
-    Return a progress callback that renders a text progress bar to stdout.
-
-    The callback does nothing when stdout is not a terminal, or when
-    total is 0.
-    """
     interactive = _is_interactive()
 
     def on_progress(done, total):
@@ -56,7 +39,7 @@ def _make_progress_bar():
             return
         pct    = int((done / total) * 100)
         filled = int(24 * done / total)
-        bar    = "\u2588" * filled + "\u2591" * (24 - filled)
+        bar    = "█" * filled + "░" * (24 - filled)
         print(f"\r  {clr.C}Scanning...{clr.RST}  {bar}  {clr.Y}{done}/{total}{clr.RST}  {clr.DIM}({pct}%){clr.RST}",
               end='', flush=True)
 
@@ -91,7 +74,7 @@ def _wait_phrase(seconds: float) -> str:
 
 
 def _print_limit_message(e: YouTubeLimitError) -> None:
-    """Explain a rate/quota stop and how to continue (progress is already saved)."""
+    """Explain a rate or quota stop. Progress is already saved."""
     print(f"\n\n  {eclr.Y}[LIMIT]{eclr.RST} {_safe(e, 500)}", file=sys.stderr)
     if e.kind == 'quota':
         when = "after YouTube's daily quota resets (midnight Pacific Time)"
@@ -106,7 +89,7 @@ def _print_limit_message(e: YouTubeLimitError) -> None:
 
 
 def _scan_youtube(raw: str) -> None:
-    # Reject links we can't use before asking for an API key or touching the network.
+    # reject links we can't use before asking for an API key or touching the network
     kind, _ = _parse_yt_url(_normalise_url(raw))
     if kind is None:
         print(f"\n  {eclr.R}[ERROR]{eclr.RST} Not a supported YouTube URL: {_safe(raw, 500)}", file=sys.stderr)

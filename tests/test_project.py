@@ -99,4 +99,5 @@ def test_build_backend_is_new_enough_for_spdx_license():
 def test_mypy_checks_every_module():
     files = PYPROJECT["tool"]["mypy"]["files"]
     assert "aevum_pkg" in files
+    assert "tests" in files
     assert PYPROJECT["tool"]["mypy"]["check_untyped_defs"] is True

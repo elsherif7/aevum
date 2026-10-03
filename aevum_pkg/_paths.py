@@ -1,24 +1,17 @@
-"""
-Centralised AppData / XDG path resolution for Aevum.
-Imports nothing from the package — safe to import from anywhere.
-"""
+"""Per-user data directory. Imports nothing from the package, so anything can import it."""
 
 import os
 from pathlib import Path
 
 
 def _appdata_dir() -> Path:
-    """
-    Resolve the platform-correct Aevum data directory.
-    Validates env vars to prevent path traversal attacks.
-    """
+    """LOCALAPPDATA and XDG_DATA_HOME are used only when absolute and already resolved."""
     home = Path.home()
     if os.name == "nt":
         raw = os.environ.get("LOCALAPPDATA", "")
         if raw:
             candidate = Path(raw)
-            # Must be absolute and must not be a UNC path (\\server\share)
-            # and must resolve to the same path (no traversal sequences)
+            # UNC paths are rejected too
             if (candidate.is_absolute()
                     and not str(candidate).startswith('\\\\')
                     and candidate.resolve() == candidate):

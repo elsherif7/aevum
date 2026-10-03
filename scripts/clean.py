@@ -1,14 +1,6 @@
 """
-Removes build artifacts created by `pip install .` / `pip install -e .`:
-
-  build/            — setuptools build directory
-  dist/             — wheel/sdist output (if you ever build one)
-  *.egg-info/       — package metadata directory (e.g. aevum.egg-info)
-  __editable__*.pth — editable-install marker file (from pip install -e .)
-  __pycache__/      — compiled bytecode caches, anywhere in the tree
-  *.pyc / *.pyo     — stray compiled files, anywhere in the tree
-
-Run from the project root:
+Remove build artifacts left by `pip install` and `pip install -e`: build/, dist/,
+*.egg-info, __editable__*.pth, and __pycache__ folders and .pyc/.pyo files.
 
     python3 scripts/clean.py
 """
@@ -28,7 +20,6 @@ def _rm(path: Path) -> None:
 
 
 def clean() -> None:
-    # Top-level build artifacts
     for name in ("build", "dist"):
         _rm(ROOT / name)
     for egg_info in ROOT.glob("*.egg-info"):
@@ -36,7 +27,6 @@ def clean() -> None:
     for pth in ROOT.glob("__editable__*.pth"):
         _rm(pth)
 
-    # __pycache__ dirs and stray .pyc/.pyo files anywhere in the tree
     for cache_dir in ROOT.rglob("__pycache__"):
         _rm(cache_dir)
     for pyc in list(ROOT.rglob("*.pyc")) + list(ROOT.rglob("*.pyo")):

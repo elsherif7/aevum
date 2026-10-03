@@ -1,27 +1,19 @@
 """
-ANSI color handling for Aevum.
+ANSI colors. clr is for stdout and eclr for stderr, since either can be redirected on its own.
 
-Two color objects are exported, because stdout and stderr can be
-redirected independently:
+Colors are off (every code is an empty string) unless the stream is a terminal,
+following CPython's _colorize:
 
-    from ._color import clr, eclr, LINE
-
-    print(f"{clr.G}OK{clr.RST}")                       # stdout
-    print(f"{eclr.R}[ERROR]{eclr.RST}", file=sys.stderr)  # stderr
-
-Colors are switched off (every code becomes an empty string) unless the
-stream is a terminal. The rules follow CPython's own ``_colorize``:
-
-  1. NO_COLOR set to anything non-empty  -> off
+  1. NO_COLOR set to anything non-empty    -> off
   2. FORCE_COLOR set to anything non-empty -> on
-  3. TERM=dumb                            -> off
-  4. otherwise                            -> on only if the stream is a TTY
+  3. TERM=dumb                             -> off
+  4. otherwise                             -> on only if the stream is a TTY
 """
 
 import os
 import sys
 from collections.abc import Mapping
-from typing import TextIO
+from typing import Protocol, TextIO
 
 _CODES = {
     "R":   "\033[91m",
@@ -36,8 +28,11 @@ _CODES = {
 }
 
 
-def color_enabled(stream: TextIO | None, env: Mapping[str, str] | None = None) -> bool:
-    """Decide whether ANSI colors should be written to *stream*."""
+class _SupportsIsatty(Protocol):
+    def isatty(self) -> bool: ...
+
+
+def color_enabled(stream: _SupportsIsatty | None, env: Mapping[str, str] | None = None) -> bool:
     if env is None:
         env = os.environ
     if env.get("NO_COLOR"):
@@ -53,10 +48,7 @@ def color_enabled(stream: TextIO | None, env: Mapping[str, str] | None = None) -
 
 
 def _enable_windows_vt(std_handle: int) -> bool:
-    """Turn on ANSI processing for one Windows console handle (-11 out, -12 err).
-
-    Returns True if the console accepted it. Never raises.
-    """
+    """Enable ANSI processing on a Windows console handle (-11 stdout, -12 stderr). Never raises."""
     try:
         import ctypes
         kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
@@ -74,7 +66,7 @@ def _enable_windows_vt(std_handle: int) -> bool:
 
 
 class _Colors:
-    """Holds every ANSI escape used throughout Aevum (empty when disabled)."""
+    """Every ANSI escape Aevum uses; empty strings when colors are off."""
 
     __slots__ = ("R", "G", "Y", "B", "M", "C", "W", "DIM", "RST")
 
@@ -96,15 +88,12 @@ class _Colors:
 def _make(stream: TextIO, std_handle: int) -> _Colors:
     enabled = color_enabled(stream)
     if enabled and sys.platform == "win32":
-        # A forced color request on a redirected stream can't be "enabled" on
-        # the console; the escapes are still wanted by whoever reads the pipe.
+        # does nothing when the stream is redirected (FORCE_COLOR into a pipe)
         _enable_windows_vt(std_handle)
     return _Colors(enabled)
 
 
-#: Colors for text written to stdout.
 clr = _make(sys.stdout, -11)
-#: Colors for text written to stderr.
 eclr = _make(sys.stderr, -12)
 
 LINE = "=" * 64

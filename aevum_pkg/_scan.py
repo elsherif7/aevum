@@ -11,141 +11,34 @@ from pathlib import Path
 
 from ._models import FolderNode, ScanTree
 
-# How many ffprobe processes to run at once.
-# ffprobe is both CPU and disk-bound; scaling beyond 2× cores gives no gain
-# on spinning disks and hurts on SSDs too. Cap at 8 for safety.
+# ffprobe is CPU and disk bound, so more than 2x the core count doesn't help.
 MAX_WORKERS = min(8, (os.cpu_count() or 4) * 2)
 
+# '.iso' (disc images, too large) and '.dat' (too generic) are deliberately left out.
 video_extensions = (
-    # ── Common video ─────────────────────────────────────────────────
-    '.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv',
-    '.wmv', '.m4v', '.mpg', '.mpeg', '.3gp', '.ts',
-    '.vob', '.ogv', '.divx', '.rmvb', '.asf', '.m2ts',
-    # ── Less common video ────────────────────────────────────────────
-    '.mts', '.m2v', '.f4v', '.f4p', '.nsv', '.roq',
-    '.yuv', '.mxf', '.drc', '.gifv', '.qt',
-    '.rm', '.amv', '.svi', '.3g2', '.mpe', '.mpv',
-    '.m1v', '.m2p', '.m4p', '.mpeg1', '.mpeg2',
-    '.mpeg4', '.h264', '.h265', '.hevc', '.avchd',
-    '.ogm', '.ogx', '.dv', '.dvr', '.dvr-ms', '.rec',
-    '.wtv', '.bdmv', '.evo', '.ifo', '.mod',  # '.iso' removed — disc images too large
-    '.tod', '.trp', '.tp', '.pva', '.nuv', '.fli',
-    '.flc', '.flic', '.smk', '.bik', '.bik2',
-    # ── Additional video formats ─────────────────────────────────────
-    '.av1',                          # AV1 raw bitstream
-    '.avs', '.avs2', '.avs3',        # AVS / AVS2 / AVS3 (Chinese standards)
-    '.cavs',                         # Chinese AVS video
-    '.cdg',                          # CD+G karaoke video
-    '.cdxl',                         # Commodore CDXL
-    '.cine',                         # Phantom Cine high-speed camera
-    '.cpk',                          # Sega CRI CPK container
-    # '.dat',                        # too generic — matches Windows/game data files
-    '.dhav',                         # Dahua DVR video
-    '.dif',                          # DV interchange format
-    '.dl',                           # DL animation
-    '.dpg',                          # Nintendo DS DPG video
-    '.ea',                           # Electronic Arts video
-    '.flh', '.flt',                  # FLIC variants
-    '.gxf',                          # General eXchange Format (broadcast)
-    '.h261', '.h263',                # Raw H.261 / H.263 bitstreams
-    '.ifv',                          # IFV CCTV DVR
-    '.imf',                          # Interoperable Master Format
-    '.ipu',                          # Raw IPU video
-    '.ivf',                          # IVF (VP8/VP9/AV1 raw container)
-    '.ivr',                          # IVR Internet Video Recording
-    '.kux',                          # KUX (YouKu)
-    '.lxf',                          # VR native stream
-    '.m2t',                          # MPEG-2 transport stream (alt ext)
-    '.m4s',                          # MPEG-DASH segment
-    '.mjpeg', '.mjpg',               # Motion JPEG
-    '.mlv',                          # Magic Lantern Video
-    '.moflex',                       # MobiClip MOFLEX
-    '.mods',                         # MobiClip MODS
-    '.mpl',                          # Multiplexed video
-    '.mtv',                          # MTV video
-    '.mv',                           # Silicon Graphics Movie
-    '.mvi',                          # Motion Pixels MVI
-    '.mxg',                          # MxPEG clip
-    '.pmp',                          # PlayStation Portable PMP
-    '.psxstr',                       # Sony PlayStation STR
-    '.rpl',                          # RPL / ARMovie
-    '.scm',                          # Scala Multimedia
-    '.seq',                          # Tiertex SEQ
-    '.sfd',                          # Sega Film / CPK
-    '.swf',                          # ShockWave Flash (video content)
-    '.thp',                          # Nintendo THP video
-    '.ty', '.ty+',                   # TiVo TY stream
-    '.vc1',                          # Raw VC-1 bitstream
-    '.viv', '.vivo',                 # VivoActive video
-    '.vp6', '.vp8', '.vp9',          # Raw VP6 / VP8 / VP9
-    '.vqf',                          # TwinVQ video
-    '.wve',                          # Psion WVE
-    '.y4m',                          # YUV4MPEG2 raw video
-    # ── Common audio ─────────────────────────────────────────────────
-    '.mp3', '.aac', '.flac', '.wav', '.ogg', '.wma',
-    '.m4a', '.opus', '.aiff', '.aif', '.aifc', '.ape',
-    '.wv', '.tta', '.mka', '.mpa', '.mp2', '.ac3',
-    '.eac3', '.dts', '.dtshd', '.truehd', '.thd',
-    '.pcm', '.caf', '.ra', '.ram', '.oga', '.spx',
-    '.amr', '.awb', '.gsm', '.au', '.snd', '.vox',
-    '.8svx', '.iff', '.svx', '.f32', '.f64', '.s8',
-    '.s16', '.s24', '.s32', '.u8', '.u16', '.u24',
-    '.u32', '.w64', '.rf64', '.bwf', '.mid', '.midi',
-    '.kar', '.xmf', '.mxmf', '.rtttl', '.rtx', '.ota',
-    '.imy', '.mp1',
-    # ── Additional audio formats ─────────────────────────────────────
-    '.aa',                           # Audible AA audiobook
-    '.aax',                          # Audible AAX (enhanced audiobook)
-    '.ace',                          # tri-Ace Audio Container
-    '.acm',                          # Interplay ACM audio
-    '.act',                          # ACT Voice recorder
-    '.adp', '.ads',                  # ADP / Sony PS2 ADS
-    '.adts',                         # ADTS raw AAC
-    '.afc',                          # AFC audio
-    '.aix',                          # CRI AIX audio
-    '.apac',                         # Raw APAC
-    '.apc',                          # CRYO APC audio
-    '.avr',                          # AVR (Audio Visual Research)
-    '.bfstm',                        # BFSTM (Nintendo Binary Cafe Stream)
-    '.binka',                        # Bink Audio
-    '.bonk',                         # Bonk audio
-    '.brstm',                        # BRSTM (Binary Revolution Stream)
-    '.dss',                          # Digital Speech Standard
-    '.dsf',                          # DSD Stream File
-    '.dff',                          # DSDIFF (DSD Interchange File Format)
-    '.fwse',                         # Capcom MT Framework sound
-    '.g722', '.g723', '.g726',       # ITU-T G.7xx raw audio
-    '.g728', '.g729',                # ITU-T G.728 / G.729
-    '.hca',                          # CRI HCA audio
-    '.hcom',                         # Macintosh HCOM
-    '.laf',                          # Limitless Audio Format
-    '.latm',                         # LOAS/LATM AAC
-    '.loas',                         # LOAS AudioSyncStream
-    '.mca',                          # MCA Audio Format
-    '.mpc',                          # Musepack
-    '.msf',                          # Sony PS3 MSF audio
-    '.nsp',                          # Computerized Speech Lab NSP
-    '.osq',                          # Raw OSQ lossless audio
-    '.pp_bnk',                       # Pro Pinball Soundbank
-    '.pvf',                          # Portable Voice Format
-    '.qcp',                          # QCP (QCELP) mobile audio
-    '.qoa',                          # Quite OK Audio
-    '.rka',                          # RKA audio
-    '.rsd',                          # RSD audio
-    '.sb0', '.sb1', '.sb2',          # Sound Blaster audio banks
-    '.sd2',                          # Sound Designer II
-    '.shn',                          # Shorten lossless audio
-    '.sln',                          # Asterisk raw signed linear
-    '.tak',                          # Tom's lossless Audio Kompressor
-    '.vag',                          # Sony PS VAG audio
-    '.voc',                          # Creative Voice File
-    '.vpk',                          # Sony PS2 VPK audio
-    '.wsd',                          # Wideband Single-bit Data
-    '.xa',                           # Sony PS XA audio
-    '.xwb',                          # Microsoft XWB (Xbox audio bank)
+    '.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.m4v', '.mpg', '.mpeg', '.3gp', '.ts',
+    '.vob', '.ogv', '.divx', '.rmvb', '.asf', '.m2ts', '.mts', '.m2v', '.f4v', '.f4p', '.nsv', '.roq',
+    '.yuv', '.mxf', '.drc', '.gifv', '.qt', '.rm', '.amv', '.svi', '.3g2', '.mpe', '.mpv', '.m1v',
+    '.m2p', '.m4p', '.mpeg1', '.mpeg2', '.mpeg4', '.h264', '.h265', '.hevc', '.avchd', '.ogm', '.ogx',
+    '.dv', '.dvr', '.dvr-ms', '.rec', '.wtv', '.bdmv', '.evo', '.ifo', '.mod', '.tod', '.trp', '.tp',
+    '.pva', '.nuv', '.fli', '.flc', '.flic', '.smk', '.bik', '.bik2', '.av1', '.avs', '.avs2', '.avs3',
+    '.cavs', '.cdg', '.cdxl', '.cine', '.cpk', '.dhav', '.dif', '.dl', '.dpg', '.ea', '.flh', '.flt',
+    '.gxf', '.h261', '.h263', '.ifv', '.imf', '.ipu', '.ivf', '.ivr', '.kux', '.lxf', '.m2t', '.m4s',
+    '.mjpeg', '.mjpg', '.mlv', '.moflex', '.mods', '.mpl', '.mtv', '.mv', '.mvi', '.mxg', '.pmp',
+    '.psxstr', '.rpl', '.scm', '.seq', '.sfd', '.swf', '.thp', '.ty', '.ty+', '.vc1', '.viv', '.vivo',
+    '.vp6', '.vp8', '.vp9', '.vqf', '.wve', '.y4m', '.mp3', '.aac', '.flac', '.wav', '.ogg', '.wma',
+    '.m4a', '.opus', '.aiff', '.aif', '.aifc', '.ape', '.wv', '.tta', '.mka', '.mpa', '.mp2', '.ac3',
+    '.eac3', '.dts', '.dtshd', '.truehd', '.thd', '.pcm', '.caf', '.ra', '.ram', '.oga', '.spx', '.amr',
+    '.awb', '.gsm', '.au', '.snd', '.vox', '.8svx', '.iff', '.svx', '.f32', '.f64', '.s8', '.s16',
+    '.s24', '.s32', '.u8', '.u16', '.u24', '.u32', '.w64', '.rf64', '.bwf', '.mid', '.midi', '.kar',
+    '.xmf', '.mxmf', '.rtttl', '.rtx', '.ota', '.imy', '.mp1', '.aa', '.aax', '.ace', '.acm', '.act',
+    '.adp', '.ads', '.adts', '.afc', '.aix', '.apac', '.apc', '.avr', '.bfstm', '.binka', '.bonk',
+    '.brstm', '.dss', '.dsf', '.dff', '.fwse', '.g722', '.g723', '.g726', '.g728', '.g729', '.hca',
+    '.hcom', '.laf', '.latm', '.loas', '.mca', '.mpc', '.msf', '.nsp', '.osq', '.pp_bnk', '.pvf',
+    '.qcp', '.qoa', '.rka', '.rsd', '.sb0', '.sb1', '.sb2', '.sd2', '.shn', '.sln', '.tak', '.vag',
+    '.voc', '.vpk', '.wsd', '.xa', '.xwb',
 )
 
-# Frozenset of the same extensions for O(1) membership testing in hot paths.
 _VIDEO_EXT_SET = frozenset(video_extensions)
 
 
@@ -158,7 +51,7 @@ def check_ffprobe() -> bool:
 
 
 def _read_mp4_duration(path):
-    """Seek through MP4 atoms without reading full file into memory."""
+    """Read the duration from the moov/mvhd atom, seeking instead of loading the file."""
     try:
         file_size = os.path.getsize(path)
         with open(path, 'rb') as f:
@@ -202,8 +95,7 @@ def _read_mp4_duration(path):
                             min_size = 32 if version == 1 else 20
                             if len(box) < min_size:
                                 break
-                            # box starts at version+flags (4 bytes). v1 has two
-                            # 8-byte timestamps, v0 two 4-byte ones.
+                            # after version+flags, v1 has two 8-byte timestamps and v0 two 4-byte ones
                             if version == 1:
                                 ts  = struct.unpack_from('>I', box, 20)[0]
                                 dur = struct.unpack_from('>Q', box, 24)[0]
@@ -220,17 +112,13 @@ def _read_mp4_duration(path):
 
 
 def _read_mkv_duration(path):
-    """Read duration from MKV/WEBM by scanning EBML for the Segment/Info block.
-
-    Two passes: read 2 MB first (enough for most files), and only if the
-    Info block isn't found, retry with 8 MB. That finds Info blocks placed
-    after large Tracks/SeekHead structures without falling back to ffprobe,
-    while typical files only cost 2 MB of memory.
+    """
+    Read the duration from the EBML Info block. Reads 2 MB first and retries with
+    8 MB if Info isn't found, which covers Info placed after a large Tracks or SeekHead.
     """
     file_size = os.path.getsize(path)
 
     def _try_parse(data):
-        """Inner parser — returns duration float or None."""
 
         def read_vint(buf, pos):
             if pos >= len(buf):
@@ -279,7 +167,7 @@ def _read_mkv_duration(path):
                 while j < end - 4:
                     fid, j    = read_id(data, j)
                     fsize, j  = read_vint(data, j)
-                    field_start = j          # save position after header
+                    field_start = j
                     if fid == 0x2AD7B1:
                         timescale_ns = int.from_bytes(data[j:j+fsize], 'big')
                     elif fid == 0x4489:
@@ -288,24 +176,21 @@ def _read_mkv_duration(path):
                             duration = struct.unpack('>f', raw)[0]
                         elif fsize == 8:
                             duration = struct.unpack('>d', raw)[0]
-                    # B-05: bounds check — malformed fsize could jump j past end
-                    if j + fsize > end:
+                    if j + fsize > end:  # a bad field size would run past Info
                         break
-                    j = field_start + fsize  # always advance past field data
+                    j = field_start + fsize
                 if duration is not None:
                     return duration * timescale_ns / 1_000_000_000
                 return None
-            elif eid == 0x18538067:  # Segment: a container, so step into it
-                continue             # (its children start right after the header)
-            elif eid == 0x1F43B675:  # Cluster: media data starts, Info wasn't before it
+            elif eid == 0x18538067:  # Segment: step into it, its children follow the header
+                continue
+            elif eid == 0x1F43B675:  # Cluster: the media data starts here, so Info is not coming
                 return None
             else:
-                i += esize           # skip any other element whole
+                i += esize
         return None
 
     try:
-        # Two passes: 2 MB first (covers most MKV files), then 8 MB only if
-        # the Info block was not found.
         SMALL_READ = 2 * 1024 * 1024
         LARGE_READ = 8 * 1024 * 1024
         with open(path, 'rb') as f:
@@ -313,7 +198,6 @@ def _read_mkv_duration(path):
         result = _try_parse(data)
         if result is not None:
             return result
-        # Info block not found in first 2 MB — retry with 8 MB
         if file_size > SMALL_READ:
             with open(path, 'rb') as f:
                 data = f.read(min(LARGE_READ, file_size))
@@ -324,12 +208,7 @@ def _read_mkv_duration(path):
 
 
 def get_duration(path: str | Path) -> float:
-    """
-    Try fast native parse first; fall back to ffprobe if needed.
-
-    Security: Uses subprocess with list form (never shell=True) to prevent
-    command injection attacks. Path is converted to string safely.
-    """
+    """Native parse for MP4 and MKV, ffprobe for everything else."""
     ext    = Path(path).suffix.lower()
     result = None
     if ext in ('.mp4', '.mov', '.m4v', '.3gp', '.3g2', '.m4a', '.m4p', '.m4b', '.mp4v', '.f4v', '.f4a'):
@@ -339,8 +218,6 @@ def get_duration(path: str | Path) -> float:
     if result is not None and result > 0:
         return result
 
-    # Security: ALWAYS use list form with shell=False to prevent command injection
-    # str(path) safely converts Path to string without shell interpretation
     try:
         proc = subprocess.run(
             ['ffprobe', '-v', 'error', '-show_entries',
@@ -348,7 +225,7 @@ def get_duration(path: str | Path) -> float:
             capture_output=True,
             text=True,
             timeout=15,
-            shell=False  # Explicitly set to False (default, but explicit is safer)
+            shell=False
         )
         val = proc.stdout.strip()
         return float(val) if val and val != 'N/A' else 0.0
@@ -359,7 +236,6 @@ def get_duration(path: str | Path) -> float:
 
 
 def format_size(b: int) -> str:
-    """Return human-readable file size."""
     if b >= 1_073_741_824:
         return f"{b / 1_073_741_824:.2f} GB"
     if b >= 1_048_576:
@@ -370,7 +246,7 @@ def format_size(b: int) -> str:
 
 
 def format_duration(seconds: float) -> dict[str, str]:
-    # Clamp to 0..100 years so negative or absurd values can't produce garbage output.
+    # clamp to 0..100 years so a bad value can't produce garbage output
     seconds = max(0.0, min(float(seconds), 100 * 365 * 86400))
     days    = int(seconds // 86400)
     hours   = int((seconds % 86400) // 3600)
@@ -391,27 +267,18 @@ def scan_parallel(
     stats: dict[str, int] | None = None,
 ) -> tuple[float, int, ScanTree, dict[Path, float], dict[Path, int]]:
     """
-    Parallel scan: collector thread discovers files and submits them to the
-    thread pool.  Returns (total_sec, total_count, tree_tuple, durations,
-    sizes).
+    Scan root for media files. Returns (total_sec, total_count, tree, durations, sizes).
 
-    Security: Detects symlink loops and limits recursion depth to prevent DoS.
-
-    `total` is read inside the lock inside probe(), so the progress callback
-    never sees a torn value. The collector thread is joined before
-    as_completed() is called, so no future submitted near the end is dropped.
-    Files whose duration can't be read (0.0) are excluded, so the file count
-    matches the readable media files.
-
-    A file reachable by more than one path (a hardlink, or a symlink to a
-    file) is counted once. When two paths point at the same file the real
-    one wins over a symlink, then the alphabetically first path. If *stats*
-    is given, stats["duplicates_skipped"] is set to how many were dropped.
+    A collector thread walks the folders and submits files to a thread pool.
+    Files whose duration can't be read are left out. A file reachable by more
+    than one path (a hardlink, or a symlink to a file) is counted once: the real
+    file wins over a symlink, then the alphabetically first path. If stats is
+    given, stats["duplicates_skipped"] is set to the number of duplicates dropped.
     """
     if _visited_inodes is None:
         _visited_inodes = set()
     if stop_event is None:
-        stop_event = threading.Event()   # lets an interrupt stop the workers even for direct callers
+        stop_event = threading.Event()
 
     root = Path(root).resolve()
 
@@ -434,7 +301,6 @@ def scan_parallel(
     total     = 0
     lock      = threading.Lock()
 
-    # Security: Maximum recursion depth to prevent DoS
     MAX_DEPTH = 30
     root_depth = len(root.parts)
 
@@ -447,7 +313,7 @@ def scan_parallel(
         try:
             st        = path.stat()
             file_size = st.st_size
-            if st.st_ino:   # some filesystems report 0: can't tell files apart
+            if st.st_ino:   # some filesystems report 0, so files can't be told apart
                 file_id = (st.st_dev, st.st_ino)
         except OSError:
             file_size = 0
@@ -463,7 +329,6 @@ def scan_parallel(
         futures = {}
 
         def submit(entry, is_link):
-            """Queue a media file for probing (other extensions are ignored)."""
             nonlocal total
             if os.path.splitext(entry.name)[1].lower() not in _VIDEO_EXT_SET:
                 return
@@ -473,7 +338,6 @@ def scan_parallel(
             futures[pool.submit(probe, p, is_link)] = p
 
         def collect_and_submit():
-            # Security: Track (path, depth) to prevent excessive recursion
             stack = [(str(root), root_depth)]
             visited_dirs = set()
 
@@ -483,21 +347,20 @@ def scan_parallel(
 
                 current, depth = stack.pop()
 
-                # Security: Limit recursion depth
                 if depth - root_depth > MAX_DEPTH:
                     continue
 
-                # Security: Detect directory loops via inode
+                # skip folders already seen, which also stops symlink loops
                 try:
                     current_stat = Path(current).stat()
                     current_inode = (current_stat.st_dev, current_stat.st_ino)
 
                     if current_inode in visited_dirs:
-                        continue  # Skip already visited directory
+                        continue
 
                     visited_dirs.add(current_inode)
                 except OSError:
-                    continue  # Skip inaccessible directories
+                    continue
 
                 try:
                     with os.scandir(current) as it:
@@ -505,29 +368,26 @@ def scan_parallel(
                             if stop_event and stop_event.is_set():
                                 return
 
-                            # Security: Skip symlinks or resolve and check for loops
                             try:
                                 if entry.is_symlink():
-                                    # Resolve symlink and check if it's already visited
                                     resolved = Path(entry.path).resolve(strict=True)
                                     resolved_stat = resolved.stat()
                                     resolved_inode = (resolved_stat.st_dev, resolved_stat.st_ino)
 
                                     if resolved_inode in _visited_inodes or resolved_inode in visited_dirs:
-                                        continue  # Skip symlink loop
+                                        continue
 
                                     if entry.is_dir(follow_symlinks=True):
                                         stack.append((entry.path, depth + 1))
                                     elif entry.is_file(follow_symlinks=True):
                                         submit(entry, True)
                                 else:
-                                    # Not a symlink, process normally
                                     if entry.is_dir(follow_symlinks=False):
                                         stack.append((entry.path, depth + 1))
                                     elif entry.is_file(follow_symlinks=False):
                                         submit(entry, False)
                             except (OSError, RuntimeError):
-                                # Skip broken symlinks or inaccessible entries
+                                # broken symlink or unreadable entry
                                 continue
                 except PermissionError:
                     pass
@@ -535,13 +395,12 @@ def scan_parallel(
         collector = threading.Thread(target=collect_and_submit, daemon=True)
         collector.start()
 
-        # Join the collector before consuming futures so every submitted
-        # future is visible to as_completed().
+        # join before reading the futures so as_completed() sees every submitted one
         try:
             collector.join()
         except KeyboardInterrupt:
-            # Ctrl-C: tell workers to stop and drop queued files, so leaving the
-            # `with` block doesn't wait for every remaining ffprobe call.
+            # stop the workers and drop queued files, so leaving the `with` block
+            # doesn't wait for every remaining ffprobe call
             stop_event.set()
             pool.shutdown(wait=False, cancel_futures=True)
             raise
@@ -561,8 +420,7 @@ def scan_parallel(
             pool.shutdown(wait=False, cancel_futures=True)
             raise
 
-    # Skip files whose duration could not be determined.
-    # Keep one path per underlying file: real file first, then name order.
+    # drop unreadable files, and keep one path per underlying file: real file first, then name order
     best: dict[tuple, tuple] = {}
     dropped = 0
     for item in sorted(found, key=lambda r: (r[4], str(r[0]))):
@@ -590,11 +448,9 @@ def scan_parallel(
 
 
 def _build_tree(root, durations, sizes=None) -> ScanTree:
-    """O(n) tree builder.  Returns a ScanTree of FolderNode objects, with
-    children and direct files sorted by name (ascending).
-
-    The ancestor walk is capped at MAX_DEPTH so a symlink cycle can't loop
-    forever.
+    """
+    Build the folder tree in O(n), with children and files sorted by name.
+    The ancestor walk is capped at MAX_DEPTH so a symlink cycle can't loop forever.
     """
     MAX_DEPTH = 200
     root      = Path(root)
@@ -662,10 +518,6 @@ def _build_tree(root, durations, sizes=None) -> ScanTree:
 
 
 def _run_scan(folder, on_progress, stats=None):
-    """
-    Run scan_parallel.
-    Returns (total_sec, total_count, tree, durations, sizes).
-    """
     folder     = Path(folder)
     stop_event = threading.Event()
     try:

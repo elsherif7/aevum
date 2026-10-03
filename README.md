@@ -87,7 +87,7 @@ test, and clean up when you're done:
 ```
 pip install -e ".[dev]"
 ruff check .
-mypy .
+mypy
 pytest
 python3 scripts/clean.py   # remove build artifacts when you're done
 ```

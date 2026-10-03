@@ -10,23 +10,14 @@ import time
 from ._color import clr
 from ._paths import YT_KEY_FILE, YT_VCACHE_FILE
 
-# ── API key storage (inlined from _apikey.py) ────────────────────────
-# Simplest practical option: the key is saved once to a single local file
-# with restrictive permissions (0o600, owner read/write only) so it
-# doesn't need to be re-entered on every run.
-# Compiled once at module level.
 _YT_KEY_PATTERN = re.compile(r'^AIza[0-9A-Za-z\-_]{35}$')
 
 
 def _write_private_file(path, text: str) -> None:
     """
-    Write `text` to `path` so that it is never readable by other users, not even
-    for an instant. The temp file is created owner-only (mkstemp uses mode 0600)
-    and then renamed into place, instead of writing with default permissions and
-    tightening them afterwards.
-
-    On Windows the mode bits don't apply; the file is protected by the ACL it
-    inherits from the user's profile folder (%LOCALAPPDATA%).
+    Write text so other users can never read it, not even briefly: the temp file is
+    created owner-only (mkstemp uses 0600) and then renamed into place. Mode bits don't
+    apply on Windows, where the profile folder's ACL protects the file.
     """
     import tempfile
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -44,11 +35,7 @@ def _write_private_file(path, text: str) -> None:
 
 
 def save_api_key(api_key: str) -> bool:
-    """
-    Store the API key in a local file (owner-only on Linux/macOS).
-    Returns True if saved successfully, False otherwise.
-    """
-    # Validate the key format (YouTube keys start with AIza).
+    """Save the key to a local file. Returns True on success."""
     if not api_key or not _YT_KEY_PATTERN.match(api_key):
         print("  Error: Invalid API key format (expected AIza...)", file=sys.stderr)
         return False
@@ -62,7 +49,7 @@ def save_api_key(api_key: str) -> bool:
 
 
 def load_api_key() -> str:
-    """Load the API key from local storage. Returns "" if not found."""
+    """Return the saved key, or "" if there is none."""
     try:
         return YT_KEY_FILE.read_text(encoding='utf-8').strip()
     except Exception:
@@ -72,17 +59,9 @@ def load_api_key() -> str:
 YT_API_BASE = "https://www.googleapis.com/youtube/v3"
 
 
-# ---------------------------------------------------------------------------
-# YouTube video cache
-# ---------------------------------------------------------------------------
-# Stores individual video details keyed by video ID — cached forever since
-# a video's duration never changes once uploaded.
-#
-# The file path comes from _paths.py.
-# ---------------------------------------------------------------------------
+# Video details are cached by ID. A duration never changes once a video is uploaded.
 
-
-_MAX_CACHED_DURATION = 10 * 365 * 24 * 3600   # 10 years; no real video is longer
+_MAX_CACHED_DURATION = 10 * 365 * 24 * 3600   # 10 years
 
 
 def _is_number(v) -> bool:
@@ -91,9 +70,8 @@ def _is_number(v) -> bool:
 
 def _valid_cache_entry(e) -> bool:
     """
-    Keep only cache entries that are safe to use. The cache is a plain file on
-    disk, so anything in it is untrusted: wrong types or NaN would otherwise
-    crash the report (or the "unavailable" age check) much later.
+    The cache is a plain file on disk, so entries are checked before use: a wrong
+    type or NaN would otherwise crash the report much later.
     """
     if not isinstance(e, dict):
         return False
@@ -107,8 +85,8 @@ def _valid_cache_entry(e) -> bool:
 
 
 def _load_yt_video_cache():
-    """Load the per-video cache. Returns {} on any error or if file is too large."""
-    MAX_YT_CACHE_SIZE = 100 * 1024 * 1024  # 100 MB hard limit
+    """Return the cache, or {} if it is missing, unreadable or too large."""
+    MAX_YT_CACHE_SIZE = 100 * 1024 * 1024  # 100 MB
     try:
         if YT_VCACHE_FILE.exists() and YT_VCACHE_FILE.stat().st_size > MAX_YT_CACHE_SIZE:
             print("  [WARN] YouTube cache too large, ignoring.", file=sys.stderr)
@@ -122,7 +100,7 @@ def _load_yt_video_cache():
 
 
 def _save_yt_video_cache(cache):
-    """Persist the per-video cache atomically. Failures are silently ignored."""
+    """Write the cache atomically. Failures are ignored, since the cache is only an optimisation."""
     try:
         import tempfile
         YT_VCACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -146,13 +124,6 @@ def _save_yt_video_cache(cache):
 
 
 def _merge_into_cache(cache, new_entries_by_id, save=True):
-    """
-    Write new_entries_by_id into cache and (by default) persist.
-    new_entries_by_id: dict of video_id -> entry dict.
-
-    The in-memory dict already holds the new entries after this call, so
-    nothing is reloaded from disk.
-    """
     now = int(time.time())
     for vid_id, entry in new_entries_by_id.items():
         cache[vid_id] = {**entry, "cached_at": now}
@@ -160,9 +131,9 @@ def _merge_into_cache(cache, new_entries_by_id, save=True):
         _save_yt_video_cache(cache)
 
 
-# A video the API didn't return (private, deleted, region-blocked) is remembered as
-# a small "unavailable" stub so reruns don't spend quota asking again. Unlike a
-# duration, availability can change, so a stub expires and is re-checked.
+# A video the API doesn't return (private, deleted, region-blocked) is remembered as a
+# small stub, so reruns don't spend quota asking again. The stub expires because
+# availability can change.
 UNAVAILABLE_TTL = 7 * 24 * 3600
 
 
@@ -183,10 +154,6 @@ def _mark_unavailable(cache, video_ids):
         cache[vid] = {'id': vid, 'unavailable': True, 'cached_at': now}
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 _YT_DOMAINS = (
     'youtube.com', 'youtu.be', 'm.youtube.com',
     'music.youtube.com', 'kids.youtube.com', 'gaming.youtube.com',
@@ -195,7 +162,7 @@ _YT_DOMAINS = (
 def _is_url(s):
     if s.startswith(('http://', 'https://')):
         return True
-    # bare domain shortcuts e.g. "www.youtube.com/..." or "music.youtube.com/..."
+    # bare domains such as "www.youtube.com/..." or "music.youtube.com/..."
     for domain in _YT_DOMAINS:
         if s.startswith(domain) or s.startswith('www.' + domain):
             return True
@@ -205,7 +172,6 @@ def _is_url(s):
 
 
 def _normalise_url(url):
-    """Ensure URL has a scheme so urlparse works correctly."""
     if not url.startswith(('http://', 'https://')):
         return 'https://' + url
     return url
@@ -217,39 +183,34 @@ def _parse_iso8601_duration(d):
     if not m:
         return 0.0
     dd, h, mi, s = m.groups()
-    # Never negative, and capped at one year.
     result = float(dd or 0) * 86400 + float(h or 0) * 3600 + float(mi or 0) * 60 + float(s or 0)
-    return max(0.0, min(result, 365 * 86400))  # cap at 1 year
+    return max(0.0, min(result, 365 * 86400))  # capped at one year
 
 
-# What YouTube says when it refuses a request because of a limit. The two need
-# different handling: the daily quota won't clear until midnight Pacific Time, so
-# retrying is pointless, while a short-window rate limit clears within seconds.
+# The daily quota won't clear until midnight Pacific Time, so retrying is pointless.
+# A rate limit clears within seconds, so it is worth retrying.
 _YT_QUOTA_REASONS = ('quotaExceeded', 'dailyLimitExceeded')              # HTTP 403
 _YT_RATE_REASONS  = ('rateLimitExceeded', 'userRateLimitExceeded')       # HTTP 429 (or 403)
 
-_RETRY_DELAYS    = (1, 2, 4)   # seconds to wait before each retry when YouTube gives no hint
-_MAX_RETRY_AFTER = 30          # longest Retry-After we sit through; a longer one stops the scan
+_RETRY_DELAYS    = (1, 2, 4)   # seconds before each retry when YouTube gives no hint
+_MAX_RETRY_AFTER = 30          # a longer Retry-After stops the scan instead of waiting
 
-# Temporary trouble worth retrying: server-side errors, and timeouts or dropped
-# connections (including half-received responses).
+# server errors, timeouts and dropped connections (including half-received responses)
 _TRANSIENT_HTTP    = (500, 502, 503, 504)
 _TRANSIENT_NETWORK = (TimeoutError, ConnectionError, http.client.HTTPException)
 
 
 class YouTubeLimitError(PermissionError):
     """
-    YouTube refused a request because of a limit. Retrying later is safe:
-    everything fetched so far was saved to the cache.
+    YouTube refused a request because of a limit. Everything fetched so far is
+    already in the cache, so running the command again later is safe.
 
-    kind='quota': the daily quota is used up (it resets at midnight Pacific Time).
-    kind='rate':  YouTube asked us to slow down or wait: a rate limit that outlasted
-                  the automatic retries, or a Retry-After longer than we'll sit through.
+    kind='quota': the daily quota is used up.
+    kind='rate':  a rate limit that outlasted the retries, or a Retry-After longer
+                  than we will wait.
 
-    retry_after is how long YouTube asked us to wait, in seconds, or None if it
-    didn't say. _fetch_with_cache fills in
-    `saved` / `total`: how many of the requested videos are now in the cache. Both
-    stay None if the limit hit before then.
+    retry_after is the wait YouTube asked for in seconds, or None. _fetch_with_cache
+    fills in saved and total (videos now in the cache, and videos requested).
     """
     def __init__(self, message, kind='rate', retry_after=None):
         super().__init__(message)
@@ -263,7 +224,7 @@ _ssl_context = None
 
 
 def _get_ssl_context():
-    """One TLS context for the whole run. Creating it loads the system certificates (~25 ms)."""
+    """One TLS context per run, because creating it loads the system certificates (~25 ms)."""
     global _ssl_context
     if _ssl_context is None:
         import ssl
@@ -272,7 +233,7 @@ def _get_ssl_context():
 
 
 def _classify_http_error(e):
-    """Return (kind, message): kind is 'quota', 'rate', 'transient', or None for any other error."""
+    """Return (kind, message). kind is 'quota', 'rate', 'transient', or None for any other error."""
     reason = ''
     try:
         body     = e.read().decode('utf-8', errors='replace')
@@ -282,7 +243,7 @@ def _classify_http_error(e):
     except Exception:
         msg = str(e)
     finally:
-        e.close()   # we've read all we need; release the connection (3.14+ warns if left open)
+        e.close()   # release the connection; Python 3.14+ warns if it is left open
     if reason in _YT_QUOTA_REASONS:
         return 'quota', msg
     if e.code == 429 or reason in _YT_RATE_REASONS:
@@ -296,11 +257,7 @@ _RETRY_AFTER_NUMBER = re.compile(r'\d+(?:\.\d+)?')
 
 
 def _retry_after_seconds(value, now=None):
-    """
-    Parse a Retry-After header: either a number of seconds or an HTTP date.
-    Returns the wait in seconds (never negative), or None if the header is
-    missing or can't be understood.
-    """
+    """Parse a Retry-After header (seconds or an HTTP date). Returns seconds, or None if unusable."""
     if value is None:
         return None
     value = str(value).strip()
@@ -327,35 +284,25 @@ def _yt_api_request(endpoint, params, api_key):
     """
     Make one YouTube Data API v3 request and return the parsed JSON.
 
-    Aevum keeps no quota counter and no request limit of its own: YouTube is the
-    source of truth for both, and says so in its responses.
+    Aevum keeps no quota counter or request limit of its own. YouTube's responses decide:
 
-      - daily quota used up (403 quotaExceeded): YouTubeLimitError(kind='quota') at
-        once, since waiting won't help until the quota resets
+      - daily quota used up: YouTubeLimitError(kind='quota') at once
       - rate limit (429): retried, then YouTubeLimitError(kind='rate')
-      - temporary trouble (HTTP 5xx, timeouts, dropped connections): retried the same
-        way, then RuntimeError
-      - Retry-After: a wait of up to _MAX_RETRY_AFTER seconds is honoured exactly; a
-        longer one stops at once with YouTubeLimitError(kind='rate', retry_after=...)
-        instead of retrying sooner than YouTube asked. Without it, we back off
-        1 s, 2 s, 4 s (no jitter: Aevum is a single-user tool).
-      - anything else (bad key, bad request, ...): RuntimeError, never retried
+      - 5xx, timeouts, dropped connections: retried the same way, then RuntimeError
+      - Retry-After up to _MAX_RETRY_AFTER seconds is honoured exactly. A longer one
+        raises YouTubeLimitError(kind='rate', retry_after=...) instead of retrying early.
+        Without it we back off 1 s, 2 s, 4 s.
+      - anything else (bad key, bad request): RuntimeError, never retried
 
-    Every request here is a GET, so retrying is safe.
-
-    Errors carry the API's own message, never the URL (which contains the
-    API key).
+    Every request is a GET, so retrying is safe. Errors carry the API's own message and
+    never the URL, because the URL contains the key.
     """
     import urllib.error
     import urllib.parse
     import urllib.request
 
-    # Copy params to avoid mutating the caller's dict
     params = {**params, 'key': api_key}
-    # Note: the API key goes in the URL query string (YouTube API v3 design).
-    # This means the key appears in server logs, proxy logs, and network monitoring.
-    # This is a known limitation of the YouTube Data API v3 design.
-    # For production use cases, consider OAuth 2.0 service accounts instead.
+    # the API only accepts the key in the query string
     url = f"{YT_API_BASE}/{endpoint}?{urllib.parse.urlencode(params)}"
 
     ctx  = _get_ssl_context()
@@ -367,9 +314,6 @@ def _yt_api_request(endpoint, params, api_key):
         except urllib.error.HTTPError as e:
             kind, msg = _classify_http_error(e)
             if kind in ('rate', 'transient'):
-                # Honour a short Retry-After exactly. A long one means YouTube wants us
-                # to stop: retrying earlier than it asked would be wrong, so we stop,
-                # keep what we have, and say when to come back.
                 asked = _retry_after_seconds(e.headers.get('Retry-After') if e.headers else None)
                 if asked is not None and asked > _MAX_RETRY_AFTER:
                     raise YouTubeLimitError(
@@ -401,9 +345,6 @@ class ApiKeyCancelled(Exception):
 
 
 def prompt_api_key():
-    """
-    Prompt user for YouTube API key and save it to local storage.
-    """
     print()
     print(f"  {clr.Y}YouTube API key required.{clr.RST}")
     print(f"  {clr.DIM}Get a free key in ~2 minutes:{clr.RST}")
@@ -430,11 +371,7 @@ def prompt_api_key():
 
 
 def _parse_yt_url(url):
-    """
-    Parse a YouTube URL into (kind, id).
-
-    music.youtube.com links are accepted too.
-    """
+    """Parse a YouTube URL into (kind, id), or (None, None) if it isn't a supported link."""
     from urllib.parse import parse_qs, urlparse
     p          = urlparse(url)
     qs         = parse_qs(p.query)
@@ -443,8 +380,8 @@ def _parse_yt_url(url):
 
     if netloc not in _YT_DOMAINS:
         return None, None
-    # A link to a video that also carries list=... (copied from inside a playlist)
-    # means that one video. Only a /playlist link scans the whole playlist.
+    # a video link that also carries list=... (copied from inside a playlist) means that
+    # one video. Only a /playlist link scans the whole playlist.
     if netloc == 'youtu.be' and path_parts:
         return 'video', path_parts[0]
     if 'v' in qs:
@@ -464,19 +401,17 @@ def _parse_yt_url(url):
 
 
 def _has_playlist_param(url):
-    """True if the URL carries a list=... parameter."""
     from urllib.parse import parse_qs, urlparse
     return 'list' in parse_qs(urlparse(_normalise_url(url)).query)
 
 
 def _yt_get_channel_uploads_playlist(channel_ref, api_key, kind='channel_handle'):
     """
-    Return (uploads_playlist_id, channel_title), or (None, None) if the channel
-    doesn't exist. One API call in the common case.
+    Return (uploads_playlist_id, channel_title), or (None, None) if the channel doesn't exist.
 
-    /channel/UC... is looked up by id and @handle by forHandle. A bare name
-    (from /c/Name or /user/Name) tries forHandle, then forUsername. Errors,
-    including quota and rate limits, propagate: they are not "channel not found".
+    /channel/UC... is looked up by id and @handle by forHandle. A bare name (from
+    /c/Name or /user/Name) tries forHandle, then forUsername. Errors, including quota
+    and rate limits, propagate: they are not "channel not found".
     """
     if kind == 'channel_id':
         lookups = [('id', channel_ref)]
@@ -498,8 +433,7 @@ def _yt_get_channel_uploads_playlist(channel_ref, api_key, kind='channel_handle'
 def _yt_fetch_playlist_video_ids(playlist_id, api_key, on_progress=None):
     ids        = []
     page_token = None
-    # Cap pagination at 2000 pages (100,000 videos) so a malformed or hostile
-    # nextPageToken response can't loop forever.
+    # 2000 pages (100,000 videos) is a cap so a bad nextPageToken can't loop forever
     MAX_PAGES  = 2000
     page_count = 0
     while page_count < MAX_PAGES:
@@ -518,7 +452,7 @@ def _yt_fetch_playlist_video_ids(playlist_id, api_key, on_progress=None):
                 ids.append(vid)
         page_token = data.get('nextPageToken')
         page_count += 1
-        # Use a spinner-style callback (total unknown until pagination ends)
+        # the total isn't known until the last page
         if on_progress:
             on_progress(len(ids), max(len(ids), 1))
         if not page_token:
@@ -529,14 +463,11 @@ def _yt_fetch_playlist_video_ids(playlist_id, api_key, on_progress=None):
 def _yt_fetch_video_details(video_ids, api_key, on_progress=None, progress_offset=0, total=0,
                             on_batch=None):
     """
-    Fetch video details from the API in batches of 50.
-    Returns (entries, unavailable_ids).
+    Fetch video details in batches of 50. Returns (entries, unavailable_ids), where
+    unavailable_ids are IDs the API didn't return (private, deleted or region-blocked).
 
-    unavailable_ids: IDs requested but not returned by the API
-                     (private, deleted, or region-blocked).
-
-    on_batch(batch_entries, batch_unavailable_ids), if given, is called after
-    every batch, so the caller can keep results even if a later batch fails.
+    on_batch(batch_entries, batch_unavailable_ids) is called after every batch, so the
+    caller keeps its results even if a later batch fails.
     """
     entries         = []
     unavailable_ids = []
@@ -584,20 +515,17 @@ def _yt_fetch_video_details(video_ids, api_key, on_progress=None, progress_offse
 
 def _fetch_with_cache(video_ids, api_key, cache, on_progress=None, persist=True):
     """
-    For a list of video IDs:
-      - Return cached entries immediately for IDs already in cache
-      - Skip IDs recently found to be unavailable (private/deleted/blocked)
-      - Only call the API for the rest, and keep each batch as it arrives
+    Return the details for video_ids, asking the API only for IDs that are neither
+    cached nor recently found unavailable.
 
-    Results are saved to disk when the fetch ends, however it ends (finished,
-    rate/quota limit, error or Ctrl-C), and every 10 batches in between, so a
-    failure part-way never throws away the batches already fetched.
+    The cache is saved when the fetch ends, however it ends (finished, limit, error or
+    Ctrl-C), and every 10 batches in between, so a failure part-way keeps the batches
+    already fetched. persist=False keeps everything in memory.
 
-    If a YouTube limit stops the fetch, the YouTubeLimitError is re-raised with
-    .saved / .total filled in. persist=False keeps everything in memory only.
+    A YouTubeLimitError is re-raised with .saved and .total filled in.
 
-    Returns (entries, cache_hits, unavailable_ids). cache_hits counts usable
-    cached entries only; unavailable_ids includes remembered unavailable videos.
+    Returns (entries, cache_hits, unavailable_ids). cache_hits counts usable cached
+    entries only; unavailable_ids includes remembered unavailable videos.
     """
     now             = time.time()
     states          = {vid: _cache_state(cache, vid, now) for vid in video_ids}
@@ -626,7 +554,7 @@ def _fetch_with_cache(video_ids, api_key, cache, on_progress=None, persist=True)
             e.saved = sum(1 for vid in video_ids if _cache_state(cache, vid) != 'miss')
             raise
         finally:
-            # Only rewrite the cache file if a batch actually arrived.
+            # only rewrite the file if a batch actually arrived
             if persist and batches:
                 _save_yt_video_cache(cache)
 
@@ -646,21 +574,13 @@ def _fetch_with_cache(video_ids, api_key, cache, on_progress=None, persist=True)
     return entries, cache_hits, unavailable_ids
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
 def scan_url(url, on_progress=None, use_cache=True):
     """
     Fetch durations for a YouTube URL via the Data API v3.
 
-    Quota and rate limits are YouTube's to enforce: when it refuses a request,
-    _yt_api_request raises YouTubeLimitError and the videos fetched so far are
-    already saved (see _fetch_with_cache).
-
     Returns (total_sec, total_count, entries, label, cache_hits, unavailable_count).
     """
-    # Validate the URL first, so a bad link is rejected before asking for a key.
+    # validate first, so a bad link is rejected before asking for a key
     kind, vid_id = _parse_yt_url(_normalise_url(url))
     if kind is None:
         raise ValueError(f"Could not parse YouTube URL: {url}")
@@ -676,14 +596,12 @@ def scan_url(url, on_progress=None, use_cache=True):
     entries           = []
     unavailable_count = 0
 
-    # ── Single video ──────────────────────────────────────────────────
     if kind == 'video':
         entries, cache_hits, unavail = _fetch_with_cache(
             [vid_id], api_key, cache, on_progress, persist=use_cache)
         label             = entries[0]['title'] if entries else vid_id
         unavailable_count = len(unavail)
 
-    # ── Playlist ──────────────────────────────────────────────────────
     elif kind == 'playlist':
         try:
             pl_data  = _yt_api_request('playlists', {'part': 'snippet', 'id': vid_id}, api_key)
@@ -698,7 +616,6 @@ def scan_url(url, on_progress=None, use_cache=True):
         entries, cache_hits, unavail = _fetch_with_cache(ids, api_key, cache, on_progress, persist=use_cache)
         unavailable_count           = len(unavail)
 
-    # ── Channel ───────────────────────────────────────────────────────
     elif kind in ('channel_id', 'channel_handle'):
         uploads_pl, channel_title = _yt_get_channel_uploads_playlist(vid_id, api_key, kind)
         if not uploads_pl:

@@ -49,9 +49,7 @@ def test_bar_shows_percentage():
     assert "100.0%" in _bar(500, 100)  # ratio is capped at 100%
 
 
-# ---------------------------------------------------------------------------
 # _safe: everything that could drive the terminal is removed
-# ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("hostile, expected", [
     ("a\x1b[31mred\x1b[0mb", "aredb"),               # colour (CSI ... m)
@@ -93,9 +91,7 @@ def test_safe_accepts_non_strings():
     assert _safe(ValueError("x\x1b[2J")) == "x"
 
 
-# ---------------------------------------------------------------------------
 # Every place a name or title is printed goes through _safe
-# ---------------------------------------------------------------------------
 
 _OWN_COLOURS = re.compile(r"\x1b\[[0-9;]*m")
 HOSTILE = "a\x1b[31mred\x1b]0;PWNED\x07\x1b[2J\u009bb\u202ec"

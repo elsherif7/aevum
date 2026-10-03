@@ -1,13 +1,8 @@
 """
-Aevum CLI entry point: argument parsing and dispatch, in one file.
+Argument parsing and dispatch.
 
-'scan' takes exactly one target (a folder path or a YouTube URL) and no
-flags whatsoever — this is a "point it at a target, get the result"
-tool. cmd_scan (the only command) lives in _cli_cmds.py.
-
-The 'scan' word is required (no bare 'aevum <path>' shorthand). A path
-containing spaces must be quoted — it is not auto-joined from multiple
-tokens.
+'scan' takes exactly one target (a folder or a YouTube URL) and no flags.
+The word 'scan' is required, and a path containing spaces must be quoted.
 """
 from __future__ import annotations
 
@@ -77,14 +72,13 @@ def _parse_target() -> str:
         print(f"\n  {eclr.R}[ERROR]{eclr.RST} No target specified. Usage: aevum scan <path|url>\n",
               file=sys.stderr)
         sys.exit(EX.ERR_ARGS)
-    # `aevum scan -h` / `--version` behave like the top-level flags.
     if tokens[0] in ('-h', '--help'):
         _print_help()
         sys.exit(EX.OK)
     if tokens[0] in ('-V', '--version'):
         print(f"aevum {__version__}")
         sys.exit(EX.OK)
-    # scan takes no options. A leading dash is only a path if that path exists.
+    # there are no options, so a leading dash is only valid if it names a real path
     if tokens[0].startswith('-') and not os.path.exists(tokens[0]):
         print(f"\n  {eclr.R}[ERROR]{eclr.RST} Unknown option: {_safe(tokens[0])}. "
               f"'aevum scan' takes no options, only a path or URL.\n",
@@ -101,9 +95,8 @@ def _parse_target() -> str:
 
 def _harden_streams() -> None:
     """
-    Never crash while printing. A file name the console encoding can't represent
-    (a Japanese folder name with a cp1252 console, or undecodable bytes in a
-    name) would otherwise raise UnicodeEncodeError after the scan has finished.
+    Never crash while printing: a name the console encoding can't represent would
+    otherwise raise UnicodeEncodeError after the scan has finished.
     """
     for stream in (sys.stdout, sys.stderr):
         try:

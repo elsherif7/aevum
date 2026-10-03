@@ -7,49 +7,37 @@ from ._color import LINE, clr
 from ._models import FolderNode, ScanTree
 from ._scan import format_duration, format_size
 
-# Complete escape sequences: CSI (ESC [ ... final byte, including private forms such
-# as ESC[?25l), OSC (ESC ] ... BEL or ESC \), charset switches (ESC ( 0), and the
-# two-character ones such as ESC c (full terminal reset).
+# Whole escape sequences: CSI (including private forms like ESC[?25l), OSC (ended by BEL or
+# ESC \), charset switches (ESC ( 0), and two-character ones like ESC c (terminal reset).
 _ANSI_ESCAPE = _re.compile(r'\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[ -/]+[0-~]|[0-~])')
-# C0 controls, DEL and C1 controls. U+009B is "CSI" on terminals that honour 8-bit controls.
+# C0 controls, DEL and C1 controls. U+009B is CSI on terminals that honour 8-bit controls.
 _CTRL_CHARS  = _re.compile(r'[\x00-\x1f\x7f-\x9f]')
-# Bidi embeddings/overrides/isolates, which can make "gpj.exe" display as "exe.jpg".
-_BIDI_CHARS  = _re.compile('[\u202a-\u202e\u2066-\u2069]')
+# Bidi embeddings, overrides and isolates, which can make "gpj.exe" display as "exe.jpg".
+_BIDI_CHARS  = _re.compile('[‪-‮⁦-⁩]')
 
 
 def _safe(name: object, maxlen: int = 200) -> str:
-    """
-    Make an untrusted string (folder or file name, video title, channel name, a
-    path typed or pasted by the user) safe to print: no terminal escape sequences,
-    control characters or bidi overrides, and no characters that can't be encoded
-    (the stray bytes of an undecodable file name become '?').
-    """
+    """Make an untrusted string (file name, video title, typed path) safe to print."""
     text = str(name)
     text = _ANSI_ESCAPE.sub('', text)
     text = _CTRL_CHARS.sub('', text)
     text = _BIDI_CHARS.sub('', text)
-    text = text.encode('utf-8', 'replace').decode('utf-8')
+    text = text.encode('utf-8', 'replace').decode('utf-8')  # undecodable file name bytes become '?'
     return text[:maxlen]
 
 
 _DEPTH_ATTRS = ("R", "G", "B", "M", "C")
 
-BAR_WIDTH = 28  # character width of the filled bar
+BAR_WIDTH = 28
 
 
 def _bar(seconds: float, total_sec: float, width: int = BAR_WIDTH) -> str:
-    """
-    Return a colored ASCII bar representing seconds / total_sec.
-    The bar uses block characters and shows the percentage at the end.
-    Returns an empty string when total_sec is 0.
-    """
     if total_sec <= 0:
         return ""
     ratio  = min(seconds / total_sec, 1.0)
     filled = round(ratio * width)
     pct    = ratio * 100
     bar    = "█" * filled + "░" * (width - filled)
-    # colour: green for large shares, yellow for mid, dim for small
     if pct >= 40:
         col = clr.G
     elif pct >= 15:
@@ -64,21 +52,15 @@ def print_bar_chart(
     total_sec: float,
     direct_files: list[tuple[Path, float]] | None = None,
 ) -> None:
-    """
-    Print a compact bar-chart section showing each top-level subfolder's
-    share of the total duration.  Files sitting directly in the root folder
-    are grouped as '(root files)'.
-    """
+    """Bar chart of each top-level subfolder's share of the total. Files directly in the root are grouped as '(root files)'."""
     if total_sec <= 0:
         return
 
-    # Build rows: (label, seconds)
     rows = []
     for node in children:
         if node.total_count > 0:
             rows.append((node.name, node.total_sec))
 
-    # Direct root files grouped together
     if direct_files:
         direct_sec = sum(s for _, s in direct_files)
         if direct_sec > 0:
@@ -87,10 +69,8 @@ def print_bar_chart(
     if not rows:
         return
 
-    # Sort by duration descending for a clean waterfall look
     rows.sort(key=lambda x: x[1], reverse=True)
 
-    # Truncate label to keep the chart tidy
     MAX_LABEL = 26
 
     print(f"  {clr.C}{LINE}{clr.RST}")
@@ -107,7 +87,6 @@ def print_bar_chart(
 
 
 def _dc(depth: int) -> str:
-    """Return the ANSI code for the given tree depth."""
     return getattr(clr, _DEPTH_ATTRS[depth % len(_DEPTH_ATTRS)])
 
 
@@ -122,12 +101,6 @@ def print_tree(
     max_depth: int = 50,
     fbytes: int = 0,
 ) -> None:
-    """
-    Recursively print the folder tree.
-
-    max_depth is passed down every recursive call, so a very deep folder
-    structure can't cause unbounded recursion.
-    """
     if depth > max_depth:
         return
     PAD    = "    "
@@ -217,7 +190,6 @@ def print_results(
         tree.children, tree.direct_files,
         fbytes=tree.root_bytes,
     )
-    # ASCII bar chart — only shown when there is more than one folder to compare
     if tree.children or tree.direct_files:
         print_bar_chart(tree.children, total_sec, tree.direct_files)
     print(f"  {clr.C}{LINE}{clr.RST}")
@@ -281,7 +253,6 @@ def print_url_results(
             print(f"  {clr.DIM}{i:>2}.{clr.RST}  {clr.W}{dur_fmt['hours_fmt']}{clr.RST}  {clr.DIM}|{clr.RST}  {clr.W}{_safe(e['title'])[:60]}{clr.RST}")
         print()
 
-    # Bar chart: top channels by total duration (only when multiple channels present)
     if entries and total_sec > 0:
         channel_secs: dict = {}
         for e in entries:
@@ -303,13 +274,10 @@ def print_url_results(
 
 def _fuzzy_suggest(word: str, candidates: list[str]) -> str | None:
     """
-    Return the closest candidate to word within edit-distance 2, or None.
+    Return the closest candidate within edit distance 2, or None.
 
-    Candidate lists larger than 50 items are skipped entirely. The
-    Levenshtein inner loop is O(len(word) * len(candidate)), so running it
-    on a large folder listing would be noticeably slow.
-
-    Security: Limits input lengths to prevent ReDoS attacks.
+    Lists of more than 50 candidates are skipped because the Levenshtein
+    loop would be noticeably slow on a big folder listing.
     """
     MAX_WORD_LENGTH = 50
     MAX_CANDIDATE_LENGTH = 50
