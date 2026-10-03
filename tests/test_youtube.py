@@ -853,3 +853,228 @@ def test_a_scan_recovers_from_a_damaged_cache(fake_api):
     entries, hits, unavailable = yt._fetch_with_cache(["v0001"], "key", yt._load_yt_video_cache())
     assert len(entries) == 1 and hits == 0
     assert len(api.video_calls()) == 1                # the bad entry was refetched
+
+
+# E2: key format
+
+@pytest.mark.parametrize("tail_length", [30, 35, 39, 45])
+def test_save_api_key_accepts_keys_of_30_or_more_characters(key_file, tail_length):
+    key = "AIza" + "x" * tail_length
+    assert yt.save_api_key(key) is True
+    assert yt.load_api_key() == key
+
+
+@pytest.mark.parametrize("bad", ["AIza" + "x" * 29, VALID_KEY + "\n", "AIza" + "x" * 34 + " ", "AIza" + "x" * 34 + "!"])
+def test_save_api_key_still_rejects_short_or_dirty_keys(key_file, bad):
+    assert yt.save_api_key(bad) is False
+    assert not key_file.exists()
+
+
+# E3: a limit stop is not an OSError
+
+def test_limit_error_is_not_an_os_error():
+    assert not issubclass(yt.YouTubeLimitError, OSError)
+    assert issubclass(yt.YouTubeLimitError, Exception)
+
+
+# E5: error text is not wrapped twice
+
+def test_api_errors_are_not_prefixed_twice(monkeypatch, sleeps):
+    def err():
+        return urllib.error.HTTPError("https://x", 403, "err", Message(), io.BytesIO(
+            json.dumps({"error": {"message": "nope", "errors": [{"reason": "forbidden"}]}}).encode()))
+
+    _scripted_urlopen(monkeypatch, err())
+    with pytest.raises(RuntimeError) as exc:
+        yt._yt_fetch_video_details(["abc"], "key")
+    assert str(exc.value) == "YouTube API error 403: nope"
+
+    _scripted_urlopen(monkeypatch, err())
+    with pytest.raises(RuntimeError) as exc:
+        yt._yt_fetch_playlist_video_ids("PL1", "key")
+    assert str(exc.value) == "YouTube API error 403: nope"
+
+
+# E4: a video listed more than once counts once
+
+def _requested_ids(api):
+    return [v for _, params in api.video_calls() for v in params["id"].split(",")]
+
+
+def test_repeated_ids_are_requested_once_even_across_a_batch_boundary(fake_api):
+    api = fake_api()
+    ids = _ids(55) + _ids(5)                    # the last five repeat the first five
+    entries, hits, unavailable = yt._fetch_with_cache(ids, "key", {})
+    assert sorted(_requested_ids(api)) == sorted(_ids(55))
+    assert len(entries) == 55
+    assert [e["title"] for e in entries] == [f"Title {v}" for v in _ids(55)]
+
+
+def test_repeats_keep_the_order_of_the_first_occurrence(fake_api):
+    fake_api()
+    entries, _, _ = yt._fetch_with_cache(["A", "B", "A", "C"], "key", {})
+    assert [e["title"] for e in entries] == ["Title A", "Title B", "Title C"]
+
+
+def test_playlist_that_lists_a_video_twice_counts_it_once(fake_api, monkeypatch):
+    monkeypatch.setattr(yt, "load_api_key", lambda: VALID_KEY)
+    monkeypatch.setattr(yt, "_yt_fetch_playlist_video_ids", lambda *a, **k: ["A", "B", "A", "C"])
+    api = fake_api()
+    total_sec, total_count, entries, _, cache_hits, unavailable = yt.scan_url(
+        "https://www.youtube.com/playlist?list=PL1")
+    assert total_count == 3
+    assert total_sec == 180.0                   # three one-minute videos
+    assert [e["title"] for e in entries] == ["Title A", "Title B", "Title C"]
+    assert sorted(_requested_ids(api)) == ["A", "B", "C"]
+    assert (cache_hits, unavailable) == (0, 0)
+
+
+def test_channel_uploads_with_repeats_count_each_video_once(fake_api, monkeypatch):
+    monkeypatch.setattr(yt, "load_api_key", lambda: VALID_KEY)
+    monkeypatch.setattr(yt, "_yt_get_channel_uploads_playlist", lambda *a, **k: ("UU1", "Chan"))
+    monkeypatch.setattr(yt, "_yt_fetch_playlist_video_ids", lambda *a, **k: ["A", "A", "B"])
+    fake_api()
+    _, total_count, entries, label, *_ = yt.scan_url("https://www.youtube.com/channel/UCabc")
+    assert (label, total_count, len(entries)) == ("Chan", 2, 2)
+
+
+def test_a_repeated_unavailable_video_is_counted_once(fake_api):
+    api = fake_api(unavailable={"A"})
+    entries, _, unavailable = yt._fetch_with_cache(["A", "B", "A"], "key", {})
+    assert unavailable == ["A"]
+    assert len(entries) == 1
+    assert _requested_ids(api) == ["A", "B"]
+
+
+def test_a_repeated_cached_video_is_one_cache_hit(fake_api):
+    api = fake_api()
+    cache: dict = {}
+    yt._merge_into_cache(cache, {"A": {"id": "A", "title": "T", "duration": 60.0}}, save=False)
+    entries, hits, _ = yt._fetch_with_cache(["A", "A", "B"], "key", cache)
+    assert hits == 1
+    assert len(entries) == 2
+    assert _requested_ids(api) == ["B"]
+
+
+# E1: a rejected API key
+
+def _http_error_body(code, body):
+    return urllib.error.HTTPError("https://x", code, "err", Message(), io.BytesIO(json.dumps(body).encode()))
+
+
+@pytest.mark.parametrize("body", [
+    {"error": {"message": "x", "errors": [{"reason": "keyInvalid"}]}},
+    {"error": {"message": "API key not valid. Please pass a valid API key.", "errors": [{"reason": "badRequest"}]}},
+    {"error": {"message": "x", "errors": [{"reason": "badRequest"}],
+               "details": [{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "API_KEY_INVALID"}]}},
+    {"error": {"message": "API key expired. Please renew the API key.", "errors": [{"reason": "badRequest"}]}},
+])
+def test_rejected_keys_are_recognised(body):
+    kind, _ = yt._classify_http_error(_http_error_body(400, body))
+    assert kind == "key"
+
+
+@pytest.mark.parametrize("code, reason, message", [
+    (400, "badRequest", "Invalid value for id"),
+    (403, "forbidden", "The caller does not have permission"),
+    (404, "notFound", "boom"),
+])
+def test_other_errors_are_not_mistaken_for_a_rejected_key(code, reason, message):
+    kind, _ = yt._classify_http_error(_http_error_body(
+        code, {"error": {"message": message, "errors": [{"reason": reason}]}}))
+    assert kind is None
+
+
+def test_rejected_key_raises_its_own_error_without_retrying(monkeypatch, sleeps):
+    calls = _scripted_urlopen(monkeypatch, _http_error(400, "keyInvalid", "API key not valid. Please pass a valid API key."))
+    with pytest.raises(yt.ApiKeyRejected, match="API key not valid") as exc:
+        yt._yt_api_request("videos", {"id": "x"}, VALID_KEY)
+    assert isinstance(exc.value, RuntimeError)
+    assert VALID_KEY not in str(exc.value)
+    assert len(calls) == 1 and sleeps == []
+
+
+def _video_payload(vid="abc12345678"):
+    return {"items": [{"id": vid, "snippet": {"title": "T", "channelTitle": "C"},
+                       "contentDetails": {"duration": "PT1M"}}]}
+
+
+NEW_KEY = "AIza" + "n" * 35
+OLD_KEY = "AIza" + "o" * 35
+
+
+def test_rejected_saved_key_on_a_terminal_is_replaced_and_the_scan_retried(monkeypatch, key_file, capsys):
+    yt.save_api_key(OLD_KEY)
+    monkeypatch.setattr(yt, "_stdin_is_terminal", lambda: True)
+    prompts: list[int] = []
+
+    def prompt():
+        prompts.append(1)
+        yt.save_api_key(NEW_KEY)
+        return NEW_KEY
+
+    monkeypatch.setattr(yt, "prompt_api_key", prompt)
+    calls = _scripted_urlopen(
+        monkeypatch,
+        _http_error(400, "keyInvalid", "API key not valid. Please pass a valid API key."),
+        _video_payload(),
+    )
+    result = yt.scan_url("https://youtu.be/abc12345678")
+    assert result[1] == 1                          # total_count
+    assert len(prompts) == 1 and len(calls) == 2
+    assert yt.load_api_key() == NEW_KEY
+    assert "rejected the API key" in capsys.readouterr().err
+
+
+def test_a_second_rejection_stops_without_asking_again(monkeypatch, key_file):
+    yt.save_api_key(OLD_KEY)
+    monkeypatch.setattr(yt, "_stdin_is_terminal", lambda: True)
+    prompts: list[int] = []
+
+    def prompt():
+        prompts.append(1)
+        return NEW_KEY
+
+    monkeypatch.setattr(yt, "prompt_api_key", prompt)
+    calls = _scripted_urlopen(
+        monkeypatch,
+        _http_error(400, "keyInvalid", "API key not valid."),
+        _http_error(400, "keyInvalid", "API key not valid."),
+    )
+    with pytest.raises(yt.ApiKeyRejected) as exc:
+        yt.scan_url("https://youtu.be/abc12345678")
+    assert len(prompts) == 1 and len(calls) == 2
+    assert str(key_file) in str(exc.value)
+
+
+def test_a_rejected_key_without_a_terminal_names_the_file_and_never_prompts(monkeypatch, key_file):
+    yt.save_api_key(OLD_KEY)
+    monkeypatch.setattr(yt, "_stdin_is_terminal", lambda: False)
+
+    def must_not_prompt():
+        raise AssertionError("prompted without a terminal")
+
+    monkeypatch.setattr(yt, "prompt_api_key", must_not_prompt)
+    _scripted_urlopen(monkeypatch, _http_error(400, "keyInvalid", "API key not valid."))
+    with pytest.raises(yt.ApiKeyRejected) as exc:
+        yt.scan_url("https://youtu.be/abc12345678")
+    assert str(key_file) in str(exc.value)
+    assert OLD_KEY not in str(exc.value)
+
+
+def test_cancelling_the_replacement_prompt_cancels_the_scan(monkeypatch, key_file):
+    yt.save_api_key(OLD_KEY)
+    monkeypatch.setattr(yt, "_stdin_is_terminal", lambda: True)
+    monkeypatch.setattr(yt, "prompt_api_key", lambda: None)
+    _scripted_urlopen(monkeypatch, _http_error(400, "keyInvalid", "API key not valid."))
+    with pytest.raises(yt.ApiKeyCancelled):
+        yt.scan_url("https://youtu.be/abc12345678")
+
+
+def test_a_rejected_key_is_not_hidden_by_the_playlist_title_lookup(monkeypatch, key_file):
+    yt.save_api_key(OLD_KEY)
+    monkeypatch.setattr(yt, "_stdin_is_terminal", lambda: False)
+    calls = _scripted_urlopen(monkeypatch, _http_error(400, "keyInvalid", "API key not valid."))
+    with pytest.raises(yt.ApiKeyRejected):
+        yt.scan_url("https://www.youtube.com/playlist?list=PL1")
+    assert len(calls) == 1

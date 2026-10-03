@@ -168,6 +168,8 @@ A few other things worth knowing:
   it fetched, and tells you when to try again.
 - Private, deleted, or region-blocked videos are remembered for 7 days,
   so reruns don't spend quota asking about them again.
+- A video that a playlist lists more than once is counted once, in the
+  order of its first appearance, and is fetched once.
 
 ---
 
@@ -187,6 +189,11 @@ on Linux/macOS or `%LOCALAPPDATA%\Aevum\yt_api_key.txt` on Windows.
 - On Windows Aevum doesn't change the file's permissions. It sits in
   your profile folder, which other standard user accounts can't read by
   default.
+
+If YouTube rejects the saved key (wrong, revoked or expired), Aevum says
+so. In a terminal it asks for a new key, saves it and tries once more. If
+the new key is rejected too, or the input isn't a terminal, it stops with
+exit code 5 and names the key file. Delete that file to be asked again.
 
 ---
 

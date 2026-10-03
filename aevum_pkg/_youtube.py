@@ -7,10 +7,11 @@ import re
 import sys
 import time
 
-from ._color import clr
+from ._color import clr, eclr
 from ._paths import YT_KEY_FILE, YT_VCACHE_FILE
+from ._text import _safe
 
-_YT_KEY_PATTERN = re.compile(r'^AIza[0-9A-Za-z\-_]{35}$')
+_YT_KEY_PATTERN = re.compile(r'AIza[0-9A-Za-z\-_]{30,}')
 
 
 def _write_private_file(path, text: str) -> None:
@@ -36,7 +37,7 @@ def _write_private_file(path, text: str) -> None:
 
 def save_api_key(api_key: str) -> bool:
     """Save the key to a local file. Returns True on success."""
-    if not api_key or not _YT_KEY_PATTERN.match(api_key):
+    if not api_key or not _YT_KEY_PATTERN.fullmatch(api_key):
         print("  Error: Invalid API key format (expected AIza...)", file=sys.stderr)
         return False
 
@@ -191,6 +192,9 @@ def _parse_iso8601_duration(d):
 _YT_QUOTA_REASONS = ('quotaExceeded', 'dailyLimitExceeded')              # HTTP 403
 _YT_RATE_REASONS  = ('rateLimitExceeded', 'userRateLimitExceeded')       # HTTP 429 (or 403)
 
+# Google's wording for a key that is wrong, revoked or expired (the second form is in the error details).
+_YT_KEY_REASONS = ('keyInvalid', 'API_KEY_INVALID')
+
 _RETRY_DELAYS    = (1, 2, 4)   # seconds before each retry when YouTube gives no hint
 _MAX_RETRY_AFTER = 30          # a longer Retry-After stops the scan instead of waiting
 
@@ -199,7 +203,11 @@ _TRANSIENT_HTTP    = (500, 502, 503, 504)
 _TRANSIENT_NETWORK = (TimeoutError, ConnectionError, http.client.HTTPException)
 
 
-class YouTubeLimitError(PermissionError):
+class ApiKeyRejected(RuntimeError):
+    """YouTube refused the API key itself: it is wrong, revoked or expired."""
+
+
+class YouTubeLimitError(Exception):
     """
     YouTube refused a request because of a limit. Everything fetched so far is
     already in the cache, so running the command again later is safe.
@@ -231,18 +239,30 @@ def _get_ssl_context():
     return _ssl_context
 
 
+def _looks_like_rejected_key(reasons, msg):
+    if any(r in _YT_KEY_REASONS for r in reasons):
+        return True
+    text = msg.lower()
+    return 'api key not valid' in text or 'api key expired' in text
+
+
 def _classify_http_error(e):
-    """Return (kind, message). kind is 'quota', 'rate', 'transient', or None for any other error."""
-    reason = ''
+    """Return (kind, message). kind is 'quota', 'rate', 'transient', 'key', or None for any other error."""
+    reason  = ''
+    reasons = []
     try:
         body     = e.read().decode('utf-8', errors='replace')
         err_data = json.loads(body).get('error', {})
         msg      = err_data.get('message', str(e))
         reason   = (err_data.get('errors') or [{}])[0].get('reason', '')
+        reasons  = [reason] + [d.get('reason', '') for d in err_data.get('details') or []
+                               if isinstance(d, dict)]
     except Exception:
         msg = str(e)
     finally:
         e.close()   # release the connection; Python 3.14+ warns if it is left open
+    if _looks_like_rejected_key(reasons, msg):
+        return 'key', msg
     if reason in _YT_QUOTA_REASONS:
         return 'quota', msg
     if e.code == 429 or reason in _YT_RATE_REASONS:
@@ -291,7 +311,8 @@ def _yt_api_request(endpoint, params, api_key):
       - Retry-After up to _MAX_RETRY_AFTER seconds is honoured exactly. A longer one
         raises YouTubeLimitError(kind='rate', retry_after=...) instead of retrying early.
         Without it we back off 1 s, 2 s, 4 s.
-      - anything else (bad key, bad request): RuntimeError, never retried
+      - a rejected key: ApiKeyRejected, never retried
+      - anything else (bad request and so on): RuntimeError, never retried
 
     Every request is a GET, so retrying is safe. Errors carry the API's own message and
     never the URL, because the URL contains the key.
@@ -325,6 +346,8 @@ def _yt_api_request(endpoint, params, api_key):
                         _limit_message(kind, msg), kind='rate', retry_after=asked) from None
             if kind == 'quota':
                 raise YouTubeLimitError(f"YouTube API quota exceeded: {msg}", kind='quota') from None
+            if kind == 'key':
+                raise ApiKeyRejected(f"YouTube API error {e.code}: {msg}") from None
             raise RuntimeError(f"YouTube API error {e.code}: {msg}") from None
         except urllib.error.URLError as e:
             if isinstance(e.reason, _TRANSIENT_NETWORK) and attempt < last:
@@ -442,12 +465,7 @@ def _yt_fetch_playlist_video_ids(playlist_id, api_key, on_progress=None):
         params = {'part': 'contentDetails', 'playlistId': playlist_id, 'maxResults': 50}
         if page_token:
             params['pageToken'] = page_token
-        try:
-            data = _yt_api_request('playlistItems', params, api_key)
-        except YouTubeLimitError:
-            raise
-        except Exception as e:
-            raise RuntimeError(f"playlistItems API error: {e}")
+        data = _yt_api_request('playlistItems', params, api_key)
         for item in data.get('items', []):
             vid = item.get('contentDetails', {}).get('videoId')
             if vid:
@@ -477,12 +495,7 @@ def _yt_fetch_video_details(video_ids, api_key, on_progress=None, progress_offse
 
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i:i+50]
-        try:
-            data = _yt_api_request('videos', {'part': 'snippet,contentDetails', 'id': ','.join(batch)}, api_key)
-        except YouTubeLimitError:
-            raise
-        except Exception as e:
-            raise RuntimeError(f"videos API error: {e}")
+        data = _yt_api_request('videos', {'part': 'snippet,contentDetails', 'id': ','.join(batch)}, api_key)
 
         batch_entries = []
         returned_ids  = set()
@@ -518,7 +531,8 @@ def _yt_fetch_video_details(video_ids, api_key, on_progress=None, progress_offse
 def _fetch_with_cache(video_ids, api_key, cache, on_progress=None, persist=True):
     """
     Return the details for video_ids, asking the API only for IDs that are neither
-    cached nor recently found unavailable.
+    cached nor recently found unavailable. An ID that appears more than once counts
+    once, at its first position.
 
     The cache is saved when the fetch ends, however it ends (finished, limit, error or
     Ctrl-C), and every 10 batches in between, so a failure part-way keeps the batches
@@ -529,10 +543,11 @@ def _fetch_with_cache(video_ids, api_key, cache, on_progress=None, persist=True)
     Returns (entries, cache_hits, unavailable_ids). cache_hits counts usable cached
     entries only; unavailable_ids includes remembered unavailable videos.
     """
+    video_ids       = list(dict.fromkeys(video_ids))
     now             = time.time()
     states          = {vid: _cache_state(cache, vid, now) for vid in video_ids}
     cache_hits      = sum(1 for vid in video_ids if states[vid] == 'hit')
-    unavailable_ids = [vid for vid in dict.fromkeys(video_ids) if states[vid] == 'unavailable']
+    unavailable_ids = [vid for vid in video_ids if states[vid] == 'unavailable']
     new_ids         = [vid for vid in video_ids if states[vid] == 'miss']
     total           = len(video_ids)
     batches         = 0
@@ -576,11 +591,28 @@ def _fetch_with_cache(video_ids, api_key, cache, on_progress=None, persist=True)
     return entries, cache_hits, unavailable_ids
 
 
+def _stdin_is_terminal():
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError, OSError):
+        return False
+
+
+def _key_rejected_error(rejected):
+    return ApiKeyRejected(
+        f"YouTube rejected the API key ({rejected}). It is saved in {YT_KEY_FILE}: "
+        f"delete that file, or run Aevum in a terminal, to enter a new one.")
+
+
 def scan_url(url, on_progress=None, use_cache=True):
     """
     Fetch durations for a YouTube URL via the Data API v3.
 
     Returns (total_sec, total_count, entries, label, cache_hits, unavailable_count).
+
+    If YouTube rejects the key, a terminal user is asked for a new one and the scan is
+    retried once. Without a terminal, or if the new key is rejected too, ApiKeyRejected
+    is raised.
     """
     # validate first, so a bad link is rejected before asking for a key
     kind, vid_id = _parse_yt_url(_normalise_url(url))
@@ -593,6 +625,24 @@ def scan_url(url, on_progress=None, use_cache=True):
         if not api_key:
             raise ApiKeyCancelled("No API key provided.")
 
+    try:
+        return _scan_with_key(kind, vid_id, url, api_key, on_progress, use_cache)
+    except ApiKeyRejected as rejected:
+        if not _stdin_is_terminal():
+            raise _key_rejected_error(rejected) from None
+        print(f"\n  {eclr.R}[ERROR]{eclr.RST} YouTube rejected the API key: {_safe(rejected, 500)}",
+              file=sys.stderr)
+
+    api_key = prompt_api_key()
+    if not api_key:
+        raise ApiKeyCancelled("No API key provided.")
+    try:
+        return _scan_with_key(kind, vid_id, url, api_key, on_progress, use_cache)
+    except ApiKeyRejected as rejected:
+        raise _key_rejected_error(rejected) from None
+
+
+def _scan_with_key(kind, vid_id, url, api_key, on_progress, use_cache):
     cache             = _load_yt_video_cache() if use_cache else {}
     label             = url
     entries           = []
@@ -609,7 +659,7 @@ def scan_url(url, on_progress=None, use_cache=True):
             pl_data  = _yt_api_request('playlists', {'part': 'snippet', 'id': vid_id}, api_key)
             pl_items = pl_data.get('items', [])
             label    = pl_items[0]['snippet']['title'] if pl_items else vid_id
-        except YouTubeLimitError:
+        except (YouTubeLimitError, ApiKeyRejected):
             raise
         except Exception:
             label = vid_id
