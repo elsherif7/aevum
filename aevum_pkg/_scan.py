@@ -419,27 +419,20 @@ def scan_parallel(
         collector = threading.Thread(target=collect_and_submit, daemon=True)
         collector.start()
 
-        # join before reading the futures so as_completed() sees every submitted one
-        try:
-            collector.join()
-        except KeyboardInterrupt:
-            # stop the workers and drop queued files, so leaving the `with` block
-            # doesn't wait for every remaining ffprobe call
-            stop_event.set()
-            pool.shutdown(wait=False, cancel_futures=True)
-            raise
-
-        if stop_event and stop_event.is_set():
-            tree = _build_tree(root, {})
-            return 0.0, 0, tree, {}, {}
-
         found = []   # (path, sec, size, file_id, is_link, timed_out)
         try:
+            # join before reading the futures so as_completed() sees every submitted one
+            collector.join()
+            if stop_event and stop_event.is_set():
+                tree = _build_tree(root, {})
+                return 0.0, 0, tree, {}, {}
             for future in as_completed(futures):
                 if stop_event and stop_event.is_set():
                     break
                 found.append(future.result())
         except KeyboardInterrupt:
+            # stop the workers and drop queued files, so leaving the `with` block
+            # doesn't wait for every remaining ffprobe call
             stop_event.set()
             pool.shutdown(wait=False, cancel_futures=True)
             raise

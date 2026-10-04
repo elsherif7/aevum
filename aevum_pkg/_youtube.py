@@ -7,7 +7,7 @@ import re
 import sys
 import time
 
-from ._color import clr, eclr
+from ._color import clr, eclr, is_tty
 from ._paths import YT_KEY_FILE, YT_VCACHE_FILE
 from ._text import _safe
 
@@ -349,17 +349,14 @@ def _yt_api_request(endpoint, params, api_key):
             if kind == 'key':
                 raise ApiKeyRejected(f"YouTube API error {e.code}: {msg}") from None
             raise RuntimeError(f"YouTube API error {e.code}: {msg}") from None
-        except urllib.error.URLError as e:
-            if isinstance(e.reason, _TRANSIENT_NETWORK) and attempt < last:
+        except (urllib.error.URLError, *_TRANSIENT_NETWORK) as e:
+            # a URLError wraps the cause; a bare timeout or dropped connection means
+            # the failure came while reading the response
+            reason = e.reason if isinstance(e, urllib.error.URLError) else e
+            if isinstance(reason, _TRANSIENT_NETWORK) and attempt < last:
                 time.sleep(_RETRY_DELAYS[attempt])
                 continue
-            raise RuntimeError(f"YouTube API network error: {e.reason}") from None
-        except _TRANSIENT_NETWORK as e:
-            # timeout or dropped connection while reading the response
-            if attempt < last:
-                time.sleep(_RETRY_DELAYS[attempt])
-                continue
-            raise RuntimeError(f"YouTube API network error: {e}") from None
+            raise RuntimeError(f"YouTube API network error: {reason}") from None
 
 
 class ApiKeyCancelled(Exception):
@@ -589,10 +586,7 @@ def _fetch_with_cache(video_ids, api_key, cache, on_progress=None, persist=True)
 
 
 def _stdin_is_terminal():
-    try:
-        return sys.stdin.isatty()
-    except (AttributeError, ValueError, OSError):
-        return False
+    return is_tty(sys.stdin)
 
 
 def _key_rejected_error(rejected):
@@ -651,29 +645,26 @@ def _scan_with_key(kind, vid_id, url, api_key, on_progress, use_cache):
         label             = entries[0]['title'] if entries else vid_id
         unavailable_count = len(unavail)
 
-    elif kind == 'playlist':
-        try:
-            pl_data  = _yt_api_request('playlists', {'part': 'snippet', 'id': vid_id}, api_key)
-            pl_items = pl_data.get('items', [])
-            label    = pl_items[0]['snippet']['title'] if pl_items else vid_id
-        except (YouTubeLimitError, ApiKeyRejected):
-            raise
-        except Exception:
-            label = vid_id
+    else:
+        if kind == 'playlist':
+            playlist_id = vid_id
+            try:
+                pl_data  = _yt_api_request('playlists', {'part': 'snippet', 'id': vid_id}, api_key)
+                pl_items = pl_data.get('items', [])
+                label    = pl_items[0]['snippet']['title'] if pl_items else vid_id
+            except (YouTubeLimitError, ApiKeyRejected):
+                raise
+            except Exception:
+                label = vid_id
+        else:
+            playlist_id, channel_title = _yt_get_channel_uploads_playlist(vid_id, api_key, kind)
+            if not playlist_id:
+                raise ValueError(f"Could not find channel: {vid_id}")
+            label = channel_title or vid_id
 
-        ids                         = _yt_fetch_playlist_video_ids(vid_id, api_key)
+        ids                          = _yt_fetch_playlist_video_ids(playlist_id, api_key)
         entries, cache_hits, unavail = _fetch_with_cache(ids, api_key, cache, on_progress, persist=use_cache)
-        unavailable_count           = len(unavail)
-
-    elif kind in ('channel_id', 'channel_handle'):
-        uploads_pl, channel_title = _yt_get_channel_uploads_playlist(vid_id, api_key, kind)
-        if not uploads_pl:
-            raise ValueError(f"Could not find channel: {vid_id}")
-        label = channel_title or vid_id
-
-        ids                         = _yt_fetch_playlist_video_ids(uploads_pl, api_key)
-        entries, cache_hits, unavail = _fetch_with_cache(ids, api_key, cache, on_progress, persist=use_cache)
-        unavailable_count           = len(unavail)
+        unavailable_count            = len(unavail)
 
     total_sec   = sum(e['duration'] for e in entries)
     total_count = len(entries)

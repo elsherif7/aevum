@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from ._color import clr, eclr
+from ._color import clr, eclr, is_tty
 from ._display import _fuzzy_suggest, print_results, print_url_results
 from ._exit import EX
 from ._scan import MAX_DEPTH, _run_scan, check_ffprobe
@@ -23,10 +23,7 @@ from ._youtube import (
 
 
 def _is_interactive() -> bool:
-    try:
-        return sys.stdout.isatty()
-    except (AttributeError, ValueError, OSError):
-        return False
+    return is_tty(sys.stdout)
 
 
 # rewinds the progress line; empty when stdout is not a terminal

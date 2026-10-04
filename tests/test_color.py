@@ -7,7 +7,7 @@ import sys
 import pytest
 from conftest import ROOT
 
-from aevum_pkg._color import _Colors, color_enabled
+from aevum_pkg._color import _Colors, color_enabled, is_tty
 
 
 class _Stream:
@@ -21,6 +21,16 @@ class _Stream:
 class _BrokenStream:
     def isatty(self):
         raise ValueError("I/O operation on closed file")
+
+
+# the shared terminal check
+
+def test_is_tty_handles_terminals_pipes_and_broken_streams():
+    assert is_tty(_Stream(True)) is True
+    assert is_tty(_Stream(False)) is False
+    assert is_tty(_BrokenStream()) is False
+    assert is_tty(None) is False
+    assert is_tty(object()) is False   # type: ignore[arg-type]  # no isatty at all
 
 
 # the decision function

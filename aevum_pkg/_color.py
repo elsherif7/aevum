@@ -32,6 +32,13 @@ class _SupportsIsatty(Protocol):
     def isatty(self) -> bool: ...
 
 
+def is_tty(stream: _SupportsIsatty | None) -> bool:
+    try:
+        return bool(stream is not None and stream.isatty())
+    except (AttributeError, ValueError, OSError):
+        return False
+
+
 def color_enabled(stream: _SupportsIsatty | None, env: Mapping[str, str] | None = None) -> bool:
     if env is None:
         env = os.environ
@@ -41,10 +48,7 @@ def color_enabled(stream: _SupportsIsatty | None, env: Mapping[str, str] | None 
         return True
     if env.get("TERM") == "dumb":
         return False
-    try:
-        return bool(stream is not None and stream.isatty())
-    except (AttributeError, ValueError, OSError):
-        return False
+    return is_tty(stream)
 
 
 def _enable_windows_vt(std_handle: int) -> bool:

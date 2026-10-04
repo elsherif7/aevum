@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import NoReturn
 
 from aevum_pkg import __version__
 
@@ -15,6 +16,8 @@ from ._cli_cmds import cmd_scan
 from ._color import clr, eclr
 from ._exit import EX
 from ._text import _safe
+
+_NO_TARGET = "No target specified. Usage: aevum scan <path|url>"
 
 
 def _print_help() -> None:
@@ -36,6 +39,20 @@ def _print_help() -> None:
 """)
 
 
+def _error(message: str) -> NoReturn:
+    print(f"\n  {eclr.R}[ERROR]{eclr.RST} {message}\n", file=sys.stderr)
+    sys.exit(EX.ERR_ARGS)
+
+
+def _exit_on_info_flag(token: str) -> None:
+    if token in ('-h', '--help'):
+        _print_help()
+        sys.exit(EX.OK)
+    if token in ('-V', '--version'):
+        print(f"aevum {__version__}")
+        sys.exit(EX.OK)
+
+
 def _parse_target() -> str:
     argv = sys.argv[1:]
 
@@ -55,46 +72,26 @@ def _parse_target() -> str:
     if not argv:
         _print_help()
         sys.exit(EX.OK)
-    if argv[0] in ('-h', '--help'):
-        _print_help()
-        sys.exit(EX.OK)
-    if argv[0] in ('-V', '--version'):
-        print(f"aevum {__version__}")
-        sys.exit(EX.OK)
+    _exit_on_info_flag(argv[0])
 
     if argv[0] != 'scan':
-        print(f"\n  {eclr.R}[ERROR]{eclr.RST} Missing 'scan' command. Usage: aevum scan <path|url>\n",
-              file=sys.stderr)
-        sys.exit(EX.ERR_ARGS)
+        _error("Missing 'scan' command. Usage: aevum scan <path|url>")
 
     tokens = argv[1:]
     if not tokens:
-        print(f"\n  {eclr.R}[ERROR]{eclr.RST} No target specified. Usage: aevum scan <path|url>\n",
-              file=sys.stderr)
-        sys.exit(EX.ERR_ARGS)
-    if tokens[0] in ('-h', '--help'):
-        _print_help()
-        sys.exit(EX.OK)
-    if tokens[0] in ('-V', '--version'):
-        print(f"aevum {__version__}")
-        sys.exit(EX.OK)
+        _error(_NO_TARGET)
+    _exit_on_info_flag(tokens[0])
     # there are no options, so a leading dash is only valid if it names a real path
     if tokens[0].startswith('-') and not os.path.exists(tokens[0]):
-        print(f"\n  {eclr.R}[ERROR]{eclr.RST} Unknown option: {_safe(tokens[0])}. "
-              f"'aevum scan' takes no options, only a path or URL.\n",
-              file=sys.stderr)
-        sys.exit(EX.ERR_ARGS)
+        _error(f"Unknown option: {_safe(tokens[0])}. "
+               f"'aevum scan' takes no options, only a path or URL.")
     if len(tokens) > 1:
-        print(f"\n  {eclr.R}[ERROR]{eclr.RST} Too many arguments. "
-              f"If your path contains spaces, wrap it in quotes: aevum scan \"my path\"\n",
-              file=sys.stderr)
-        sys.exit(EX.ERR_ARGS)
+        _error("Too many arguments. "
+               "If your path contains spaces, wrap it in quotes: aevum scan \"my path\"")
 
     target = tokens[0].strip().strip("'\"").strip()
     if not target:
-        print(f"\n  {eclr.R}[ERROR]{eclr.RST} No target specified. Usage: aevum scan <path|url>\n",
-              file=sys.stderr)
-        sys.exit(EX.ERR_ARGS)
+        _error(_NO_TARGET)
     return target
 
 
