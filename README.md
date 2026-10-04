@@ -16,10 +16,12 @@ aevum/
 ├── .gitattributes        # Keeps text files on LF line endings
 ├── LICENSE               # GNU General Public License v3.0
 ├── scripts/
+│   ├── check.py          # Dev tool: runs ruff, mypy and pytest in one go
 │   └── clean.py          # Dev tool: removes build artifacts and tool caches
 ├── tests/                # pytest suite (needs ffmpeg/ffprobe on PATH; no network or API key)
 │   ├── conftest.py       # Shared fixtures: ffmpeg-generated media, isolated CLI runner
 │   ├── test_cli.py       # Arguments, exit codes, end-to-end scans
+│   ├── test_check.py     # scripts/check.py runs every check and reports failures
 │   ├── test_clean.py     # scripts/clean.py removes artifacts and keeps sources
 │   ├── test_color.py     # NO_COLOR / FORCE_COLOR, terminal vs piped output
 │   ├── test_display.py   # Output sanitizing, fuzzy suggestions, bar
@@ -85,19 +87,19 @@ pip install --force-reinstall git+https://github.com/elsherif7/aevum
 
 ## Development
 
-Install in editable mode with the dev tools, then lint, type-check,
-test, and clean up when you're done:
+Install in editable mode with the dev tools, then run all checks (lint,
+type-check, tests) and clean up when you're done:
 
 ```
 pip install -e ".[dev]"
-ruff check .
-mypy
-pytest
+python3 scripts/check.py   # ruff, mypy and pytest in one go
 python3 scripts/clean.py   # remove build artifacts and tool caches when you're done
 ```
 
 Text files use LF line endings on every platform, and `.gitattributes`
 enforces that. A few tests are Windows-only and are skipped elsewhere.
+`scripts/check.py` runs `ruff check .`, `mypy`, `mypy .` and `pytest`, and
+new test files are picked up automatically. Each tool also runs on its own.
 
 ---
 

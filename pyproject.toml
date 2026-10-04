@@ -61,3 +61,4 @@ python_version = "3.11"
 ignore_missing_imports = true
 check_untyped_defs = true
 files = ["aevum.py", "aevum_pkg", "scripts", "tests"]
+exclude = ["^build/", "^dist/"]   # pip install leaves a copy of the package in build/
