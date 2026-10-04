@@ -19,16 +19,20 @@ from aevum_pkg._scan import (
     MAX_DEPTH,
     PROBE_TIMEOUT,
     _looks_like_text,
+    _probe_duration,
     _read_mkv_duration,
     _read_mp4_duration,
     format_duration,
     format_size,
-    get_duration,
     scan_parallel,
     video_extensions,
 )
 
 TOLERANCE = 0.1  # seconds; container rounding differs a little per format
+
+
+def get_duration(path) -> float:
+    return _probe_duration(path)[0]
 
 
 # warnings

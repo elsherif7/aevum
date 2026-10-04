@@ -48,10 +48,9 @@ def _make_progress_bar():
     return on_progress
 
 
-def _require_ffprobe(context: str = "") -> None:
+def _require_ffprobe() -> None:
     if not check_ffprobe():
-        ctx = f" ({context})" if context else ""
-        print(f"\n  {eclr.R}[ERROR]{eclr.RST} ffprobe not found on PATH{ctx}.", file=sys.stderr)
+        print(f"\n  {eclr.R}[ERROR]{eclr.RST} ffprobe not found on PATH.", file=sys.stderr)
         print(f"  {eclr.DIM}ffprobe is required for local folder scanning.{eclr.RST}", file=sys.stderr)
         print(f"  Install FFmpeg: {eclr.C}https://ffmpeg.org/download.html{eclr.RST}\n", file=sys.stderr)
         sys.exit(EX.ERR_DEPS)
@@ -162,7 +161,7 @@ def _scan_folder(raw: str) -> None:
     if not folder.is_dir():
         print(f"\n  {eclr.R}[ERROR]{eclr.RST} That is a file, not a folder: {_safe(str(folder), 500)}\n", file=sys.stderr)
         sys.exit(EX.ERR_ARGS)
-    _require_ffprobe("scan")
+    _require_ffprobe()
 
     on_progress = _make_progress_bar()
     if _is_interactive():

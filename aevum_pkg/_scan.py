@@ -249,11 +249,6 @@ def _probe_duration(path: str | Path) -> tuple[float, bool]:
         return 0.0, False
 
 
-def get_duration(path: str | Path) -> float:
-    """Native parse for MP4 and MKV, ffprobe for everything else."""
-    return _probe_duration(path)[0]
-
-
 def format_size(b: int) -> str:
     if b >= 1_073_741_824:
         return f"{b / 1_073_741_824:.2f} GB"

@@ -455,7 +455,7 @@ def _yt_get_channel_uploads_playlist(channel_ref, api_key, kind='channel_handle'
     return None, None
 
 
-def _yt_fetch_playlist_video_ids(playlist_id, api_key, on_progress=None):
+def _yt_fetch_playlist_video_ids(playlist_id, api_key):
     ids        = []
     page_token = None
     # 2000 pages (100,000 videos) is a cap so a bad nextPageToken can't loop forever
@@ -472,9 +472,6 @@ def _yt_fetch_playlist_video_ids(playlist_id, api_key, on_progress=None):
                 ids.append(vid)
         page_token = data.get('nextPageToken')
         page_count += 1
-        # the total isn't known until the last page
-        if on_progress:
-            on_progress(len(ids), max(len(ids), 1))
         if not page_token:
             break
     return ids
@@ -664,7 +661,7 @@ def _scan_with_key(kind, vid_id, url, api_key, on_progress, use_cache):
         except Exception:
             label = vid_id
 
-        ids                         = _yt_fetch_playlist_video_ids(vid_id, api_key, None)
+        ids                         = _yt_fetch_playlist_video_ids(vid_id, api_key)
         entries, cache_hits, unavail = _fetch_with_cache(ids, api_key, cache, on_progress, persist=use_cache)
         unavailable_count           = len(unavail)
 
@@ -674,7 +671,7 @@ def _scan_with_key(kind, vid_id, url, api_key, on_progress, use_cache):
             raise ValueError(f"Could not find channel: {vid_id}")
         label = channel_title or vid_id
 
-        ids                         = _yt_fetch_playlist_video_ids(uploads_pl, api_key, None)
+        ids                         = _yt_fetch_playlist_video_ids(uploads_pl, api_key)
         entries, cache_hits, unavail = _fetch_with_cache(ids, api_key, cache, on_progress, persist=use_cache)
         unavailable_count           = len(unavail)
 
