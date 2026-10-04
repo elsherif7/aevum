@@ -24,33 +24,33 @@ MAX_DEPTH = 100
 # Common video and audio formats only. Raw/headerless, game, ringtone and ambiguous
 # extensions (.mid, .ifo, .sln, .avs, ...) are left out on purpose, as are .iso and .dat.
 video_extensions = (
-    '.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.m4v', '.mpg', '.mpeg', '.3gp', '.ts',
-    '.m2ts', '.mts', '.vob', '.ogv', '.asf', '.3g2', '.f4v', '.divx', '.rmvb', '.rm', '.m2v', '.m1v',
-    '.mpe', '.m2p', '.m2t', '.m4p', '.mxf', '.qt', '.dv', '.dvr-ms', '.wtv', '.ogm', '.ogx', '.h264',
-    '.h265', '.hevc', '.mk3d',
-    '.mp3', '.aac', '.flac', '.wav', '.ogg', '.wma', '.m4a', '.m4b', '.opus', '.aiff', '.aif', '.ac3',
-    '.mka', '.amr', '.aifc', '.ape', '.wv', '.tta', '.mp2', '.mpa', '.au', '.caf', '.ra', '.oga',
-    '.spx', '.mpc', '.dsf', '.dff', '.aax', '.aa', '.dts', '.dtshd', '.eac3', '.truehd', '.thd', '.awb',
-    '.w64', '.rf64', '.bwf',
+    ".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".wmv", ".m4v", ".mpg", ".mpeg", ".3gp", ".ts",
+    ".m2ts", ".mts", ".vob", ".ogv", ".asf", ".3g2", ".f4v", ".divx", ".rmvb", ".rm", ".m2v", ".m1v",
+    ".mpe", ".m2p", ".m2t", ".m4p", ".mxf", ".qt", ".dv", ".dvr-ms", ".wtv", ".ogm", ".ogx", ".h264",
+    ".h265", ".hevc", ".mk3d",
+    ".mp3", ".aac", ".flac", ".wav", ".ogg", ".wma", ".m4a", ".m4b", ".opus", ".aiff", ".aif", ".ac3",
+    ".mka", ".amr", ".aifc", ".ape", ".wv", ".tta", ".mp2", ".mpa", ".au", ".caf", ".ra", ".oga",
+    ".spx", ".mpc", ".dsf", ".dff", ".aax", ".aa", ".dts", ".dtshd", ".eac3", ".truehd", ".thd", ".awb",
+    ".w64", ".rf64", ".bwf",
 )
 
 _VIDEO_EXT_SET = frozenset(video_extensions)
 
-_MP4_EXTENSIONS = frozenset(('.mp4', '.mov', '.m4v', '.3gp', '.3g2', '.m4a', '.m4p', '.m4b', '.f4v'))
-_MKV_EXTENSIONS = frozenset(('.mkv', '.webm', '.mka', '.mk3d'))
+_MP4_EXTENSIONS = frozenset((".mp4", ".mov", ".m4v", ".3gp", ".3g2", ".m4a", ".m4p", ".m4b", ".f4v"))
+_MKV_EXTENSIONS = frozenset((".mkv", ".webm", ".mka", ".mk3d"))
 
 # TypeScript uses the same extension as MPEG-TS, so it is sniffed before probing.
-_TEXT_AMBIGUOUS_EXTENSIONS = frozenset(('.ts',))
+_TEXT_AMBIGUOUS_EXTENSIONS = frozenset((".ts",))
 
 
 def _looks_like_text(path) -> bool:
     try:
-        with open(path, 'rb') as f:
+        with open(path, "rb") as f:
             head = f.read(4096)
-        if b'\0' in head:
+        if b"\0" in head:
             return False
         # final=False so a character cut off at the 4 KiB boundary isn't an error
-        codecs.getincrementaldecoder('utf-8')().decode(head)
+        codecs.getincrementaldecoder("utf-8")().decode(head)
         return True
     except (OSError, UnicodeDecodeError):
         return False
@@ -58,7 +58,7 @@ def _looks_like_text(path) -> bool:
 
 def check_ffprobe() -> bool:
     try:
-        subprocess.run(['ffprobe', '-version'], capture_output=True)
+        subprocess.run(["ffprobe", "-version"], capture_output=True)
         return True
     except (FileNotFoundError, OSError):
         return False
@@ -68,18 +68,18 @@ def _read_mp4_duration(path):
     """Read the duration from the moov/mvhd atom, seeking instead of loading the file."""
     try:
         file_size = os.path.getsize(path)
-        with open(path, 'rb') as f:
+        with open(path, "rb") as f:
             def read_atom(limit_end):
                 hdr = f.read(8)
                 if len(hdr) < 8:
                     return None, None, 0
-                size = struct.unpack('>I', hdr[:4])[0]
+                size = struct.unpack(">I", hdr[:4])[0]
                 name = hdr[4:8]
                 if size == 1:
                     ext = f.read(8)
                     if len(ext) < 8:
                         return None, None, 0
-                    size = struct.unpack('>Q', ext)[0]
+                    size = struct.unpack(">Q", ext)[0]
                     header_size = 16
                 else:
                     header_size = 8
@@ -93,7 +93,7 @@ def _read_mp4_duration(path):
                 name, size, hdr_size = read_atom(file_size)
                 if name is None or size < hdr_size:
                     break
-                if name == b'moov':
+                if name == b"moov":
                     moov_end = pos + size
                     inner = pos + hdr_size
                     while inner < moov_end:
@@ -101,7 +101,7 @@ def _read_mp4_duration(path):
                         iname, isize, ihdr = read_atom(moov_end)
                         if iname is None or isize < ihdr:
                             break
-                        if iname == b'mvhd':
+                        if iname == b"mvhd":
                             box = f.read(min(isize - ihdr, 40))
                             if not box:
                                 break
@@ -111,11 +111,11 @@ def _read_mp4_duration(path):
                                 break
                             # after version+flags, v1 has two 8-byte timestamps and v0 two 4-byte ones
                             if version == 1:
-                                ts  = struct.unpack_from('>I', box, 20)[0]
-                                dur = struct.unpack_from('>Q', box, 24)[0]
+                                ts  = struct.unpack_from(">I", box, 20)[0]
+                                dur = struct.unpack_from(">Q", box, 24)[0]
                             else:
-                                ts  = struct.unpack_from('>I', box, 12)[0]
-                                dur = struct.unpack_from('>I', box, 16)[0]
+                                ts  = struct.unpack_from(">I", box, 12)[0]
+                                dur = struct.unpack_from(">I", box, 16)[0]
                             return dur / ts if ts else 0.0
                         inner += isize
                     break
@@ -159,7 +159,7 @@ def _read_mkv_duration(path):
             while not (b & mask) and width <= 4:
                 width += 1
                 mask >>= 1
-            val = int.from_bytes(buf[pos:pos+width], 'big')
+            val = int.from_bytes(buf[pos:pos+width], "big")
             return val, pos + width
 
         timescale_ns = 1_000_000
@@ -181,13 +181,13 @@ def _read_mkv_duration(path):
                     fsize, j  = read_vint(data, j)
                     field_start = j
                     if fid == 0x2AD7B1:
-                        timescale_ns = int.from_bytes(data[j:j+fsize], 'big')
+                        timescale_ns = int.from_bytes(data[j:j+fsize], "big")
                     elif fid == 0x4489:
                         raw = data[j:j+fsize]
                         if fsize == 4:
-                            duration = struct.unpack('>f', raw)[0]
+                            duration = struct.unpack(">f", raw)[0]
                         elif fsize == 8:
-                            duration = struct.unpack('>d', raw)[0]
+                            duration = struct.unpack(">d", raw)[0]
                     if j + fsize > end:  # a bad field size would run past Info
                         break
                     j = field_start + fsize
@@ -206,13 +206,13 @@ def _read_mkv_duration(path):
         file_size = os.path.getsize(path)
         SMALL_READ = 2 * 1024 * 1024
         LARGE_READ = 8 * 1024 * 1024
-        with open(path, 'rb') as f:
+        with open(path, "rb") as f:
             data = f.read(min(SMALL_READ, file_size))
         result = _try_parse(data)
         if result is not None:
             return result
         if file_size > SMALL_READ:
-            with open(path, 'rb') as f:
+            with open(path, "rb") as f:
                 data = f.read(min(LARGE_READ, file_size))
             return _try_parse(data)
         return None
@@ -233,15 +233,15 @@ def _probe_duration(path: str | Path) -> tuple[float, bool]:
 
     try:
         proc = subprocess.run(
-            ['ffprobe', '-v', 'error', '-show_entries',
-             'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', str(path)],
+            ["ffprobe", "-v", "error", "-show_entries",
+             "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
             capture_output=True,
             text=True,
             timeout=PROBE_TIMEOUT,
             shell=False
         )
         val = proc.stdout.strip()
-        return (float(val) if val and val != 'N/A' else 0.0), False
+        return (float(val) if val and val != "N/A" else 0.0), False
     except subprocess.TimeoutExpired:
         warn(f"ffprobe timed out on: {path}")
         return 0.0, True

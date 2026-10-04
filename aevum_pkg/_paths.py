@@ -1,4 +1,4 @@
-"""Per-user data directory. Imports nothing from the package, so anything can import it."""
+"""Per-user data directory. Imports nothing from the package."""
 
 import os
 from pathlib import Path
@@ -13,18 +13,17 @@ def _appdata_dir() -> Path:
             candidate = Path(raw)
             # UNC paths are rejected too
             if (candidate.is_absolute()
-                    and not str(candidate).startswith('\\\\')
+                    and not str(candidate).startswith("\\\\")
                     and candidate.resolve() == candidate):
                 return candidate / "Aevum"
         return home / "AppData" / "Local" / "Aevum"
-    else:
-        raw = os.environ.get("XDG_DATA_HOME", "")
-        if raw:
-            candidate = Path(raw)
-            if (candidate.is_absolute()
-                    and candidate.resolve() == candidate):
-                return candidate / "Aevum"
-        return home / ".local" / "share" / "Aevum"
+
+    raw = os.environ.get("XDG_DATA_HOME", "")
+    if raw:
+        candidate = Path(raw)
+        if candidate.is_absolute() and candidate.resolve() == candidate:
+            return candidate / "Aevum"
+    return home / ".local" / "share" / "Aevum"
 
 
 APPDATA        = _appdata_dir()

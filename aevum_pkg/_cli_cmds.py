@@ -40,7 +40,7 @@ def _make_progress_bar():
         filled = int(24 * done / total)
         bar    = "█" * filled + "░" * (24 - filled)
         print(f"\r  {clr.C}Scanning...{clr.RST}  {bar}  {clr.Y}{done}/{total}{clr.RST}  {clr.DIM}({pct}%){clr.RST}",
-              end='', flush=True)
+              end="", flush=True)
 
     return on_progress
 
@@ -75,7 +75,7 @@ def _wait_phrase(seconds: float) -> str:
 def _print_limit_message(e: YouTubeLimitError) -> None:
     """Explain a rate or quota stop. Progress is already saved."""
     print(f"\n\n  {eclr.Y}[LIMIT]{eclr.RST} {_safe(e, 500)}", file=sys.stderr)
-    if e.kind == 'quota':
+    if e.kind == "quota":
         when = "after YouTube's daily quota resets (midnight Pacific Time)"
     elif e.retry_after is not None:
         when = _wait_phrase(e.retry_after)
@@ -96,7 +96,7 @@ def _scan_youtube(raw: str) -> None:
               f"youtube.com/watch?v=ID, /playlist?list=ID, /@handle, /channel/ID{eclr.RST}\n",
               file=sys.stderr)
         sys.exit(EX.ERR_ARGS)
-    if kind == 'video' and _has_playlist_param(raw):
+    if kind == "video" and _has_playlist_param(raw):
         print(f"  {clr.DIM}This link is a video inside a playlist, so only the video is "
               f"scanned. To scan the whole playlist, use its /playlist?list=... link.{clr.RST}")
 
@@ -162,7 +162,7 @@ def _scan_folder(raw: str) -> None:
 
     on_progress = _make_progress_bar()
     if _is_interactive():
-        print(f"  {clr.DIM}Collecting files...{clr.RST}", end='', flush=True)
+        print(f"  {clr.DIM}Collecting files...{clr.RST}", end="", flush=True)
     stats: dict[str, int] = {}
     try:
         total_sec, total_count, tree, durations, sizes = _run_scan(folder, on_progress, stats)

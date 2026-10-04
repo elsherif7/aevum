@@ -45,10 +45,10 @@ def _error(message: str) -> NoReturn:
 
 
 def _exit_on_info_flag(token: str) -> None:
-    if token in ('-h', '--help'):
+    if token in ("-h", "--help"):
         _print_help()
         sys.exit(EX.OK)
-    if token in ('-V', '--version'):
+    if token in ("-V", "--version"):
         print(f"aevum {__version__}")
         sys.exit(EX.OK)
 
@@ -61,7 +61,7 @@ def _parse_target() -> str:
     i = 0
     while i < len(argv):
         tok = argv[i]
-        if tok.endswith(':') and i + 1 < len(argv) and argv[i + 1] in ('\\', '/'):
+        if tok.endswith(":") and i + 1 < len(argv) and argv[i + 1] in ("\\", "/"):
             rejoined.append(tok + argv[i + 1])
             i += 2
         else:
@@ -74,7 +74,7 @@ def _parse_target() -> str:
         sys.exit(EX.OK)
     _exit_on_info_flag(argv[0])
 
-    if argv[0] != 'scan':
+    if argv[0] != "scan":
         _error("Missing 'scan' command. Usage: aevum scan <path|url>")
 
     tokens = argv[1:]
@@ -82,7 +82,7 @@ def _parse_target() -> str:
         _error(_NO_TARGET)
     _exit_on_info_flag(tokens[0])
     # there are no options, so a leading dash is only valid if it names a real path
-    if tokens[0].startswith('-') and not os.path.exists(tokens[0]):
+    if tokens[0].startswith("-") and not os.path.exists(tokens[0]):
         _error(f"Unknown option: {_safe(tokens[0])}. "
                f"'aevum scan' takes no options, only a path or URL.")
     if len(tokens) > 1:
@@ -102,7 +102,7 @@ def _harden_streams() -> None:
     """
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(errors='replace')  # type: ignore[union-attr]
+            stream.reconfigure(errors="replace")  # type: ignore[union-attr]
         except (AttributeError, ValueError):
             pass
 
