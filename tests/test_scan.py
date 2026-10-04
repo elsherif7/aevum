@@ -115,7 +115,7 @@ def test_removed_extensions_are_never_probed(tmp_path, monkeypatch):
     assert stats["unreadable_files"] == 0
 
 
-# get_duration (native parser first, ffprobe fallback)
+# duration reading (native parser first, ffprobe fallback)
 
 @needs_ffmpeg
 @pytest.mark.parametrize("name", ["clip.mp4", "clip.mkv", "clip.webm", "clip.mp3"])

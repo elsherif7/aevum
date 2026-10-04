@@ -22,9 +22,9 @@ _YT_KEY_PATTERN = re.compile(r"AIza[0-9A-Za-z\-_]{30,}")
 
 def _write_private_file(path, text: str) -> None:
     """
-    Write text so other users can never read it, not even briefly: the temp file is
-    created owner-only (mkstemp uses 0600) and then renamed into place. Mode bits don't
-    apply on Windows, where the profile folder's ACL protects the file.
+    Write text so other users can never read it, not even briefly: mkstemp creates the
+    temp file as 0600 and it is renamed into place. Mode bits do nothing on Windows,
+    where the profile folder's ACL protects the file.
     """
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".tmp_{path.stem}_", suffix=".tmp")
@@ -67,7 +67,7 @@ YT_API_BASE = "https://www.googleapis.com/youtube/v3"
 
 # Video details are cached by ID. A duration never changes once a video is uploaded.
 
-_MAX_CACHED_DURATION = 10 * 365 * 24 * 3600   # 10 years
+_MAX_CACHED_DURATION = 10 * 365 * 24 * 3600
 
 
 def _is_number(v) -> bool:
@@ -92,7 +92,7 @@ def _valid_cache_entry(e) -> bool:
 
 def _load_yt_video_cache():
     """Return the cache, or {} if it is missing, unreadable or too large."""
-    MAX_YT_CACHE_SIZE = 100 * 1024 * 1024  # 100 MB
+    MAX_YT_CACHE_SIZE = 100 * 1024 * 1024
     try:
         if YT_VCACHE_FILE.exists() and YT_VCACHE_FILE.stat().st_size > MAX_YT_CACHE_SIZE:
             print("  [WARN] YouTube cache too large, ignoring.", file=sys.stderr)
@@ -188,7 +188,7 @@ def _parse_iso8601_duration(d):
         return 0.0
     dd, h, mi, s = m.groups()
     result = float(dd or 0) * 86400 + float(h or 0) * 3600 + float(mi or 0) * 60 + float(s or 0)
-    return max(0.0, min(result, 365 * 86400))  # capped at one year
+    return max(0.0, min(result, 365 * 86400))
 
 
 # The daily quota won't clear until midnight Pacific Time, so retrying is pointless.
@@ -305,19 +305,18 @@ def _yt_api_request(endpoint, params, api_key):
     """
     Make one YouTube Data API v3 request and return the parsed JSON.
 
-    Aevum keeps no quota counter or request limit of its own. YouTube's responses decide:
+    Aevum keeps no quota counter of its own; YouTube's responses decide:
 
       - daily quota used up: YouTubeLimitError(kind='quota') at once
-      - rate limit (429): retried, then YouTubeLimitError(kind='rate')
-      - 5xx, timeouts, dropped connections: retried the same way, then RuntimeError
+      - rate limit (429), 5xx, timeouts, dropped connections: retried, then
+        YouTubeLimitError(kind='rate') or RuntimeError
       - Retry-After up to _MAX_RETRY_AFTER seconds is honoured exactly. A longer one
-        raises YouTubeLimitError(kind='rate', retry_after=...) instead of retrying early.
+        raises YouTubeLimitError(kind='rate', retry_after=...) instead of retrying.
         Without it we back off 1 s, 2 s, 4 s.
       - a rejected key: ApiKeyRejected, never retried
-      - anything else (bad request and so on): RuntimeError, never retried
+      - anything else: RuntimeError, never retried
 
-    Every request is a GET, so retrying is safe. Errors carry the API's own message and
-    never the URL, because the URL contains the key.
+    Errors carry the API's own message, never the URL, because the URL contains the key.
     """
     params = {**params, "key": api_key}
     # the API only accepts the key in the query string

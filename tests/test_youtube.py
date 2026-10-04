@@ -855,7 +855,7 @@ def test_a_scan_recovers_from_a_damaged_cache(fake_api):
     assert len(api.video_calls()) == 1                # the bad entry was refetched
 
 
-# E2: key format
+# API key format
 
 @pytest.mark.parametrize("tail_length", [30, 35, 39, 45])
 def test_save_api_key_accepts_keys_of_30_or_more_characters(key_file, tail_length):
@@ -870,14 +870,14 @@ def test_save_api_key_still_rejects_short_or_dirty_keys(key_file, bad):
     assert not key_file.exists()
 
 
-# E3: a limit stop is not an OSError
+# a limit stop is not an OSError
 
 def test_limit_error_is_not_an_os_error():
     assert not issubclass(yt.YouTubeLimitError, OSError)
     assert issubclass(yt.YouTubeLimitError, Exception)
 
 
-# E5: error text is not wrapped twice
+# error text is not wrapped twice
 
 def test_api_errors_are_not_prefixed_twice(monkeypatch, sleeps):
     def err():
@@ -895,7 +895,7 @@ def test_api_errors_are_not_prefixed_twice(monkeypatch, sleeps):
     assert str(exc.value) == "YouTube API error 403: nope"
 
 
-# E4: a video listed more than once counts once
+# a video listed more than once counts once
 
 def _requested_ids(api):
     return [v for _, params in api.video_calls() for v in params["id"].split(",")]
@@ -956,7 +956,7 @@ def test_a_repeated_cached_video_is_one_cache_hit(fake_api):
     assert _requested_ids(api) == ["B"]
 
 
-# E1: a rejected API key
+# a rejected API key
 
 def _http_error_body(code, body):
     return urllib.error.HTTPError("https://x", code, "err", Message(), io.BytesIO(json.dumps(body).encode()))
