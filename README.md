@@ -13,15 +13,18 @@ hand.
 aevum/
 ├── aevum.py              # Entry point — delegates to aevum_pkg._cli:main
 ├── pyproject.toml        # Packaging, ruff, mypy config
+├── .gitattributes        # Keeps text files on LF line endings
 ├── LICENSE               # GNU General Public License v3.0
 ├── scripts/
 │   └── clean.py          # Dev tool: removes build artifacts (build/, egg-info/, __pycache__)
 ├── tests/                # pytest suite (needs ffmpeg/ffprobe on PATH; no network or API key)
 │   ├── conftest.py       # Shared fixtures: ffmpeg-generated media, isolated CLI runner
 │   ├── test_cli.py       # Arguments, exit codes, end-to-end scans
+│   ├── test_clean.py     # scripts/clean.py removes artifacts and keeps sources
 │   ├── test_color.py     # NO_COLOR / FORCE_COLOR, terminal vs piped output
 │   ├── test_display.py   # Output sanitizing, fuzzy suggestions, bar
-│   ├── test_project.py   # pyproject.toml settings, Python-version floor
+│   ├── test_paths.py     # Data directory choice (XDG_DATA_HOME, LOCALAPPDATA)
+│   ├── test_project.py   # pyproject.toml settings, Python-version floor, README sync
 │   ├── test_scan.py      # Duration parsing (MP4/MKV/ffprobe), folder tree
 │   └── test_youtube.py   # URL/duration parsing, API key, retries, cache
 └── aevum_pkg/
@@ -93,6 +96,9 @@ pytest
 python3 scripts/clean.py   # remove build artifacts when you're done
 ```
 
+Text files use LF line endings on every platform, and `.gitattributes`
+enforces that. A few tests are Windows-only and are skipped elsewhere.
+
 ---
 
 ## How it works
@@ -102,9 +108,10 @@ each media file's duration (a fast native MP4/MKV header parser first,
 falling back to `ffprobe` for other formats), and prints a folder tree
 with per-subfolder duration and size, a duration breakdown bar chart (when
 there is more than one group to compare), playback-speed conversions
-(1x/1.25x/1.5x/1.75x/2x), and the 10 longest files. `ffprobe` gets 30 seconds per file, and folders more
-than 100 levels below the one you scan are not scanned. A `.ts` file
-that is plain text (TypeScript, not MPEG-TS) is ignored.
+(1x/1.25x/1.5x/1.75x/2x), and the 10 longest files. `ffprobe` gets 30
+seconds per file, and folders more than 100 levels below the one you scan
+are not scanned. A `.ts` file that is plain text (TypeScript, not
+MPEG-TS) is ignored.
 
 Aevum counts these 78 extensions and ignores everything else. The list is
 kept to common formats on purpose, so raw, game, ringtone and ambiguous
@@ -194,6 +201,17 @@ If YouTube rejects the saved key (wrong, revoked or expired), Aevum says
 so. In a terminal it asks for a new key, saves it and tries once more. If
 the new key is rejected too, or the input isn't a terminal, it stops with
 exit code 5 and names the key file. Delete that file to be asked again.
+
+---
+
+## Known limits
+
+- The video cache has no lock. If two Aevum runs save progress at the same
+  moment, the last one wins and the other's new entries are fetched again
+  next time.
+- A cache file larger than 100 MB is ignored, so those videos are fetched
+  again.
+- Aevum has no options. `scan` takes one folder or one YouTube link.
 
 ---
 

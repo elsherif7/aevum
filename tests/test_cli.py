@@ -460,3 +460,107 @@ def test_clean_scan_prints_no_skip_summary(run_cli, library):
     r = run_cli("scan", str(library))
     assert r.returncode == 0
     assert "could not be" not in r.stdout
+
+
+# discovery counter shown before the progress bar
+
+def test_discovery_counter_prints_on_a_terminal(monkeypatch, capsys):
+    from aevum_pkg import _cli_cmds
+
+    times = iter([100.0, 100.01, 100.5, 100.51])
+    monkeypatch.setattr(_cli_cmds, "_is_interactive", lambda: True)
+    monkeypatch.setattr(_cli_cmds.time, "monotonic", lambda: next(times))
+    on_discovered = _cli_cmds._make_discovery_counter()
+    for count in (1, 2, 3, 4):
+        on_discovered(count)
+    out = capsys.readouterr().out
+    assert "1 file found" in out
+    assert "2 files found" not in out            # redrawn too soon after the first
+    assert "3 files found" in out
+    assert "4 files found" not in out
+
+
+def test_discovery_counter_is_silent_when_not_a_terminal(monkeypatch, capsys):
+    from aevum_pkg import _cli_cmds
+
+    monkeypatch.setattr(_cli_cmds, "_is_interactive", lambda: False)
+    on_discovered = _cli_cmds._make_discovery_counter()
+    on_discovered(1)
+    on_discovered(500)
+    assert capsys.readouterr().out == ""
+
+
+# argument parsing and the error paths of the folder scan
+
+@pytest.mark.parametrize("argv, expected", [
+    (["scan", "D:", "\\"], "D:\\"),            # Windows can split "D:\" into two arguments
+    (["scan", "D:", "/"], "D:/"),
+    (["scan", "D:"], "D:"),
+    (["scan", "'my folder'"], "my folder"),
+    (["scan", '  "x"  '], "x"),
+])
+def test_parse_target(monkeypatch, argv, expected):
+    from aevum_pkg._cli import _parse_target
+
+    monkeypatch.setattr(sys, "argv", ["aevum", *argv])
+    assert _parse_target() == expected
+
+
+def test_drive_letter_is_only_rejoined_with_a_slash(monkeypatch, capsys):
+    from aevum_pkg._cli import _parse_target
+
+    monkeypatch.setattr(sys, "argv", ["aevum", "scan", "D:", "movies"])
+    with pytest.raises(SystemExit) as exc:
+        _parse_target()
+    assert exc.value.code == EX.ERR_ARGS
+    assert "Too many arguments" in capsys.readouterr().err
+
+
+def test_missing_ffprobe_exits_2_with_install_hint(tmp_path, monkeypatch, capsys):
+    from aevum_pkg import _cli_cmds
+
+    monkeypatch.setattr(_cli_cmds, "check_ffprobe", lambda: False)
+    with pytest.raises(SystemExit) as exc:
+        _cli_cmds.cmd_scan(str(tmp_path))
+    assert exc.value.code == EX.ERR_DEPS
+    err = capsys.readouterr().err
+    assert "ffprobe not found" in err
+    assert "ffmpeg.org" in err
+
+
+def test_missing_folder_suggests_a_close_name(tmp_path, monkeypatch, capsys):
+    from aevum_pkg import _cli_cmds
+
+    (tmp_path / "Movies").mkdir()
+    with pytest.raises(SystemExit) as exc:
+        _cli_cmds.cmd_scan(str(tmp_path / "Movis"))
+    assert exc.value.code == EX.ERR_ARGS
+    err = capsys.readouterr().err
+    assert "Path not found" in err
+    assert str(tmp_path / "Movies") in err
+
+
+def test_a_file_instead_of_a_folder_exits_1(tmp_path, capsys):
+    from aevum_pkg import _cli_cmds
+
+    f = tmp_path / "a.txt"
+    f.write_text("x")
+    with pytest.raises(SystemExit) as exc:
+        _cli_cmds.cmd_scan(str(f))
+    assert exc.value.code == EX.ERR_ARGS
+    assert "not a folder" in capsys.readouterr().err
+
+
+def test_ctrl_c_during_a_folder_scan_exits_3(tmp_path, monkeypatch, capsys):
+    from aevum_pkg import _cli_cmds
+
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(_cli_cmds, "check_ffprobe", lambda: True)
+    monkeypatch.setattr(_cli_cmds, "_run_scan", interrupted)
+    with pytest.raises(SystemExit) as exc:
+        _cli_cmds.cmd_scan(str(tmp_path))
+    assert exc.value.code == EX.ERR_SCAN
+    assert "Scan cancelled" in capsys.readouterr().out
+

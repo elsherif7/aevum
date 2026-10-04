@@ -110,3 +110,24 @@ def test_readme_lists_every_scanned_extension():
     section = readme.split("- **Video:**", 1)[1].split("**YouTube URL**", 1)[0]
     listed = [ext for chunk in re.findall(r"`([^`]+)`", section) for ext in chunk.split()]
     assert sorted(listed) == sorted(video_extensions)
+
+
+def _tree_entries() -> set[str]:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    tree = readme.split("## Structure", 1)[1].split("```", 2)[1]
+    return set(re.findall(r"[\w.\-]+\.(?:py|toml|md)|\.git\w+", tree))
+
+
+@pytest.mark.parametrize("folder", ["aevum_pkg", "scripts", "tests"])
+def test_readme_structure_tree_lists_every_python_file(folder):
+    listed = _tree_entries()
+    missing = [p.name for p in sorted((ROOT / folder).glob("*.py"))
+               if p.name != "__init__.py" and p.name not in listed]
+    assert not missing, f"README structure tree is missing {folder}/: {missing}"
+
+
+def test_readme_structure_tree_lists_the_top_level_files():
+    listed = _tree_entries()
+    for name in ("aevum.py", "pyproject.toml", ".gitattributes"):
+        assert name in listed
+
