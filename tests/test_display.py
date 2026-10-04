@@ -1,6 +1,7 @@
 """Output helpers: sanitising, fuzzy suggestions, and the bar."""
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -205,6 +206,7 @@ def test_models_default_direct_bytes_to_zero():
     assert ScanTree([], [], 0).direct_bytes == 0
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows folders cannot differ only by case")
 def test_folders_that_differ_only_by_case_keep_a_stable_order():
     root = Path("/r")
     files = [(root / "a" / "x.mp4", 1.0), (root / "A" / "y.mp4", 1.0),

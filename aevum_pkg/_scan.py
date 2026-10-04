@@ -301,8 +301,7 @@ def scan_parallel(
     root = Path(root).resolve()
 
     try:
-        root_stat  = root.stat()
-        root_inode = (root_stat.st_dev, root_stat.st_ino)
+        root_stat = root.stat()
     except OSError as e:
         warn(f"Cannot access {root}: {e}")
         if stats is not None:
@@ -360,15 +359,17 @@ def scan_parallel(
         def collect_and_submit():
             nonlocal unreadable_dirs, skipped_deep
             # a folder's identity is recorded when it is queued, so it is walked only once
-            seen = {root_inode}
+            seen = {(root_stat.st_dev, root_stat.st_ino)} if root_stat.st_ino else set()
             stack = [(str(root), root_depth, False)]   # (path, depth, reached through a link)
             links: list[tuple[str, int]] = []
 
             def queue(path, depth, via_link, st):
-                ident = (st.st_dev, st.st_ino)
-                if ident not in seen:
+                if st.st_ino:   # 0 means the filesystem can't identify folders, so don't dedupe
+                    ident = (st.st_dev, st.st_ino)
+                    if ident in seen:
+                        return
                     seen.add(ident)
-                    stack.append((path, depth, via_link))
+                stack.append((path, depth, via_link))
 
             while True:
                 if stop_event and stop_event.is_set():
@@ -406,7 +407,8 @@ def scan_parallel(
                                         submit(entry, True)
                                 elif entry.is_dir(follow_symlinks=False):
                                     try:
-                                        st = entry.stat(follow_symlinks=False)
+                                        # DirEntry.stat() leaves st_ino at 0 on Windows
+                                        st = os.stat(entry.path, follow_symlinks=False)
                                     except OSError:
                                         unreadable_dirs += 1
                                         continue

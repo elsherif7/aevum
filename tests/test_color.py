@@ -94,12 +94,15 @@ def test_piped_scan_has_no_carriage_return_progress(library):
 # whole program on a real terminal (POSIX only)
 
 def _run_on_tty(*args, env=None) -> str:
-    import pty as _pty
+    if sys.platform == "win32":   # also tells mypy the pty calls below are POSIX-only
+        raise NotImplementedError("needs a POSIX pty")
+    import pty
+
     base = {k: v for k, v in os.environ.items()
             if k not in ("NO_COLOR", "FORCE_COLOR")}
     base["TERM"] = "xterm"
     base.update(env or {})
-    master, slave = _pty.openpty()
+    master, slave = pty.openpty()
     try:
         p = subprocess.Popen(
             [sys.executable, str(ROOT / "aevum.py"), *args],

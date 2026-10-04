@@ -42,8 +42,7 @@ def test_ffprobe_timeout_warning_is_sanitised(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(subprocess, "run", fake_run)
     assert get_duration(tmp_path / "evil\x1b[2J\nname.avi") == 0.0
     err = capsys.readouterr().err
-    assert err == f"  [WARN] ffprobe timed out on: {tmp_path / 'evil'} name.avi\n".replace(
-        f"{tmp_path / 'evil'} name", f"{tmp_path}/evil name")
+    assert err == f"  [WARN] ffprobe timed out on: {tmp_path}{os.sep}evil name.avi\n"
 
 
 # formatting
@@ -436,6 +435,43 @@ def _deep_chain(root: Path, levels: int) -> Path:
         pytest.skip("path too long for this filesystem")
     (folder / "x.mp3").write_bytes(b"x")
     return folder
+
+
+def test_nested_folders_are_walked_when_scandir_reports_no_inode(tmp_path, monkeypatch):
+    # DirEntry.stat() has st_ino 0 on Windows; every folder must not look like the same one
+    monkeypatch.setattr(_scan, "_probe_duration", _fake_probe())
+    (tmp_path / "a" / "inner").mkdir(parents=True)
+    (tmp_path / "b").mkdir()
+    for name in ("a/x.mp3", "a/inner/y.mp3", "b/z.mp3"):
+        (tmp_path / name).write_bytes(b"x")
+
+    real_scandir = os.scandir
+
+    class ZeroInode:
+        def __init__(self, entry):
+            self._entry = entry
+
+        def __getattr__(self, name):
+            return getattr(self._entry, name)
+
+        def stat(self, *, follow_symlinks=True):
+            st = self._entry.stat(follow_symlinks=follow_symlinks)
+            return os.stat_result((st.st_mode, 0, 0, st.st_nlink, st.st_uid, st.st_gid,
+                                   st.st_size, st.st_atime, st.st_mtime, st.st_ctime))
+
+    class Wrapped:
+        def __init__(self, path):
+            self._it = real_scandir(path)
+
+        def __enter__(self):
+            return (ZeroInode(e) for e in self._it.__enter__())
+
+        def __exit__(self, *exc):
+            return self._it.__exit__(*exc)
+
+    monkeypatch.setattr(_scan.os, "scandir", Wrapped)
+    _, count, *_ = scan_parallel(tmp_path)
+    assert count == 3
 
 
 def test_folders_beyond_max_depth_are_counted_as_skipped(tmp_path, monkeypatch):

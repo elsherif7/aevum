@@ -1,6 +1,7 @@
 """
 Remove build artifacts left by `pip install` and `pip install -e`: build/, dist/,
-*.egg-info, __editable__*.pth, and __pycache__ folders and .pyc/.pyo files.
+*.egg-info, __editable__*.pth, and __pycache__ folders and .pyc/.pyo files, plus the
+pytest, mypy and ruff caches.
 
     python3 scripts/clean.py
 """
@@ -20,7 +21,7 @@ def _rm(path: Path) -> None:
 
 
 def clean() -> None:
-    for name in ("build", "dist"):
+    for name in ("build", "dist", ".pytest_cache", ".mypy_cache", ".ruff_cache"):
         _rm(ROOT / name)
     for egg_info in ROOT.glob("*.egg-info"):
         _rm(egg_info)

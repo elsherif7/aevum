@@ -23,6 +23,9 @@ def _make_project(root: Path) -> tuple[list[Path], list[Path]]:
     doomed = [
         root / "build" / "lib" / "x.py",
         root / "dist" / "aevum-1.0.tar.gz",
+        root / ".pytest_cache" / "v" / "cache" / "lastfailed",
+        root / ".mypy_cache" / "3.11" / "meta.json",
+        root / ".ruff_cache" / "CACHEDIR.TAG",
         root / "aevum.egg-info" / "PKG-INFO",
         root / "__editable__.aevum-1.0.pth",
         root / "pkg" / "__pycache__" / "mod.cpython-311.pyc",
@@ -42,6 +45,7 @@ def test_clean_removes_build_artifacts_and_keeps_sources(clean_module, tmp_path,
     assert not [p for p in doomed if p.exists()]
     assert all(p.exists() for p in kept)
     assert not (tmp_path / "build").exists()
+    assert not (tmp_path / ".pytest_cache").exists()
     assert not (tmp_path / "pkg" / "__pycache__").exists()
     out = capsys.readouterr().out
     assert "removed" in out

@@ -16,7 +16,7 @@ aevum/
 ├── .gitattributes        # Keeps text files on LF line endings
 ├── LICENSE               # GNU General Public License v3.0
 ├── scripts/
-│   └── clean.py          # Dev tool: removes build artifacts (build/, egg-info/, __pycache__)
+│   └── clean.py          # Dev tool: removes build artifacts and tool caches
 ├── tests/                # pytest suite (needs ffmpeg/ffprobe on PATH; no network or API key)
 │   ├── conftest.py       # Shared fixtures: ffmpeg-generated media, isolated CLI runner
 │   ├── test_cli.py       # Arguments, exit codes, end-to-end scans
@@ -93,7 +93,7 @@ pip install -e ".[dev]"
 ruff check .
 mypy
 pytest
-python3 scripts/clean.py   # remove build artifacts when you're done
+python3 scripts/clean.py   # remove build artifacts and tool caches when you're done
 ```
 
 Text files use LF line endings on every platform, and `.gitattributes`
