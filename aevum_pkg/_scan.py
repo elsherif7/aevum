@@ -456,7 +456,7 @@ def scan_parallel(
     unreadable_files = 0
     timed_out_files  = 0
     bad_ids: set[tuple] = set()
-    for path, sec, _, file_id, _, timed_out in ordered:
+    for _, sec, _, file_id, _, timed_out in ordered:
         if sec > 0.0:
             continue
         if file_id is not None:

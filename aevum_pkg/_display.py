@@ -69,10 +69,7 @@ def print_bar_chart(
     if total_sec <= 0:
         return
 
-    rows = []
-    for node in children:
-        if node.total_count > 0:
-            rows.append((node.name, node.total_sec))
+    rows = [(node.name, node.total_sec) for node in children if node.total_count > 0]
 
     if direct_files:
         direct_sec = sum(s for _, s in direct_files)
