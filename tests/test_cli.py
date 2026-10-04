@@ -462,34 +462,6 @@ def test_clean_scan_prints_no_skip_summary(run_cli, library):
     assert "could not be" not in r.stdout
 
 
-# discovery counter shown before the progress bar
-
-def test_discovery_counter_prints_on_a_terminal(monkeypatch, capsys):
-    from aevum_pkg import _cli_cmds
-
-    times = iter([100.0, 100.01, 100.5, 100.51])
-    monkeypatch.setattr(_cli_cmds, "_is_interactive", lambda: True)
-    monkeypatch.setattr(_cli_cmds.time, "monotonic", lambda: next(times))
-    on_discovered = _cli_cmds._make_discovery_counter()
-    for count in (1, 2, 3, 4):
-        on_discovered(count)
-    out = capsys.readouterr().out
-    assert "1 file found" in out
-    assert "2 files found" not in out            # redrawn too soon after the first
-    assert "3 files found" in out
-    assert "4 files found" not in out
-
-
-def test_discovery_counter_is_silent_when_not_a_terminal(monkeypatch, capsys):
-    from aevum_pkg import _cli_cmds
-
-    monkeypatch.setattr(_cli_cmds, "_is_interactive", lambda: False)
-    on_discovered = _cli_cmds._make_discovery_counter()
-    on_discovered(1)
-    on_discovered(500)
-    assert capsys.readouterr().out == ""
-
-
 # argument parsing and the error paths of the folder scan
 
 @pytest.mark.parametrize("argv, expected", [

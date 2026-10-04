@@ -337,10 +337,9 @@ def scan_parallel(
             file_size = 0
         with lock:
             done += 1
-            _snap_done  = done
-            _snap_total = total
-        if on_progress and _snap_total > 0:
-            on_progress(_snap_done, _snap_total)
+            finished, queued = done, total
+        if on_progress and queued > 0:
+            on_progress(finished, queued)
         return path, sec, file_size, file_id, is_link, timed_out
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
